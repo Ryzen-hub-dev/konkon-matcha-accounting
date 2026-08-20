@@ -1,0 +1,25 @@
+﻿{
+  "api_endpoints": {
+    "base": "https://valaxscrub.rf.gd/api",
+    "health": "/health.php",
+    "login": "/login.php",
+    "logout": "/logout.php",
+    "customer_list": "/customer/list.php"
+  },
+  "environment": {
+    "php_minimum": "8.0+",
+    "requires_ssl": true,
+    "cors_origin": "https://valaxscrub.rf.gd"
+  },
+  "auth": {
+    "type": "JWT Bearer",
+    "header": "Authorization: Bearer <accessToken>"
+  },
+  "security": [
+    "HTTPS mandatory",
+    "jwt_secret in config.php",
+    "rate limit enabled",
+    "error logs in /logs",
+    "upload logs writable"
+  ]
+}

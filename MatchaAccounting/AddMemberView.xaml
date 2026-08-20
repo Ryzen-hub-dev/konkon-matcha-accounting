@@ -1,0 +1,17 @@
+﻿<Window x:Class="MatchaAccounting.AddMemberView"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Add Member" Height="300" Width="400"
+        Background="#222" Foreground="#A8A8A8">
+    <Grid>
+        <StackPanel Margin="20">
+            <Label Content="IC Number:" Foreground="#A8A8A8"/>
+            <TextBox x:Name="txtICNumber" Background="#444" Foreground="#A8A8A8" Margin="0,0,0,10"/>
+
+            <Label Content="Name:" Foreground="#A8A8A8"/>
+            <TextBox x:Name="txtName" Background="#444" Foreground="#A8A8A8" Margin="0,0,0,10"/>
+
+            <Button Content="Add" Click="btnAdd_Click" Background="#4CAF50" Foreground="White" BorderThickness="0"/>
+        </StackPanel>
+    </Grid>
+</Window>

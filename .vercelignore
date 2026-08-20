@@ -1,0 +1,11 @@
+# The web application is the root Next.js project. Exclude preserved legacy artifacts.
+MatchaAccounting/
+packages/
+api/
+deploy/
+sql/
+*.sln
+PROMPT.md
+Receipts/
+Reports/
+docs/ui-preview.svg

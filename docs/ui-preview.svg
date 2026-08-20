@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <rect width="1200" height="700" fill="#1f1f1f"/>
+  <rect x="0" y="0" width="900" height="700" fill="#2b2b2b"/>
+  <rect x="900" y="0" width="300" height="700" fill="#222"/>
+  <text x="20" y="28" fill="#8bc34a" font-size="24" font-family="Arial">Matcha Accounting - WPF Layout Preview</text>
+  <rect x="20" y="50" width="860" height="620" fill="#353535"/>
+  <text x="40" y="80" fill="#ddd" font-size="18" font-family="Arial">POS Products</text>
+  <rect x="40" y="100" width="820" height="410" fill="#2d2d2d"/>
+  <text x="680" y="120" fill="#ddd" font-size="12" font-family="Arial">(Product cards area)</text>
+  <rect x="40" y="530" width="820" height="120" fill="#2d2d2d"/>
+  <text x="60" y="555" fill="#ddd" font-size="14" font-family="Arial">Order + Payment sidebar area</text>
+  <rect x="920" y="50" width="260" height="620" fill="#2d2d2d"/>
+  <text x="930" y="85" fill="#fff" font-size="16" font-family="Arial">Login / Settings / actions</text>
+  <rect x="940" y="110" width="220" height="44" fill="#4caf50"/>
+  <text x="947" y="138" fill="#fff" font-size="12" font-family="Arial">Sign In / Buttons</text>
+</svg>

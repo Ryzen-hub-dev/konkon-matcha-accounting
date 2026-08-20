@@ -1,0 +1,33 @@
+# Web dependencies and output
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Secrets - never commit real credentials
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Local IDE and OS files
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Legacy WPF build output and restored packages
+MatchaAccounting/bin/
+MatchaAccounting/obj/
+packages/
+
+# Runtime exports
+Receipts/
+Reports/
+*.log
+*.zip
+
+# Unrelated local engineering prompt retained outside version control
+PROMPT.md

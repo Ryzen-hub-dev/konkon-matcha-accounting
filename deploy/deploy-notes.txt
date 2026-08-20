@@ -1,0 +1,17 @@
+﻿# Matcha Accounting API Deploy Notes
+
+## 当前部署状态
+- API 基线已就绪，位于 `deploy/package/api`
+- 健康检查: `health.php`
+- 登录: `login.php`
+- 退出: `logout.php`
+- 示例受保护接口: `customer/list.php`
+
+## 直接使用（你现在可以执行）
+1. 打开 `deploy/package` 文件夹
+2. 将 `api/` 目录上传到你的 InfinityFree 的 `public_html` 中（如 `/public_html/api/`）
+3. 运行 `deploy/checklist`（可选）和 `schema.sql`
+4. 访问: https://valaxscrub.rf.gd/api/health.php
+
+## 注意
+- `api/config.php` 当前为模板值，上传前请替换 DB 与 JWT Secret。

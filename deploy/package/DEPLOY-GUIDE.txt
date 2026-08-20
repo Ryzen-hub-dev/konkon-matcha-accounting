@@ -1,0 +1,14 @@
+﻿# 你可以把以下两个文件夹直接用于部署
+- deploy/package/api  (上传到 public_html/api)
+- deploy/package/schema.sql (导入数据库)
+- deploy/package/deployment.md (部署说明)
+- deploy/package/deploy-check.ps1 (本地校验)
+
+部署顺序（严格）：
+1) 上传 deploy/package/api 到服务器 public_html/api
+2) 在 InfinityFree phpMyAdmin 执行 deploy/package/schema.sql
+3) 修改 deploy/package/api/config.php 中数据库与 JWT 配置
+4) 测试：
+   - GET  https://valaxscrub.rf.gd/api/health.php
+   - POST https://valaxscrub.rf.gd/api/login.php
+     body: {"username":"admin","password":"password"}

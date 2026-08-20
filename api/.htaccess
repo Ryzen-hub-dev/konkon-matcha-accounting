@@ -1,0 +1,11 @@
+﻿# Basic safe config for shared hosting.
+<IfModule mod_headers.c>
+    Header set Access-Control-Allow-Origin "https://valaxscrub.rf.gd"
+    Header set Access-Control-Allow-Methods "GET,POST,OPTIONS"
+    Header set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+    Header set Access-Control-Allow-Credentials "true"
+</IfModule>
+
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE application/json
+</IfModule>

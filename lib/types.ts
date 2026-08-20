@@ -1,0 +1,52 @@
+export const USER_ROLES = ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT", "CASHIER"] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
+export type SessionUser = {
+  id: string;
+  username: string;
+  fullName: string;
+  role: UserRole;
+};
+
+export type SessionPayload = SessionUser & {
+  exp?: number;
+  iat?: number;
+};
+
+export type ApiSuccess<T> = { ok: true; data: T };
+export type ApiFailure = { ok: false; error: string; issues?: Record<string, string[]> };
+export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
+
+export type ProductRecord = {
+  _id: string;
+  sku: string;
+  name: string;
+  category: string;
+  unit: string;
+  price: number;
+  cost: number;
+  stock: number;
+  reorderLevel: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MemberRecord = {
+  _id: string;
+  memberNo: string;
+  name: string;
+  phone: string;
+  email: string;
+  points: number;
+  lifetimeSpend: number;
+  active: boolean;
+  createdAt: string;
+};
+
+export type JournalLine = {
+  accountCode: string;
+  accountName: string;
+  debit: number;
+  credit: number;
+};
