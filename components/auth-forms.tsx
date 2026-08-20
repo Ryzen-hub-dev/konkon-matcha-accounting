@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { ArrowRight, Eye, EyeOff, LoaderCircle, LockKeyhole, Sprout } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { apiRequest, Notice } from "@/components/ui";
@@ -36,7 +36,18 @@ export function LoginForm() {
 export function SetupForm() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(true);
+  const [configured, setConfigured] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => {
+    apiRequest<{ configured: boolean }>("/api/setup")
+      .then((result) => {
+        setConfigured(result.configured);
+        if (result.configured) setError("This workspace already has an Owner. Return to sign in.");
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Could not check workspace setup."))
+      .finally(() => setChecking(false));
+  }, []);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError("");
     const data = new FormData(event.currentTarget);
@@ -55,7 +66,7 @@ export function SetupForm() {
     <div className="form-grid two"><label className="field"><span>Username</span><input name="username" autoComplete="username" pattern="[A-Za-z0-9._-]+" required /></label><label className="field"><span>Email</span><input name="email" type="email" autoComplete="email" required /></label></div>
     <PasswordField name="password" label="Owner password · 12+ characters, mixed case and a number" autoComplete="new-password" />
     <label className="check-row"><input name="seedProducts" type="checkbox" defaultChecked /><span><strong>Start with the Kōn-Kōn product catalogue</strong><small>Add a few editable matcha, hojicha and dōgu products.</small></span></label>
-    <button className="button button-primary button-large" disabled={busy}>{busy ? <LoaderCircle className="spin" size={18} /> : <Sprout size={18} />}{busy ? "Preparing workspace…" : "Create Owner workspace"}<ArrowRight size={17} /></button>
+    <button className="button button-primary button-large" disabled={busy || checking || configured}>{busy || checking ? <LoaderCircle className="spin" size={18} /> : <Sprout size={18} />}{checking ? "Checking workspace…" : busy ? "Preparing workspace…" : "Create Owner workspace"}<ArrowRight size={17} /></button>
     <p className="setup-link">Already set up? <Link href="/login">Return to sign in</Link></p>
   </form>;
 }

@@ -1,7 +1,7 @@
 import { ObjectId } from "mongodb";
 import { z } from "zod";
-import { created, fail, publicError, sameOrigin } from "@/lib/api";
-import { hashPassword, normalizeIdentity, setSession } from "@/lib/auth";
+import { created, fail, ok, publicError, sameOrigin } from "@/lib/api";
+import { hashPassword, isAuthConfigured, normalizeIdentity, setSession } from "@/lib/auth";
 import { getDb, getMongoClient } from "@/lib/db";
 import { seedWorkspace } from "@/lib/seed";
 
@@ -19,11 +19,33 @@ const setupSchema = z.object({
   seedProducts: z.boolean().default(true),
 });
 
+export async function GET() {
+  if (!isAuthConfigured()) {
+    return fail("Authentication is not configured on this deployment.", 503);
+  }
+  try {
+    const db = await getDb();
+    const configured = Boolean(await db.collection("users").countDocuments({}, { limit: 1 }));
+    return ok({ configured, registrationOpen: !configured });
+  } catch (error) {
+    return publicError(error);
+  }
+}
+
 export async function POST(request: Request) {
   if (!sameOrigin(request)) return fail("This request was blocked.", 403);
   let lockCreated = false;
   try {
-    const input = setupSchema.safeParse(await request.json());
+    if (!isAuthConfigured()) {
+      return fail("Authentication is not configured on this deployment.", 503);
+    }
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return fail("The request body must be valid JSON.", 400);
+    }
+    const input = setupSchema.safeParse(body);
     if (!input.success) return fail("Check the highlighted setup details.", 422, input.error.flatten().fieldErrors);
     const db = await getDb();
     if (await db.collection("users").countDocuments({}, { limit: 1 })) {

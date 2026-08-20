@@ -1,7 +1,7 @@
 # The web application is the root Next.js project. Exclude preserved legacy artifacts.
 MatchaAccounting/
 packages/
-api/
+/api/
 deploy/
 sql/
 *.sln

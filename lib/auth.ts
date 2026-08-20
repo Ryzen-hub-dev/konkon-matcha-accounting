@@ -14,6 +14,10 @@ function secretKey() {
   return new TextEncoder().encode(secret);
 }
 
+export function isAuthConfigured() {
+  return typeof process.env.AUTH_SECRET === "string" && process.env.AUTH_SECRET.length >= 32;
+}
+
 export function normalizeIdentity(value: string) {
   return value.trim().toLocaleLowerCase("en-SG");
 }

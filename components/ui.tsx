@@ -7,13 +7,52 @@ export const money = new Intl.NumberFormat("en-SG", { style: "currency", currenc
 export const shortDate = new Intl.DateTimeFormat("en-SG", { day: "2-digit", month: "short", year: "numeric" });
 export const dateTime = new Intl.DateTimeFormat("en-SG", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 
+type ApiErrorBody = {
+  ok?: boolean;
+  error?: string;
+  issues?: Record<string, string[]>;
+};
+
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly issues?: Record<string, string[]>) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
+function fallbackMessage(status: number) {
+  if (status === 404) return "This service endpoint is unavailable (404). The deployment may be incomplete.";
+  if (status === 405) return "The server does not allow this action (405).";
+  if (status === 429) return "Too many requests. Wait a moment and try again.";
+  if (status >= 500) return "The server is temporarily unavailable. Please try again.";
+  return `The request failed (${status || "network error"}).`;
+}
+
 export async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
-  const body = await response.json().catch(() => ({ ok: false, error: "The server returned an unreadable response." }));
-  if (!response.ok || !body.ok) throw new Error(body.error || "The request failed.");
+  const headers = new Headers(init?.headers);
+  headers.set("Accept", "application/json");
+  if (init?.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, credentials: "same-origin", headers });
+  } catch {
+    throw new ApiRequestError("Could not reach the server. Check your connection and try again.", 0);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  const body = contentType.includes("application/json")
+    ? await response.json().catch(() => null) as (ApiErrorBody & { data?: T }) | null
+    : null;
+
+  if (!response.ok || body?.ok !== true) {
+    const firstIssue = body?.issues
+      ? Object.values(body.issues).flat().find((issue) => typeof issue === "string" && issue.length > 0)
+      : undefined;
+    const baseMessage = body?.error || fallbackMessage(response.status);
+    const message = firstIssue ? `${baseMessage} ${firstIssue}` : baseMessage;
+    throw new ApiRequestError(message, response.status, body?.issues);
+  }
   return body.data as T;
 }
 

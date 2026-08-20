@@ -42,6 +42,10 @@ export async function authorize(permission: Permission) {
 }
 
 export function publicError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "MONGODB_URI is not configured.") {
+    return fail("The database is not configured on this deployment.", 503);
+  }
   if (process.env.NODE_ENV !== "production") console.error(error);
   return fail("The request could not be completed. Please try again.", 500);
 }

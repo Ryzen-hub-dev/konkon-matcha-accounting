@@ -2,7 +2,7 @@ import { ObjectId } from "mongodb";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { fail, ok, publicError, sameOrigin } from "@/lib/api";
-import { normalizeIdentity, setSession, verifyPassword } from "@/lib/auth";
+import { isAuthConfigured, normalizeIdentity, setSession, verifyPassword } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import type { UserRole } from "@/lib/types";
 
@@ -25,7 +25,16 @@ function throttleKey(request: Request, identity: string) {
 export async function POST(request: Request) {
   if (!sameOrigin(request)) return fail("This request was blocked.", 403);
   try {
-    const input = loginSchema.safeParse(await request.json());
+    if (!isAuthConfigured()) {
+      return fail("Authentication is not configured on this deployment.", 503);
+    }
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return fail("The request body must be valid JSON.", 400);
+    }
+    const input = loginSchema.safeParse(body);
     if (!input.success) return fail("Enter your username or email and password.", 422);
     const db = await getDb();
     const identity = normalizeIdentity(input.data.identity);
