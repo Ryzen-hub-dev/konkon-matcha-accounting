@@ -5,6 +5,7 @@ import { canManageRole, hasPermission } from "../lib/rbac";
 import { POST as login } from "../app/api/auth/login/route";
 import { POST as setup } from "../app/api/setup/route";
 import { publicError } from "../lib/api";
+import { scopedCollectionName } from "../lib/db";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -94,4 +95,15 @@ test("database failures return actionable service errors", async () => {
   const authResponse = publicError(authentication);
   assert.equal(authResponse.status, 503);
   assert.match((await authResponse.json()).error, /credentials/i);
+
+  const stableApi = Object.assign(new Error("API strict error"), { code: 323 });
+  const stableApiResponse = publicError(stableApi);
+  assert.equal(stableApiResponse.status, 503);
+  assert.match((await stableApiResponse.json()).error, /Stable API/i);
+});
+
+test("MongoDB collections use an isolated application namespace", () => {
+  assert.equal(scopedCollectionName("users"), "konkon_users");
+  assert.equal(scopedCollectionName("sales", "matcha_"), "matcha_sales");
+  assert.throws(() => scopedCollectionName("users", "invalid prefix"), /invalid/i);
 });

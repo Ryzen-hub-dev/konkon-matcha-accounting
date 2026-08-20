@@ -48,11 +48,17 @@ export function publicError(error: unknown) {
   if (message === "MONGODB_URI is not configured.") {
     return fail("The database is not configured on this deployment.", 503);
   }
+  if (message === "MONGODB_COLLECTION_PREFIX is invalid.") {
+    return fail("The database collection namespace is not configured correctly.", 503);
+  }
   if (name === "MongoParseError") {
     return fail("The database connection string is invalid.", 503);
   }
   if (code === "18" || /authentication failed|bad auth/i.test(message)) {
     return fail("The database rejected its credentials.", 503);
+  }
+  if (code === "323") {
+    return fail("The database rejected an index that is incompatible with its Stable API settings.", 503);
   }
   if (name === "MongoServerSelectionError" || name === "MongoNetworkError") {
     return fail("The database cluster could not be reached. Check the MongoDB Atlas IP access list.", 503);
