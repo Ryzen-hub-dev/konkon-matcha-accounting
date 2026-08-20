@@ -4,6 +4,7 @@ import { asMoney, makeDocumentNo } from "../lib/format";
 import { canManageRole, hasPermission } from "../lib/rbac";
 import { POST as login } from "../app/api/auth/login/route";
 import { POST as setup } from "../app/api/setup/route";
+import { publicError } from "../lib/api";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -80,4 +81,17 @@ test("authentication endpoints reject cross-origin requests", async () => {
   }));
   assert.equal(response.status, 403);
   assert.deepEqual(await response.json(), { ok: false, error: "This request was blocked." });
+});
+
+test("database failures return actionable service errors", async () => {
+  const unreachable = new Error("server selection timed out");
+  unreachable.name = "MongoServerSelectionError";
+  const response = publicError(unreachable);
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /IP access list/i);
+
+  const authentication = Object.assign(new Error("Authentication failed"), { code: 18 });
+  const authResponse = publicError(authentication);
+  assert.equal(authResponse.status, 503);
+  assert.match((await authResponse.json()).error, /credentials/i);
 });

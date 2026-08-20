@@ -31,3 +31,5 @@ Reports/
 
 # Unrelated local engineering prompt retained outside version control
 PROMPT.md
+
+.vercel/

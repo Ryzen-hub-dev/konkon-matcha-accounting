@@ -43,8 +43,19 @@ export async function authorize(permission: Permission) {
 
 export function publicError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
+  const name = error instanceof Error ? error.name : "";
+  const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
   if (message === "MONGODB_URI is not configured.") {
     return fail("The database is not configured on this deployment.", 503);
+  }
+  if (name === "MongoParseError") {
+    return fail("The database connection string is invalid.", 503);
+  }
+  if (code === "18" || /authentication failed|bad auth/i.test(message)) {
+    return fail("The database rejected its credentials.", 503);
+  }
+  if (name === "MongoServerSelectionError" || name === "MongoNetworkError") {
+    return fail("The database cluster could not be reached. Check the MongoDB Atlas IP access list.", 503);
   }
   if (process.env.NODE_ENV !== "production") console.error(error);
   return fail("The request could not be completed. Please try again.", 500);
