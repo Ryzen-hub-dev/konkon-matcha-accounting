@@ -4,14 +4,19 @@ import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api
 import { writeAudit } from "@/lib/audit";
 import { getDb, getMongoClient } from "@/lib/db";
 import { asMoney, makeDocumentNo, serialise } from "@/lib/format";
+import { DEFAULT_INVOICE_TEMPLATE, normaliseInvoiceTemplate } from "@/lib/invoice-templates";
 
 export const runtime = "nodejs";
 
 const invoiceSchema = z.object({
   customerName: z.string().trim().min(2).max(120),
   customerEmail: z.union([z.string().trim().email(), z.literal("")]).default(""),
+  customerPhone: z.string().trim().max(40).default(""),
+  customerAddress: z.string().trim().max(300).default(""),
+  customerReference: z.string().trim().max(80).default(""),
   dueDate: z.coerce.date(),
   notes: z.string().trim().max(500).default(""),
+  templateId: z.union([z.string().length(24), z.literal("")]).default(""),
   items: z.array(z.object({
     description: z.string().trim().min(2).max(160),
     quantity: z.coerce.number().positive().max(100_000),
@@ -21,11 +26,26 @@ const invoiceSchema = z.object({
 
 const statusSchema = z.object({ id: z.string().length(24), status: z.enum(["DRAFT", "SENT", "PAID", "VOID"]) });
 
-export async function GET() {
+async function readBody(request: Request) {
+  try {
+    return { value: await request.json() } as const;
+  } catch {
+    return { error: fail("The request body must be valid JSON.", 400) } as const;
+  }
+}
+
+export async function GET(request: Request) {
   const auth = await authorize("invoices.read");
   if (auth.error) return auth.error;
   try {
     const db = await getDb();
+    const id = new URL(request.url).searchParams.get("id");
+    if (id) {
+      if (!ObjectId.isValid(id)) return fail("The invoice reference is invalid.", 422);
+      const invoice = await db.collection("invoices").findOne({ _id: new ObjectId(id) });
+      if (!invoice) return fail("This invoice could not be found.", 404);
+      return ok(serialise(invoice));
+    }
     const invoices = await db.collection("invoices").find({}).sort({ createdAt: -1 }).limit(200).toArray();
     return ok(serialise(invoices));
   } catch (error) {
@@ -37,13 +57,21 @@ export async function POST(request: Request) {
   const auth = await authorize("invoices.write");
   if (auth.error) return auth.error;
   if (!sameOrigin(request)) return fail("This request was blocked.", 403);
+  const body = await readBody(request);
+  if (body.error) return body.error;
   try {
-    const input = invoiceSchema.safeParse(await request.json());
+    const input = invoiceSchema.safeParse(body.value);
     if (!input.success) return fail("Check the invoice details.", 422, input.error.flatten().fieldErrors);
     const items = input.data.items.map((item) => ({ ...item, unitPrice: asMoney(item.unitPrice), lineTotal: asMoney(item.quantity * item.unitPrice) }));
     const db = await getDb();
     const subtotal = asMoney(items.reduce((sum, item) => sum + item.lineTotal, 0));
     const business = await db.collection("settings").findOne({ key: "business" });
+    const requestedTemplate = input.data.templateId && ObjectId.isValid(input.data.templateId)
+      ? await db.collection("invoiceTemplates").findOne({ _id: new ObjectId(input.data.templateId), active: { $ne: false } })
+      : null;
+    if (input.data.templateId && !requestedTemplate) return fail("Choose an available invoice template.", 422);
+    const defaultTemplate = requestedTemplate || await db.collection("invoiceTemplates").findOne({ isDefault: true, active: { $ne: false } });
+    const templateSnapshot = normaliseInvoiceTemplate(defaultTemplate || DEFAULT_INVOICE_TEMPLATE);
     const taxRate = Math.max(0, Math.min(100, Number(business?.taxRate || 0)));
     const tax = asMoney(subtotal * (taxRate / 100));
     const total = asMoney(subtotal + tax);
@@ -52,8 +80,23 @@ export async function POST(request: Request) {
       invoiceNo: makeDocumentNo("INV"),
       customerName: input.data.customerName,
       customerEmail: input.data.customerEmail,
+      customerPhone: input.data.customerPhone,
+      customerAddress: input.data.customerAddress,
+      customerReference: input.data.customerReference,
       dueDate: input.data.dueDate,
       notes: input.data.notes,
+      templateId: defaultTemplate?._id || null,
+      templateName: templateSnapshot.name,
+      templateSnapshot,
+      businessSnapshot: {
+        businessName: String(business?.businessName || "Kōn-Kōn Matchā"),
+        registrationNo: String(business?.registrationNo || ""),
+        email: String(business?.email || ""),
+        phone: String(business?.phone || ""),
+        address: String(business?.address || ""),
+        currency: String(business?.currency || "SGD"),
+        taxName: String(business?.taxName || "GST"),
+      },
       items,
       subtotal,
       taxRate,
@@ -77,8 +120,10 @@ export async function PATCH(request: Request) {
   const auth = await authorize("invoices.write");
   if (auth.error) return auth.error;
   if (!sameOrigin(request)) return fail("This request was blocked.", 403);
+  const body = await readBody(request);
+  if (body.error) return body.error;
   try {
-    const input = statusSchema.safeParse(await request.json());
+    const input = statusSchema.safeParse(body.value);
     if (!input.success || !ObjectId.isValid(input.data?.id || "")) return fail("Check the invoice status.", 422);
     const db = await getDb();
     const _id = new ObjectId(input.data.id);

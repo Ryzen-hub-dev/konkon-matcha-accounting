@@ -30,7 +30,7 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const visibleNav = nav.filter((item) => !item.roles || item.roles.includes(user.role));
-  const current = visibleNav.find((item) => path === item.href)?.label || "Kōn-Kōn Ledger";
+  const current = visibleNav.find((item) => path === item.href || path.startsWith(`${item.href}/`))?.label || "Kōn-Kōn Ledger";
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -52,7 +52,7 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
         <nav aria-label="Main navigation">
           {visibleNav.map((item) => {
             const Icon = item.icon;
-            const active = path === item.href;
+            const active = path === item.href || path.startsWith(`${item.href}/`);
             return (
               <Link key={item.href} href={item.href} className={active ? "active" : ""} title={collapsed ? item.label : undefined} onClick={() => setMobileOpen(false)}>
                 <Icon size={19} strokeWidth={1.7} /><span>{item.label}</span>{active ? <i /> : null}

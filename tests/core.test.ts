@@ -6,6 +6,11 @@ import { POST as login } from "../app/api/auth/login/route";
 import { POST as setup } from "../app/api/setup/route";
 import { publicError } from "../lib/api";
 import { scopedCollectionName } from "../lib/db";
+import {
+  DEFAULT_INVOICE_TEMPLATE,
+  invoiceTemplateInputSchema,
+  normaliseInvoiceTemplate,
+} from "../lib/invoice-templates";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -106,4 +111,31 @@ test("MongoDB collections use an isolated application namespace", () => {
   assert.equal(scopedCollectionName("users"), "konkon_users");
   assert.equal(scopedCollectionName("sales", "matcha_"), "matcha_sales");
   assert.throws(() => scopedCollectionName("users", "invalid prefix"), /invalid/i);
+});
+
+test("invoice templates accept portable JSON and safe raster logos", () => {
+  const imported = invoiceTemplateInputSchema.safeParse({
+    ...DEFAULT_INVOICE_TEMPLATE,
+    name: "Wholesale ledger",
+    layout: "LEDGER",
+    accentColor: "#69815d",
+    logoDataUrl: "data:image/png;base64,aGVsbG8=",
+    termsDays: "30",
+  });
+  assert.equal(imported.success, true);
+  if (imported.success) {
+    assert.equal(imported.data.termsDays, 30);
+    assert.equal(imported.data.layout, "LEDGER");
+  }
+});
+
+test("invoice templates reject SVG uploads and fall back safely for old invoices", () => {
+  const unsafeLogo = invoiceTemplateInputSchema.safeParse({
+    ...DEFAULT_INVOICE_TEMPLATE,
+    logoDataUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+  });
+  assert.equal(unsafeLogo.success, false);
+
+  const legacySnapshot = normaliseInvoiceTemplate({ layout: "UNKNOWN" });
+  assert.deepEqual(legacySnapshot, DEFAULT_INVOICE_TEMPLATE);
 });
