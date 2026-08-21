@@ -128,6 +128,6 @@ export function AddButton({ children, onClick }: { children: ReactNode; onClick:
 }
 
 export function StatusPill({ value }: { value: string }) {
-  const tone = ["PAID", "POSTED", "COMPLETED", "ACTIVE"].includes(value) ? "good" : ["VOID", "DISABLED", "OVERDUE"].includes(value) ? "bad" : "neutral";
+  const tone = ["PAID", "POSTED", "COMPLETED", "ACTIVE"].includes(value) ? "good" : ["VOID", "DISABLED", "OVERDUE", "REFUNDED"].includes(value) ? "bad" : "neutral";
   return <span className={`status-pill status-${tone}`}>{value.replaceAll("_", " ")}</span>;
 }

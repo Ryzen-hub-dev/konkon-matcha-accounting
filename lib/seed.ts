@@ -1,5 +1,6 @@
 import type { ClientSession, Db } from "mongodb";
 import { ensureDefaultInvoiceTemplate } from "@/lib/invoice-templates";
+import { ensureDefaultReceiptTemplate } from "@/lib/receipt-templates";
 
 const starterProducts = [
   { sku: "MATCHA-A-30", name: "Gurēdo A Ceremonial · 30g", category: "Matcha powder", unit: "tin", price: 46.9, cost: 24, stock: 18, reorderLevel: 6 },
@@ -21,13 +22,14 @@ export async function seedWorkspace(db: Db, ownerId: unknown, businessName: stri
   const now = new Date();
   await db.collection("settings").updateOne(
     { key: "business" },
-    { $setOnInsert: { key: "business", businessName, currency: "SGD", taxName: "GST", taxRate: 0, pointsPerDollar: 1, createdAt: now }, $set: { updatedAt: now } },
+    { $setOnInsert: { key: "business", businessName, currency: "SGD", taxName: "GST", taxRate: 0, taxMode: "EXCLUSIVE", pointsPerDollar: 1, createdAt: now }, $set: { updatedAt: now } },
     { upsert: true, ...(session ? { session } : {}) },
   );
   await db.collection("chartOfAccounts").bulkWrite(chartOfAccounts.map(([code, name, type]) => ({
     updateOne: { filter: { code }, update: { $setOnInsert: { code, name, type, active: true, createdAt: now } }, upsert: true },
   })), session ? { session } : undefined);
   await ensureDefaultInvoiceTemplate(db, ownerId, session);
+  await ensureDefaultReceiptTemplate(db, ownerId, session);
   if (seedProducts) {
     await db.collection("products").bulkWrite(starterProducts.map((product) => ({
       updateOne: {

@@ -11,6 +11,12 @@ import {
   invoiceTemplateInputSchema,
   normaliseInvoiceTemplate,
 } from "../lib/invoice-templates";
+import {
+  DEFAULT_RECEIPT_TEMPLATE,
+  normaliseReceiptTemplate,
+  receiptTemplateInputSchema,
+} from "../lib/receipt-templates";
+import { calculateTaxTotals } from "../lib/tax";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -35,6 +41,8 @@ test("document numbers are recognisable and collision resistant", () => {
 
 test("cashier permissions stop at the counter", () => {
   assert.equal(hasPermission("CASHIER", "pos.sell"), true);
+  assert.equal(hasPermission("CASHIER", "receipts.read"), true);
+  assert.equal(hasPermission("CASHIER", "receipts.manage"), false);
   assert.equal(hasPermission("CASHIER", "accounting.write"), false);
   assert.equal(hasPermission("CASHIER", "team.write"), false);
 });
@@ -138,4 +146,23 @@ test("invoice templates reject SVG uploads and fall back safely for old invoices
 
   const legacySnapshot = normaliseInvoiceTemplate({ layout: "UNKNOWN" });
   assert.deepEqual(legacySnapshot, DEFAULT_INVOICE_TEMPLATE);
+});
+
+test("receipt templates support 58mm and 80mm paper but reject active SVG content", () => {
+  const narrow = receiptTemplateInputSchema.safeParse({ ...DEFAULT_RECEIPT_TEMPLATE, name: "Market roll", paperWidth: "58MM" });
+  assert.equal(narrow.success, true);
+  const unsafeLogo = receiptTemplateInputSchema.safeParse({
+    ...DEFAULT_RECEIPT_TEMPLATE,
+    logoDataUrl: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+  });
+  assert.equal(unsafeLogo.success, false);
+  assert.deepEqual(normaliseReceiptTemplate({ paperWidth: "A4" }), DEFAULT_RECEIPT_TEMPLATE);
+});
+
+test("POS tax totals are identical for exclusive and tax-inclusive shelf prices", () => {
+  const exclusive = calculateTaxTotals(100, 10, 9, "EXCLUSIVE");
+  assert.deepEqual(exclusive, { subtotal: 100, discount: 10, discountedTotal: 90, taxRate: 9, taxMode: "EXCLUSIVE", tax: 8.1, netSales: 90, total: 98.1 });
+
+  const inclusive = calculateTaxTotals(109, 0, 9, "INCLUSIVE");
+  assert.deepEqual(inclusive, { subtotal: 109, discount: 0, discountedTotal: 109, taxRate: 9, taxMode: "INCLUSIVE", tax: 9, netSales: 100, total: 109 });
 });

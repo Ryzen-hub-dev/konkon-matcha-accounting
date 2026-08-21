@@ -24,8 +24,8 @@ MatchaAccounting/obj/
 packages/
 
 # Runtime exports
-Receipts/
-Reports/
+/Receipts/
+/Reports/
 *.log
 *.zip
 

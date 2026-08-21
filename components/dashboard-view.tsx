@@ -10,7 +10,7 @@ type DashboardData = {
   month: { revenue: number; transactions: number };
   memberCount: number;
   lowStockCount: number;
-  recentSales: Array<{ _id: string; receiptNo: string; memberName: string; total: number; paymentMethod: string; createdAt: string }>;
+  recentSales: Array<{ _id: string; receiptNo: string; memberName: string; total: number; refundedAmount?: number; paymentMethod: string; status?: string; createdAt: string }>;
   dailySales: Array<{ _id: string; total: number }>;
   topProducts: Array<{ _id: string; name: string; quantity: number; revenue: number }>;
 };
@@ -41,7 +41,7 @@ export function DashboardView() {
   return <div className="page page-enter">
     <PageHeader eyebrow="TODAY AT KŌN-KŌN" title={`${greeting}. Here’s the pour.`} description="Sales, stock and member activity in Singapore time." action={<Link href="/pos" className="button button-primary"><ShoppingBag size={17} />New sale<ArrowUpRight size={16} /></Link>} />
     <section className="ledger-hero">
-      <div className="hero-copy"><span className="eyebrow light">TODAY&apos;S TEA ROOM</span><strong>{money.format(value.today.revenue)}</strong><p>from {value.today.transactions} completed {value.today.transactions === 1 ? "order" : "orders"}</p><div className="hero-rule"><span>Average cup</span><b>{money.format(value.today.averageSale)}</b></div></div>
+      <div className="hero-copy"><span className="eyebrow light">TODAY&apos;S TEA ROOM</span><strong>{money.format(value.today.revenue)}</strong><p>from {value.today.transactions} posted {value.today.transactions === 1 ? "order" : "orders"}, net of refunds</p><div className="hero-rule"><span>Average cup</span><b>{money.format(value.today.averageSale)}</b></div></div>
       <div className="whisk-orbit" aria-hidden="true"><div className="orbit-ring ring-one" /><div className="orbit-ring ring-two" /><div className="orbit-core">抹<span>MATCHĀ</span></div></div>
       <div className="hero-month"><span>THIS MONTH</span><strong>{money.format(value.month.revenue)}</strong><small>{value.month.transactions} transactions posted</small></div>
     </section>
@@ -53,8 +53,8 @@ export function DashboardView() {
     </section>
     <section className="dashboard-grid">
       <article className="panel sales-panel"><header className="panel-header"><div><span className="eyebrow">SALES FLOW</span><h2>Seven-day rhythm</h2></div><span className="panel-note">SGD · DAILY</span></header><SalesChart points={value.dailySales} /></article>
-      <article className="panel"><header className="panel-header"><div><span className="eyebrow">FRESHLY SERVED</span><h2>Recent receipts</h2></div><Link href="/reports">View all</Link></header>
-        {value.recentSales.length ? <div className="receipt-list">{value.recentSales.map((sale) => <div className="receipt-row" key={sale._id}><div className="receipt-icon"><ReceiptText size={17} /></div><div><strong>{sale.memberName}</strong><span>{sale.receiptNo} · {dateTime.format(new Date(sale.createdAt))}</span></div><div><strong>{money.format(sale.total)}</strong><span>{sale.paymentMethod}</span></div></div>)}</div> : <EmptyState title="No cups rung up yet" detail="Complete the first sale from the POS and it will appear here." />}
+      <article className="panel"><header className="panel-header"><div><span className="eyebrow">FRESHLY SERVED</span><h2>Recent receipts</h2></div><Link href="/receipts">View all</Link></header>
+        {value.recentSales.length ? <div className="receipt-list">{value.recentSales.map((sale) => <Link href={`/receipts/${sale._id}`} className="receipt-row" key={sale._id}><div className="receipt-icon"><ReceiptText size={17} /></div><div><strong>{sale.memberName}</strong><span>{sale.receiptNo} · {dateTime.format(new Date(sale.createdAt))}</span></div><div><strong>{money.format(Math.max(0, sale.total - Number(sale.refundedAmount || 0)))}</strong><span>{sale.status === "COMPLETED" || !sale.status ? sale.paymentMethod : sale.status.replaceAll("_", " ")}</span></div></Link>)}</div> : <EmptyState title="No cups rung up yet" detail="Complete the first sale from the POS and it will appear here." />}
       </article>
       <article className="panel top-products-panel"><header className="panel-header"><div><span className="eyebrow">THIS MONTH</span><h2>Best sellers</h2></div><span className="panel-note">BY REVENUE</span></header>
         {value.topProducts.length ? <div className="rank-list">{value.topProducts.map((product, index) => <div key={product._id}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{product.name}</strong><small>{product.quantity} sold</small></div><b>{money.format(product.revenue)}</b></div>)}</div> : <EmptyState title="A clean whisk" detail="Best-selling products appear after the first transactions." />}

@@ -19,25 +19,26 @@ export async function GET() {
     const month = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1) - 8 * 60 * 60 * 1000);
     const [todayAgg, monthAgg, memberCount, lowStockCount, recentSales, dailySales, topProducts] = await Promise.all([
       db.collection("sales").aggregate([
-        { $match: { status: "COMPLETED", createdAt: { $gte: today } } },
-        { $group: { _id: null, revenue: { $sum: "$total" }, transactions: { $sum: 1 }, averageSale: { $avg: "$total" } } },
+        { $match: { status: { $in: ["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] }, createdAt: { $gte: today } } },
+        { $group: { _id: null, revenue: { $sum: { $subtract: ["$total", { $ifNull: ["$refundedAmount", 0] }] } }, transactions: { $sum: 1 }, averageSale: { $avg: { $subtract: ["$total", { $ifNull: ["$refundedAmount", 0] }] } } } },
       ]).next(),
       db.collection("sales").aggregate([
-        { $match: { status: "COMPLETED", createdAt: { $gte: month } } },
-        { $group: { _id: null, revenue: { $sum: "$total" }, transactions: { $sum: 1 } } },
+        { $match: { status: { $in: ["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] }, createdAt: { $gte: month } } },
+        { $group: { _id: null, revenue: { $sum: { $subtract: ["$total", { $ifNull: ["$refundedAmount", 0] }] } }, transactions: { $sum: 1 } } },
       ]).next(),
       db.collection("members").countDocuments({ active: { $ne: false } }),
       db.collection("products").countDocuments({ active: { $ne: false }, $expr: { $lte: ["$stock", "$reorderLevel"] } }),
-      db.collection("sales").find({ status: "COMPLETED" }).sort({ createdAt: -1 }).limit(6).project({ receiptNo: 1, memberName: 1, total: 1, paymentMethod: 1, createdAt: 1 }).toArray(),
+      db.collection("sales").find({ status: { $in: ["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] } }).sort({ createdAt: -1 }).limit(6).project({ receiptNo: 1, memberName: 1, total: 1, refundedAmount: 1, paymentMethod: 1, status: 1, createdAt: 1 }).toArray(),
       db.collection("sales").aggregate([
-        { $match: { status: "COMPLETED", createdAt: { $gte: new Date(Date.now() - 6 * 86400000) } } },
-        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "+08:00" } }, total: { $sum: "$total" } } },
+        { $match: { status: { $in: ["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] }, createdAt: { $gte: new Date(Date.now() - 6 * 86400000) } } },
+        { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "+08:00" } }, total: { $sum: { $subtract: ["$total", { $ifNull: ["$refundedAmount", 0] }] } } } },
         { $sort: { _id: 1 } },
       ]).toArray(),
       db.collection("sales").aggregate([
-        { $match: { status: "COMPLETED", createdAt: { $gte: month } } },
+        { $match: { status: { $in: ["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] }, createdAt: { $gte: month } } },
         { $unwind: "$items" },
-        { $group: { _id: "$items.productId", name: { $first: "$items.name" }, quantity: { $sum: "$items.quantity" }, revenue: { $sum: "$items.lineTotal" } } },
+        { $group: { _id: "$items.productId", name: { $first: "$items.name" }, quantity: { $sum: { $subtract: ["$items.quantity", { $ifNull: ["$items.refundedQuantity", 0] }] } }, revenue: { $sum: { $subtract: ["$items.lineTotal", { $ifNull: ["$items.refundedLineTotal", 0] }] } } } },
+        { $match: { quantity: { $gt: 0 } } },
         { $sort: { revenue: -1 } }, { $limit: 5 },
       ]).toArray(),
     ]);

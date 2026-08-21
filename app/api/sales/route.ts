@@ -4,12 +4,18 @@ import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api
 import { writeAudit } from "@/lib/audit";
 import { getDb, getMongoClient } from "@/lib/db";
 import { asMoney, makeDocumentNo, serialise } from "@/lib/format";
+import { DEFAULT_RECEIPT_TEMPLATE, ensureDefaultReceiptTemplate, normaliseReceiptTemplate } from "@/lib/receipt-templates";
+import { calculateTaxTotals } from "@/lib/tax";
 
 export const runtime = "nodejs";
 
 const saleSchema = z.object({
   memberId: z.union([z.string().length(24), z.literal(""), z.null()]).optional(),
   paymentMethod: z.enum(["CASH", "CARD", "PAYNOW", "OTHER"]),
+  paymentReference: z.string().trim().max(80).default(""),
+  tenderedAmount: z.coerce.number().min(0).max(100_000_000).optional(),
+  templateId: z.union([z.string().length(24), z.literal("")]).default(""),
+  saleNote: z.string().trim().max(300).default(""),
   discount: z.coerce.number().min(0).max(100_000).default(0),
   items: z.array(z.object({
     productId: z.string().length(24),
@@ -19,12 +25,36 @@ const saleSchema = z.object({
 
 class StockError extends Error {}
 
-export async function GET() {
-  const auth = await authorize("reports.read");
+async function readBody(request: Request) {
+  try {
+    return { value: await request.json() } as const;
+  } catch {
+    return { error: fail("The request body must be valid JSON.", 400) } as const;
+  }
+}
+
+function escapedSearch(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export async function GET(request: Request) {
+  const auth = await authorize("receipts.read");
   if (auth.error) return auth.error;
   try {
     const db = await getDb();
-    const sales = await db.collection("sales").find({}).sort({ createdAt: -1 }).limit(200).toArray();
+    const url = new URL(request.url);
+    const id = url.searchParams.get("id");
+    if (id) {
+      if (!ObjectId.isValid(id)) return fail("The receipt reference is invalid.", 422);
+      const sale = await db.collection("sales").findOne({ _id: new ObjectId(id) });
+      if (!sale) return fail("This receipt could not be found.", 404);
+      return ok(serialise(sale));
+    }
+    const query = url.searchParams.get("q")?.trim().slice(0, 60) || "";
+    const filter = query ? {
+      $or: ["receiptNo", "memberName", "cashierName", "paymentReference"].map((field) => ({ [field]: { $regex: escapedSearch(query), $options: "i" } })),
+    } : {};
+    const sales = await db.collection("sales").find(filter).sort({ createdAt: -1 }).limit(200).toArray();
     return ok(serialise(sales));
   } catch (error) {
     return publicError(error);
@@ -35,8 +65,10 @@ export async function POST(request: Request) {
   const auth = await authorize("pos.sell");
   if (auth.error) return auth.error;
   if (!sameOrigin(request)) return fail("This request was blocked.", 403);
+  const body = await readBody(request);
+  if (body.error) return body.error;
   try {
-    const input = saleSchema.safeParse(await request.json());
+    const input = saleSchema.safeParse(body.value);
     if (!input.success) return fail("Check the sale details.", 422, input.error.flatten().fieldErrors);
     const quantities = new Map<string, number>();
     for (const item of input.data.items) {
@@ -45,6 +77,7 @@ export async function POST(request: Request) {
     }
 
     const db = await getDb();
+    await ensureDefaultReceiptTemplate(db, new ObjectId(auth.session.id));
     const ids = [...quantities.keys()].map((id) => new ObjectId(id));
     const products = await db.collection("products").find({ _id: { $in: ids }, active: { $ne: false } }).toArray();
     if (products.length !== ids.length) return fail("One or more products are no longer available.", 409);
@@ -68,10 +101,19 @@ export async function POST(request: Request) {
     const discount = asMoney(input.data.discount);
     if (discount > subtotal) return fail("Discount cannot exceed the subtotal.", 422);
     const business = await db.collection("settings").findOne({ key: "business" });
-    const taxRate = Math.max(0, Math.min(100, Number(business?.taxRate || 0)));
-    const taxable = asMoney(subtotal - discount);
-    const tax = asMoney(taxable * (taxRate / 100));
-    const total = asMoney(taxable + tax);
+    const requestedTemplate = input.data.templateId && ObjectId.isValid(input.data.templateId)
+      ? await db.collection("receiptTemplates").findOne({ _id: new ObjectId(input.data.templateId), active: { $ne: false } })
+      : null;
+    if (input.data.templateId && !requestedTemplate) return fail("Choose an available receipt template.", 422);
+    const selectedTemplate = requestedTemplate || await db.collection("receiptTemplates").findOne({ isDefault: true, active: { $ne: false } });
+    const templateSnapshot = normaliseReceiptTemplate(selectedTemplate || DEFAULT_RECEIPT_TEMPLATE);
+    const taxMode = business?.taxMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE";
+    const { taxRate, tax, netSales, total } = calculateTaxTotals(subtotal, discount, Number(business?.taxRate || 0), taxMode);
+    const tenderedAmount = input.data.paymentMethod === "CASH" ? asMoney(input.data.tenderedAmount || 0) : total;
+    if (input.data.paymentMethod === "CASH" && tenderedAmount < total) {
+      return fail("Cash received must cover the amount due.", 422, { tenderedAmount: ["Enter the cash received from the customer."] });
+    }
+    const changeDue = input.data.paymentMethod === "CASH" ? asMoney(tenderedAmount - total) : 0;
     const totalCost = asMoney(items.reduce((sum, item) => sum + item.lineCost, 0));
     const receiptNo = makeDocumentNo("KKM");
     const journalNo = makeDocumentNo("JE");
@@ -81,6 +123,7 @@ export async function POST(request: Request) {
       member = await db.collection("members").findOne({ _id: new ObjectId(input.data.memberId), active: { $ne: false } });
       if (!member) return fail("The selected member no longer exists.", 409);
     }
+    const pointsEarned = member ? Math.max(0, Math.floor(total * Number(business?.pointsPerDollar || 1))) : 0;
 
     const saleId = new ObjectId();
     const sale = {
@@ -88,15 +131,35 @@ export async function POST(request: Request) {
       receiptNo,
       memberId: member?._id || null,
       memberName: member?.name || "Walk-in guest",
+      memberNo: member?.memberNo || "",
+      pointsEarned,
+      pointsBalance: member ? Number(member.points || 0) + pointsEarned : 0,
       items,
       subtotal,
       discount,
       taxRate,
+      taxMode,
       tax,
-      netSales: taxable,
+      netSales,
       total,
       totalCost,
       paymentMethod: input.data.paymentMethod,
+      paymentReference: input.data.paymentReference,
+      tenderedAmount,
+      changeDue,
+      saleNote: input.data.saleNote,
+      templateId: selectedTemplate?._id || null,
+      templateName: templateSnapshot.name,
+      templateSnapshot,
+      businessSnapshot: {
+        businessName: String(business?.businessName || "Kōn-Kōn Matchā"),
+        registrationNo: String(business?.registrationNo || ""),
+        email: String(business?.email || ""),
+        phone: String(business?.phone || ""),
+        address: String(business?.address || ""),
+        currency: String(business?.currency || "SGD"),
+        taxName: String(business?.taxName || "GST"),
+      },
       status: "COMPLETED",
       createdBy: new ObjectId(auth.session.id),
       cashierName: auth.session.fullName,
@@ -128,7 +191,6 @@ export async function POST(request: Request) {
         }
         await db.collection("sales").insertOne(sale, { session: mongoSession });
         if (member) {
-          const pointsEarned = Math.max(0, Math.floor(total * Number(business?.pointsPerDollar || 1)));
           await db.collection("members").updateOne(
             { _id: member._id },
             { $inc: { points: pointsEarned, lifetimeSpend: total }, $set: { lastVisitAt: now, updatedAt: now } },
@@ -137,7 +199,7 @@ export async function POST(request: Request) {
         }
         const cashAccount = input.data.paymentMethod === "CASH" ? ["1000", "Cash on hand"] : ["1010", "Bank"];
         const revenueLines = [
-          { accountCode: "4000", accountName: "Product sales", debit: 0, credit: taxable },
+          { accountCode: "4000", accountName: "Product sales", debit: 0, credit: netSales },
           ...(tax > 0 ? [{ accountCode: "2100", accountName: "GST payable", debit: 0, credit: tax }] : []),
         ];
         await db.collection("journalEntries").insertOne({

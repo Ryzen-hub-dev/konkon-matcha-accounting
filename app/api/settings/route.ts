@@ -15,6 +15,7 @@ const settingsSchema = z.object({
   currency: z.enum(["SGD"]),
   taxName: z.string().trim().min(2).max(20),
   taxRate: z.coerce.number().min(0).max(100),
+  taxMode: z.enum(["EXCLUSIVE", "INCLUSIVE"]).default("EXCLUSIVE"),
   pointsPerDollar: z.coerce.number().min(0).max(100),
   lowStockNotifications: z.boolean().default(true),
 });
@@ -25,7 +26,7 @@ export async function GET() {
   try {
     const db = await getDb();
     const settings = await db.collection("settings").findOne({ key: "business" });
-    return ok(serialise(settings || { key: "business", businessName: "Kōn-Kōn Matchā", currency: "SGD", taxName: "GST", taxRate: 0, pointsPerDollar: 1 }));
+    return ok(serialise(settings || { key: "business", businessName: "Kōn-Kōn Matchā", currency: "SGD", taxName: "GST", taxRate: 0, taxMode: "EXCLUSIVE", pointsPerDollar: 1 }));
   } catch (error) {
     return publicError(error);
   }
