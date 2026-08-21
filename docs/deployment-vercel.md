@@ -19,7 +19,9 @@ In MongoDB Atlas:
 3. Add these Production, Preview and Development variables:
    - `MONGODB_URI`
    - `MONGODB_DB_NAME`
+   - `MONGODB_COLLECTION_PREFIX` — for example `konkon_`
    - `AUTH_SECRET` — at least 32 random characters
+   - `IDENTITY_LOOKUP_SECRET` — a different stable 32+ character HMAC secret; set it before storing member IDs
    - `NEXT_PUBLIC_APP_URL` — the final HTTPS origin
 4. Deploy. `vercel.json` enables Fluid Compute and selects Singapore (`sin1`).
 5. Visit `/setup` immediately and create the Owner. Once any user exists, the setup API permanently refuses another Owner bootstrap.
@@ -39,6 +41,9 @@ Indexes are created automatically on first connection. The application stores:
 - `settings` and `chartOfAccounts`
 - `products` and `stockMovements`
 - `members`, `sales`, `journalEntries` and `invoices`
+- `coupons` and `couponRedemptions`
+- `scannerSessions` and short-lived `scannerEvents`
+- `systemControls`, `ownershipTransfers` and short-lived security throttle collections
 
 No database exports or real customer records belong in Git.
 
@@ -48,5 +53,9 @@ No database exports or real customer records belong in Git.
 - Cashier cannot open Accounting or change team access.
 - A test POS sale reduces product stock and creates a posted journal.
 - A member sale increases points and lifetime spend.
+- A product barcode and printable member card both resolve through the POS scan dock.
+- A coupon is recalculated by the sale API and its use counter advances once.
+- A phone scanner pass accepts a code, appears at the selected POS and fails immediately after revocation.
+- Read-only mode blocks writes; closed mode blocks business APIs; reopening restores access.
 - A paid invoice creates a cash-basis bank/revenue journal, including GST payable when configured.
 - `npm run build` passes in the deployment log.

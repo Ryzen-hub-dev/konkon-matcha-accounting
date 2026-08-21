@@ -6,6 +6,7 @@ import { getDb, getMongoClient } from "@/lib/db";
 import { asMoney, makeDocumentNo, serialise } from "@/lib/format";
 import { DEFAULT_RECEIPT_TEMPLATE, ensureDefaultReceiptTemplate, normaliseReceiptTemplate } from "@/lib/receipt-templates";
 import { calculateTaxTotals } from "@/lib/tax";
+import { CouponError, validateCoupon } from "@/lib/coupons";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,9 @@ const saleSchema = z.object({
   tenderedAmount: z.coerce.number().min(0).max(100_000_000).optional(),
   templateId: z.union([z.string().length(24), z.literal("")]).default(""),
   saleNote: z.string().trim().max(300).default(""),
-  discount: z.coerce.number().min(0).max(100_000).default(0),
+  couponCode: z.string().trim().max(32).default(""),
+  manualDiscount: z.coerce.number().min(0).max(100_000).optional(),
+  discount: z.coerce.number().min(0).max(100_000).optional(),
   items: z.array(z.object({
     productId: z.string().length(24),
     quantity: z.coerce.number().int().min(1).max(999),
@@ -98,8 +101,10 @@ export async function POST(request: Request) {
       };
     });
     const subtotal = asMoney(items.reduce((sum, item) => sum + item.lineTotal, 0));
-    const discount = asMoney(input.data.discount);
-    if (discount > subtotal) return fail("Discount cannot exceed the subtotal.", 422);
+    const manualDiscount = asMoney(input.data.manualDiscount ?? input.data.discount ?? 0);
+    if (manualDiscount > 0 && !["OWNER", "ADMIN", "MANAGER"].includes(auth.session.role)) {
+      return fail("A Manager must approve a manual discount. Use an active coupon instead.", 403);
+    }
     const business = await db.collection("settings").findOne({ key: "business" });
     const requestedTemplate = input.data.templateId && ObjectId.isValid(input.data.templateId)
       ? await db.collection("receiptTemplates").findOne({ _id: new ObjectId(input.data.templateId), active: { $ne: false } })
@@ -107,6 +112,17 @@ export async function POST(request: Request) {
     if (input.data.templateId && !requestedTemplate) return fail("Choose an available receipt template.", 422);
     const selectedTemplate = requestedTemplate || await db.collection("receiptTemplates").findOne({ isDefault: true, active: { $ne: false } });
     const templateSnapshot = normaliseReceiptTemplate(selectedTemplate || DEFAULT_RECEIPT_TEMPLATE);
+    let member = null;
+    if (input.data.memberId) {
+      member = await db.collection("members").findOne({ _id: new ObjectId(input.data.memberId), active: { $ne: false } });
+      if (!member) return fail("The selected member no longer exists.", 409);
+    }
+    const couponResult = input.data.couponCode
+      ? await validateCoupon(db, input.data.couponCode, subtotal, member?._id.toHexString() || null)
+      : null;
+    const couponDiscount = asMoney(couponResult?.discount || 0);
+    const discount = asMoney(manualDiscount + couponDiscount);
+    if (discount > subtotal) return fail("Combined discounts cannot exceed the subtotal.", 422);
     const taxMode = business?.taxMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE";
     const { taxRate, tax, netSales, total } = calculateTaxTotals(subtotal, discount, Number(business?.taxRate || 0), taxMode);
     const tenderedAmount = input.data.paymentMethod === "CASH" ? asMoney(input.data.tenderedAmount || 0) : total;
@@ -118,11 +134,6 @@ export async function POST(request: Request) {
     const receiptNo = makeDocumentNo("KKM");
     const journalNo = makeDocumentNo("JE");
     const now = new Date();
-    let member = null;
-    if (input.data.memberId) {
-      member = await db.collection("members").findOne({ _id: new ObjectId(input.data.memberId), active: { $ne: false } });
-      if (!member) return fail("The selected member no longer exists.", 409);
-    }
     const pointsEarned = member ? Math.max(0, Math.floor(total * Number(business?.pointsPerDollar || 1))) : 0;
 
     const saleId = new ObjectId();
@@ -137,6 +148,11 @@ export async function POST(request: Request) {
       items,
       subtotal,
       discount,
+      manualDiscount,
+      couponDiscount,
+      couponId: couponResult?.coupon._id || null,
+      couponCode: couponResult?.coupon.code || "",
+      couponName: couponResult?.coupon.name || "",
       taxRate,
       taxMode,
       tax,
@@ -170,6 +186,34 @@ export async function POST(request: Request) {
     const mongoSession = client.startSession();
     try {
       await mongoSession.withTransaction(async () => {
+        if (couponResult) {
+          const refreshed = await validateCoupon(db, couponResult.coupon.code, subtotal, member?._id.toHexString() || null, mongoSession);
+          if (!refreshed || refreshed.discount !== couponDiscount) throw new CouponError("The coupon changed before checkout. Review the order and try again.");
+          const claimed = await db.collection("coupons").updateOne(
+            {
+              _id: couponResult.coupon._id,
+              active: true,
+              archivedAt: { $exists: false },
+              $or: [
+                { usageLimit: 0 },
+                { usageLimit: { $exists: false } },
+                { $expr: { $lt: [{ $ifNull: ["$usageCount", 0] }, "$usageLimit"] } },
+              ],
+            },
+            { $inc: { usageCount: 1 }, $set: { lastUsedAt: now, updatedAt: now } },
+            { session: mongoSession },
+          );
+          if (!claimed.modifiedCount) throw new CouponError("That coupon has just reached its usage limit.");
+          await db.collection("couponRedemptions").insertOne({
+            couponId: couponResult.coupon._id,
+            couponCode: couponResult.coupon.code,
+            saleId,
+            memberId: member?._id || null,
+            discount: couponDiscount,
+            redeemedBy: new ObjectId(auth.session.id),
+            createdAt: now,
+          }, { session: mongoSession });
+        }
         for (const item of items) {
           const updated = await db.collection("products").findOneAndUpdate(
             { _id: item.productId, active: { $ne: false }, stock: { $gte: item.quantity } },
@@ -220,14 +264,14 @@ export async function POST(request: Request) {
           createdBy: new ObjectId(auth.session.id),
           createdAt: now,
         }, { session: mongoSession });
-        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, total, itemCount: items.length }, mongoSession);
+        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, total, itemCount: items.length, couponCode: couponResult?.coupon.code || "", manualDiscount }, mongoSession);
       });
     } finally {
       await mongoSession.endSession();
     }
     return created(serialise(sale));
   } catch (error) {
-    if (error instanceof StockError) return fail(error.message, 409);
+    if (error instanceof StockError || error instanceof CouponError) return fail(error.message, 409);
     if ((error as { code?: number }).code === 11000) return fail("The receipt number collided. Please submit the sale again.", 409);
     return publicError(error);
   }

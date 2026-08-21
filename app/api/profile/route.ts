@@ -1,7 +1,7 @@
 import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { fail, ok, publicError, sameOrigin } from "@/lib/api";
-import { hashPassword, readSession, verifyPassword } from "@/lib/auth";
+import { hashPassword, readSession, setSession, verifyPassword } from "@/lib/auth";
 import { writeAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 
@@ -20,7 +20,19 @@ export async function PATCH(request: Request) {
     const db = await getDb();
     const user = await db.collection("users").findOne({ _id: new ObjectId(session.id), active: true });
     if (!user || !(await verifyPassword(input.data.currentPassword, String(user.passwordHash)))) return fail("The current password is incorrect.", 401);
-    await db.collection("users").updateOne({ _id: user._id }, { $set: { passwordHash: await hashPassword(input.data.newPassword), updatedAt: new Date() } });
+    const sessionVersion = Number(user.sessionVersion || 0) + 1;
+    await db.collection("users").updateOne(
+      { _id: user._id },
+      { $set: { passwordHash: await hashPassword(input.data.newPassword), mustChangePassword: false, sessionVersion, updatedAt: new Date() } },
+    );
+    await setSession({
+      id: session.id,
+      username: String(user.username),
+      fullName: String(user.fullName),
+      role: user.role,
+      sessionVersion,
+      mustChangePassword: false,
+    });
     await writeAudit(db, session, "user.password_change", "user", session.id);
     return ok({ changed: true });
   } catch (error) {

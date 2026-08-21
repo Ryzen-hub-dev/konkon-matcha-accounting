@@ -20,6 +20,11 @@ const chartOfAccounts = [
 
 export async function seedWorkspace(db: Db, ownerId: unknown, businessName: string, seedProducts: boolean, session?: ClientSession) {
   const now = new Date();
+  await db.collection("systemControls").updateOne(
+    { _id: "workspace" as never },
+    { $setOnInsert: { mode: "OPEN", reason: "", reopenAt: null, scannerGeneration: 1, createdAt: now, updatedAt: now } },
+    { upsert: true, ...(session ? { session } : {}) },
+  );
   await db.collection("settings").updateOne(
     { key: "business" },
     { $setOnInsert: { key: "business", businessName, currency: "SGD", taxName: "GST", taxRate: 0, taxMode: "EXCLUSIVE", pointsPerDollar: 1, createdAt: now }, $set: { updatedAt: now } },

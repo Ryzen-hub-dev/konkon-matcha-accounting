@@ -71,6 +71,8 @@ export async function POST(request: Request) {
       passwordHash: await hashPassword(input.data.password),
       role: "OWNER" as const,
       active: true,
+      sessionVersion: 1,
+      mustChangePassword: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -92,7 +94,7 @@ export async function POST(request: Request) {
         }, { session: mongoSession });
       });
     } finally { await mongoSession.endSession(); }
-    await setSession({ id: _id.toHexString(), username: user.username, fullName: user.fullName, role: user.role });
+    await setSession({ id: _id.toHexString(), username: user.username, fullName: user.fullName, role: user.role, sessionVersion: user.sessionVersion, mustChangePassword: false });
     return created({ redirectTo: "/dashboard" });
   } catch (error) {
     if (lockCreated) {

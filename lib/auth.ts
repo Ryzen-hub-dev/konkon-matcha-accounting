@@ -35,6 +35,8 @@ export async function createSessionToken(user: SessionUser) {
     username: user.username,
     fullName: user.fullName,
     role: user.role,
+    sessionVersion: Number(user.sessionVersion || 0),
+    mustChangePassword: Boolean(user.mustChangePassword),
   })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setSubject(user.id)
@@ -77,6 +79,8 @@ export async function readSession(): Promise<SessionPayload | null> {
       username: String(payload.username),
       fullName: String(payload.fullName),
       role: String(payload.role) as UserRole,
+      sessionVersion: Number(payload.sessionVersion || 0),
+      mustChangePassword: Boolean(payload.mustChangePassword),
       iat: payload.iat,
       exp: payload.exp,
     };

@@ -71,6 +71,8 @@ export async function POST(request: Request) {
       username: String(user.username),
       fullName: String(user.fullName),
       role: user.role as UserRole,
+      sessionVersion: Number(user.sessionVersion || 0),
+      mustChangePassword: Boolean(user.mustChangePassword),
     };
     await setSession(sessionUser);
     await db.collection("authThrottle").deleteOne({ key });
@@ -85,7 +87,7 @@ export async function POST(request: Request) {
       details: {},
       createdAt: new Date(),
     });
-    return ok({ user: sessionUser, redirectTo: "/dashboard" });
+    return ok({ user: sessionUser, redirectTo: user.mustChangePassword ? "/change-password" : "/dashboard" });
   } catch (error) {
     return publicError(error);
   }

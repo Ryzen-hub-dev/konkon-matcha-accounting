@@ -66,8 +66,20 @@ async function initializeIndexes(db: Db) {
       { unique: true, partialFilterExpression: { emailNormalized: { $type: "string" } } },
     ),
     db.collection("products").createIndex({ sku: 1 }, { unique: true }),
+    db.collection("products").createIndex(
+      { barcode: 1 },
+      { unique: true, partialFilterExpression: { barcode: { $type: "string" } } },
+    ),
     db.collection("products").createIndex({ category: 1, name: 1 }),
     db.collection("members").createIndex({ memberNo: 1 }, { unique: true }),
+    db.collection("members").createIndex(
+      { memberCardCode: 1 },
+      { unique: true, partialFilterExpression: { memberCardCode: { $type: "string" } } },
+    ),
+    db.collection("members").createIndex(
+      { identityLookupHash: 1 },
+      { unique: true, partialFilterExpression: { identityLookupHash: { $type: "string" } } },
+    ),
     db.collection("members").createIndex(
       { phone: 1 },
       { unique: true, partialFilterExpression: { phone: { $type: "string" } } },
@@ -87,7 +99,19 @@ async function initializeIndexes(db: Db) {
     db.collection("invoiceTemplates").createIndex({ isDefault: -1, updatedAt: -1 }),
     db.collection("auditLogs").createIndex({ createdAt: -1 }),
     db.collection("auditLogs").createIndex({ actorId: 1, createdAt: -1 }),
+    db.collection("coupons").createIndex({ code: 1 }, { unique: true }),
+    db.collection("coupons").createIndex({ active: 1, expiresAt: 1 }),
+    db.collection("couponRedemptions").createIndex({ couponId: 1, memberId: 1, createdAt: -1 }),
+    db.collection("couponRedemptions").createIndex({ saleId: 1 }, { unique: true }),
+    db.collection("scannerSessions").createIndex({ tokenHash: 1 }, { unique: true }),
+    db.collection("scannerSessions").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    db.collection("scannerSessions").createIndex({ createdBy: 1, expiresAt: -1 }),
+    db.collection("scannerEvents").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    db.collection("scannerEvents").createIndex({ scannerSessionId: 1, consumedAt: 1, createdAt: 1 }),
+    db.collection("ownershipTransfers").createIndex({ status: 1, createdAt: -1 }),
     db.collection("authThrottle").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    db.collection("sensitiveLookupEvents").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    db.collection("sensitiveLookupEvents").createIndex({ actorId: 1, createdAt: -1 }),
   ]);
 }
 

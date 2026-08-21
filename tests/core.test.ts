@@ -17,6 +17,10 @@ import {
   receiptTemplateInputSchema,
 } from "../lib/receipt-templates";
 import { calculateTaxTotals } from "../lib/tax";
+import { computeCouponDiscount } from "../lib/coupons";
+import { createScannerToken, normaliseScanCode, scannerTokenHash } from "../lib/scanner";
+import { normalisePrivateIdentifier, privateIdentifierHash } from "../lib/sensitive";
+import { isWritePermission } from "../lib/system-control";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -41,10 +45,48 @@ test("document numbers are recognisable and collision resistant", () => {
 
 test("cashier permissions stop at the counter", () => {
   assert.equal(hasPermission("CASHIER", "pos.sell"), true);
+  assert.equal(hasPermission("CASHIER", "coupons.read"), true);
+  assert.equal(hasPermission("CASHIER", "coupons.manage"), false);
   assert.equal(hasPermission("CASHIER", "receipts.read"), true);
   assert.equal(hasPermission("CASHIER", "receipts.manage"), false);
   assert.equal(hasPermission("CASHIER", "accounting.write"), false);
   assert.equal(hasPermission("CASHIER", "team.write"), false);
+});
+
+test("coupon discounts are bounded and calculated on the server model", () => {
+  assert.equal(computeCouponDiscount({ type: "PERCENT", value: 15, minSpend: 20 }, 100), 15);
+  assert.equal(computeCouponDiscount({ type: "FIXED", value: 500, minSpend: 0 }, 42.5), 42.5);
+  assert.equal(computeCouponDiscount({ type: "FIXED", value: 10, minSpend: 50 }, 49.99), 0);
+});
+
+test("scanner tokens are unguessable hashes and scan codes reject controls", () => {
+  const token = createScannerToken();
+  assert.ok(token.length >= 40);
+  assert.notEqual(scannerTokenHash(token), token);
+  assert.equal(scannerTokenHash(token), scannerTokenHash(token));
+  assert.equal(normaliseScanCode("  ean-123  "), "EAN-123");
+  assert.equal(normaliseScanCode("BAD\nCODE"), "");
+});
+
+test("member identity lookups are normalised and keyed without storing plaintext", () => {
+  const previousSecret = process.env.AUTH_SECRET;
+  process.env.AUTH_SECRET = "test-only-auth-secret-with-at-least-32-characters";
+  try {
+    assert.equal(normalisePrivateIdentifier(" s-123 45 "), "S12345");
+    const hash = privateIdentifierHash("S12345");
+    assert.notEqual(hash, "S12345");
+    assert.equal(hash, privateIdentifierHash(" s-123 45 "));
+  } finally {
+    if (previousSecret === undefined) delete process.env.AUTH_SECRET;
+    else process.env.AUTH_SECRET = previousSecret;
+  }
+});
+
+test("system modes recognise every business mutation as a write", () => {
+  assert.equal(isWritePermission("pos.sell"), true);
+  assert.equal(isWritePermission("inventory.write"), true);
+  assert.equal(isWritePermission("coupons.manage"), true);
+  assert.equal(isWritePermission("reports.read"), false);
 });
 
 test("owner remains the only role that can manage administrators", () => {

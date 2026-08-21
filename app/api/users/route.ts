@@ -1,4 +1,5 @@
 import { ObjectId } from "mongodb";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
@@ -21,9 +22,12 @@ const userSchema = z.object({
 
 const updateSchema = z.object({
   id: z.string().length(24),
+  action: z.enum(["UPDATE", "RESET_PASSWORD"]).default("UPDATE"),
   role: z.enum(USER_ROLES).optional(),
   active: z.boolean().optional(),
-}).refine((value) => value.role !== undefined || value.active !== undefined);
+}).refine((value) => value.action === "RESET_PASSWORD" || value.role !== undefined || value.active !== undefined);
+
+const deleteSchema = z.object({ id: z.string().length(24) });
 
 const projection = { passwordHash: 0, usernameNormalized: 0, emailNormalized: 0 };
 
@@ -61,6 +65,8 @@ export async function POST(request: Request) {
       passwordHash: await hashPassword(input.data.password),
       role: input.data.role,
       active: true,
+      sessionVersion: 1,
+      mustChangePassword: true,
       createdBy: new ObjectId(auth.session.id),
       createdAt: now,
       updatedAt: now,
@@ -84,19 +90,57 @@ export async function PATCH(request: Request) {
     if (!input.success || !ObjectId.isValid(input.data?.id || "")) return fail("Check the account update.", 422);
     if (input.data.id === auth.session.id && input.data.active === false) return fail("You cannot disable your own account.", 409);
     const db = await getDb();
-    const target = await db.collection("users").findOne({ _id: new ObjectId(input.data.id) });
+    const target = await db.collection("users").findOne({ _id: new ObjectId(input.data.id), archivedAt: { $exists: false } });
     if (!target) return fail("The account no longer exists.", 404);
     if (!canManageRole(auth.session.role, target.role) || (input.data.role && !canManageRole(auth.session.role, input.data.role))) {
       return fail("You cannot manage this account.", 403);
+    }
+    if (input.data.action === "RESET_PASSWORD") {
+      const temporaryPassword = `Ko!${randomBytes(12).toString("base64url")}9a`;
+      const changedAt = new Date();
+      await db.collection("users").updateOne(
+        { _id: target._id },
+        { $set: { passwordHash: await hashPassword(temporaryPassword), mustChangePassword: true, updatedAt: changedAt }, $inc: { sessionVersion: 1 } },
+      );
+      await writeAudit(db, auth.session, "user.password_reset", "user", input.data.id, { forcedChange: true });
+      return ok({ user: serialise(await db.collection("users").findOne({ _id: target._id }, { projection })), temporaryPassword });
     }
     const changes = {
       ...(input.data.role ? { role: input.data.role } : {}),
       ...(input.data.active !== undefined ? { active: input.data.active } : {}),
       updatedAt: new Date(),
     };
-    const user = await db.collection("users").findOneAndUpdate({ _id: target._id }, { $set: changes }, { returnDocument: "after", projection });
+    const user = await db.collection("users").findOneAndUpdate(
+      { _id: target._id },
+      { $set: changes, $inc: { sessionVersion: 1 } },
+      { returnDocument: "after", projection },
+    );
     await writeAudit(db, auth.session, "user.update", "user", input.data.id, changes);
     return ok(serialise(user));
+  } catch (error) {
+    return publicError(error);
+  }
+}
+
+export async function DELETE(request: Request) {
+  const auth = await authorize("team.write");
+  if (auth.error) return auth.error;
+  if (!sameOrigin(request)) return fail("This request was blocked.", 403);
+  try {
+    const input = deleteSchema.safeParse(await request.json());
+    if (!input.success || !ObjectId.isValid(input.data.id)) return fail("Check the account reference.", 422);
+    if (input.data.id === auth.session.id) return fail("You cannot archive your own account.", 409);
+    const db = await getDb();
+    const target = await db.collection("users").findOne({ _id: new ObjectId(input.data.id), archivedAt: { $exists: false } });
+    if (!target) return fail("The account no longer exists.", 404);
+    if (!canManageRole(auth.session.role, target.role)) return fail("You cannot archive this account.", 403);
+    const now = new Date();
+    await db.collection("users").updateOne(
+      { _id: target._id },
+      { $set: { active: false, archivedAt: now, archivedBy: new ObjectId(auth.session.id), updatedAt: now }, $inc: { sessionVersion: 1 } },
+    );
+    await writeAudit(db, auth.session, "user.archive", "user", input.data.id, { username: target.username });
+    return ok({ archived: true });
   } catch (error) {
     return publicError(error);
   }

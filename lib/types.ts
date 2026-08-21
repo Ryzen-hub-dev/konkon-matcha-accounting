@@ -6,6 +6,8 @@ export type SessionUser = {
   username: string;
   fullName: string;
   role: UserRole;
+  sessionVersion?: number;
+  mustChangePassword?: boolean;
 };
 
 export type SessionPayload = SessionUser & {
@@ -20,6 +22,7 @@ export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 export type ProductRecord = {
   _id: string;
   sku: string;
+  barcode?: string;
   name: string;
   category: string;
   unit: string;
@@ -35,12 +38,15 @@ export type ProductRecord = {
 export type MemberRecord = {
   _id: string;
   memberNo: string;
+  memberCardCode: string;
   name: string;
   phone: string;
   email: string;
   points: number;
   lifetimeSpend: number;
   active: boolean;
+  identityType?: string;
+  identityLast4?: string;
   createdAt: string;
 };
 

@@ -4,6 +4,7 @@ import { readSession } from "@/lib/auth";
 import { hasPermission, type Permission } from "@/lib/rbac";
 import { getDb } from "@/lib/db";
 import type { UserRole } from "@/lib/types";
+import { getSystemControl, isWritePermission } from "@/lib/system-control";
 
 export function ok<T>(data: T, init?: ResponseInit) {
   return NextResponse.json({ ok: true, data }, { status: 200, ...init });
@@ -17,20 +18,36 @@ export function fail(error: string, status = 400, issues?: Record<string, string
   return NextResponse.json({ ok: false, error, ...(issues ? { issues } : {}) }, { status });
 }
 
-export async function authorize(permission: Permission) {
+export async function authorize(permission: Permission, options: { allowReadOnlyWrite?: boolean } = {}) {
   const session = await readSession();
   if (!session) return { error: fail("Your session has expired. Sign in again.", 401) } as const;
   if (!ObjectId.isValid(session.id)) return { error: fail("Your session is invalid. Sign in again.", 401) } as const;
   try {
     const db = await getDb();
-    const user = await db.collection("users").findOne(
-      { _id: new ObjectId(session.id), active: true },
-      { projection: { role: 1, username: 1, fullName: 1 } },
-    );
+    const [user, system] = await Promise.all([
+      db.collection("users").findOne(
+        { _id: new ObjectId(session.id), active: true },
+        { projection: { role: 1, username: 1, fullName: 1, sessionVersion: 1, mustChangePassword: 1 } },
+      ),
+      getSystemControl(db),
+    ]);
     if (!user) return { error: fail("This account is no longer active.", 401) } as const;
+    if (Number(session.sessionVersion || 0) !== Number(user.sessionVersion || 0)) {
+      return { error: fail("Your access changed. Sign in again to continue.", 401) } as const;
+    }
     session.role = user.role as UserRole;
     session.username = String(user.username);
     session.fullName = String(user.fullName);
+    session.mustChangePassword = Boolean(user.mustChangePassword);
+    if (session.mustChangePassword) {
+      return { error: fail("Change your temporary password before using the workspace.", 428) } as const;
+    }
+    if (system.mode === "CLOSED" && !["settings.read", "settings.write", "team.read", "team.write"].includes(permission)) {
+      return { error: fail(system.reason || "This workspace is temporarily closed by the Owner.", 423) } as const;
+    }
+    if (system.mode === "READ_ONLY" && isWritePermission(permission) && !options.allowReadOnlyWrite) {
+      return { error: fail(system.reason || "This workspace is temporarily read-only.", 423) } as const;
+    }
   } catch (error) {
     if (process.env.NODE_ENV !== "production") console.error(error);
     return { error: fail("The account service is temporarily unavailable.", 503) } as const;
