@@ -6,6 +6,6 @@ deploy/
 sql/
 *.sln
 PROMPT.md
-Receipts/
-Reports/
+/Receipts/
+/Reports/
 docs/ui-preview.svg
