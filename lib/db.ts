@@ -90,6 +90,10 @@ async function initializeIndexes(db: Db) {
       { unique: true, partialFilterExpression: { clientRequestId: { $type: "string" } } },
     ),
     db.collection("sales").createIndex({ createdAt: -1 }),
+    db.collection("sales").createIndex(
+      { paymentProvider: 1, paymentReferenceNormalized: 1 },
+      { unique: true, partialFilterExpression: { paymentVerificationMode: "STATIC_QR", paymentReferenceNormalized: { $type: "string" } } },
+    ),
     db.collection("settingsHistory").createIndex({ key: 1, createdAt: -1 }),
     db.collection("locations").createIndex({ code: 1 }, { unique: true }),
     db.collection("locations").createIndex({ systemKey: 1 }, { unique: true, sparse: true }),
@@ -101,6 +105,7 @@ async function initializeIndexes(db: Db) {
     db.collection("refunds").createIndex({ refundNo: 1 }, { unique: true }),
     db.collection("refunds").createIndex({ saleId: 1, createdAt: -1 }),
     db.collection("journalEntries").createIndex({ entryNo: 1 }, { unique: true }),
+    db.collection("journalEntries").createIndex({ status: 1, date: 1 }),
     db.collection("invoices").createIndex({ invoiceNo: 1 }, { unique: true }),
     db.collection("invoices").createIndex({ dueDate: 1, status: 1 }),
     db.collection("invoiceTemplates").createIndex({ nameNormalized: 1 }, { unique: true }),

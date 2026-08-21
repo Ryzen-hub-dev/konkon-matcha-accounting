@@ -16,6 +16,7 @@ export type PaymentMethodRecord = {
   referenceRequired: boolean;
   verificationMode?: PaymentVerificationMode;
   providerCode?: PaymentProvider;
+  qrPayload?: string;
   supportedCurrencies?: string[];
   active: boolean;
   sortOrder: number;
@@ -34,6 +35,7 @@ const paymentMethodFields = z.object({
   referenceRequired: z.coerce.boolean().default(false),
   verificationMode: z.enum(PAYMENT_VERIFICATION_MODES).default("NONE"),
   providerCode: z.enum(PAYMENT_PROVIDERS).optional(),
+  qrPayload: z.string().trim().max(4096).refine((value) => !/[\u0000-\u001F\u007F]/.test(value), "The QR payload contains unsupported control characters.").default(""),
   supportedCurrencies: z.array(currencyCodeSchema).max(16).default([]),
   sortOrder: z.coerce.number().int().min(0).max(999).default(100),
 });
@@ -41,6 +43,9 @@ const paymentMethodFields = z.object({
 export const paymentMethodSchema = paymentMethodFields.superRefine((value, context) => {
   if (value.verificationMode === "PROVIDER" && !value.providerCode) {
     context.addIssue({ code: "custom", path: ["providerCode"], message: "Verified provider payments require a provider." });
+  }
+  if (value.verificationMode === "STATIC_QR" && value.qrPayload.length < 8) {
+    context.addIssue({ code: "custom", path: ["qrPayload"], message: "Import an official recipient QR payload before enabling static QR collection." });
   }
 });
 
@@ -53,7 +58,8 @@ export const DEFAULT_PAYMENT_METHODS = [
   { systemKey: "CASH", code: "CASH", name: "Cash", kind: "CASH", accountCode: "1000", accountName: "Cash on hand", referenceRequired: false, verificationMode: "NONE", supportedCurrencies: [], sortOrder: 10 },
   { systemKey: "CARD", code: "CARD", name: "Card", kind: "NON_CASH", accountCode: "1010", accountName: "Bank", referenceRequired: true, verificationMode: "REFERENCE", supportedCurrencies: [], sortOrder: 20 },
   { systemKey: "PAYNOW", code: "PAYNOW", name: "PayNow", kind: "NON_CASH", accountCode: "1010", accountName: "Bank", referenceRequired: true, verificationMode: "PROVIDER", providerCode: "PAYNOW", supportedCurrencies: ["SGD"], sortOrder: 30 },
-] satisfies Array<{ systemKey: string; code: string; name: string; kind: PaymentKind; accountCode: string; accountName: string; referenceRequired: boolean; verificationMode: PaymentVerificationMode; providerCode?: PaymentProvider; supportedCurrencies: string[]; sortOrder: number }>;
+  { systemKey: "TNG", code: "TNG", name: "Touch 'n Go eWallet", kind: "NON_CASH", accountCode: "1010", accountName: "Bank", referenceRequired: true, verificationMode: "STATIC_QR", providerCode: "TNG", qrPayload: "", supportedCurrencies: ["MYR"], sortOrder: 40, active: false },
+] satisfies Array<{ systemKey: string; code: string; name: string; kind: PaymentKind; accountCode: string; accountName: string; referenceRequired: boolean; verificationMode: PaymentVerificationMode; providerCode?: PaymentProvider; qrPayload?: string; supportedCurrencies: string[]; sortOrder: number; active?: boolean }>;
 
 export function effectiveVerificationMode(method: Record<string, unknown>): PaymentVerificationMode {
   if (PAYMENT_VERIFICATION_MODES.includes(method.verificationMode as PaymentVerificationMode)) return method.verificationMode as PaymentVerificationMode;
@@ -77,7 +83,7 @@ export async function ensureDefaultPaymentMethods(db: Db, ownerId?: unknown, ses
   await db.collection("paymentMethods").bulkWrite(DEFAULT_PAYMENT_METHODS.map((method) => ({
     updateOne: {
       filter: { systemKey: method.systemKey },
-      update: { $setOnInsert: { ...method, active: true, createdBy: ownerId || null, createdAt: now, updatedAt: now } },
+      update: { $setOnInsert: { ...method, active: method.active !== false, createdBy: ownerId || null, createdAt: now, updatedAt: now } },
       upsert: true,
     },
   })), session ? { session } : undefined);

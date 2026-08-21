@@ -37,13 +37,16 @@ export async function GET(request: Request) {
       db.collection("settings").findOne({ key: "business" }),
     ]);
     const business = normaliseBusinessSettings(settings);
-    const normalised = methods.map((method) => ({
-      ...method,
-      verificationMode: effectiveVerificationMode(method),
-      providerCode: effectiveProvider(method),
-      supportedCurrencies: paymentCurrencies(method, business.currency, business.acceptedCurrencies),
-      referenceRequired: effectiveVerificationMode(method) !== "NONE" || Boolean(method.referenceRequired),
-    }));
+    const normalised = methods.map((method) => {
+      const configuredCurrencies = Array.isArray(method.supportedCurrencies) ? method.supportedCurrencies.map(String) : [];
+      return {
+        ...method,
+        verificationMode: effectiveVerificationMode(method),
+        providerCode: effectiveProvider(method),
+        supportedCurrencies: includeArchived && configuredCurrencies.length ? configuredCurrencies : paymentCurrencies(method, business.currency, business.acceptedCurrencies),
+        referenceRequired: effectiveVerificationMode(method) !== "NONE" || Boolean(method.referenceRequired),
+      };
+    });
     const response = ok(serialise(normalised));
     response.headers.set("Cache-Control", "private, no-store, max-age=0");
     return response;
@@ -95,9 +98,13 @@ export async function PATCH(request: Request) {
     if (!current) return fail("This payment method could not be found.", 404);
     const nextMode = changes.verificationMode || effectiveVerificationMode(current);
     const nextProvider = changes.providerCode || current.providerCode;
+    const nextQrPayload = changes.qrPayload ?? String(current.qrPayload || "");
     if (nextMode === "PROVIDER" && !nextProvider) return fail("Verified provider payments require a provider.", 422, { providerCode: ["Choose the provider that confirms settlement."] });
+    if (nextMode === "STATIC_QR" && nextQrPayload.length < 8) return fail("Import an official recipient QR before enabling static QR collection.", 422, { qrPayload: ["The recipient QR payload is missing."] });
     const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
     if (changes.supportedCurrencies?.some((currency) => !business.acceptedCurrencies.includes(currency))) return fail("A payment currency is not enabled in Workspace settings.", 422);
+    const nextCurrencies = paymentCurrencies({ ...current, ...changes }, business.currency, business.acceptedCurrencies);
+    if (changes.active === true && !nextCurrencies.length) return fail("Enable at least one of this payment method's currencies in Workspace settings before restoring it.", 422);
     if (changes.active === false && current.active !== false) {
       const activeCount = await db.collection("paymentMethods").countDocuments({ active: { $ne: false } });
       if (activeCount <= 1) return fail("Keep at least one payment method active.", 409);

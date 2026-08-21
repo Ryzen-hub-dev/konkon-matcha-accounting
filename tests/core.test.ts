@@ -32,7 +32,7 @@ import {
 import { clearPosDraft, posDraftStorageKey, readPosDraft, savePosDraft, type PosDraft } from "../lib/pos-draft";
 import {
   normaliseVerificationCode, paymentAmountsMatch, signPaymentWebhook,
-  verificationCodeHash, verifyPaymentWebhook,
+  staticQrPaymentIsConfirmed, verificationCodeHash, verifyPaymentWebhook,
 } from "../lib/payment-verification";
 import { locationParentChainIsValid } from "../lib/locations";
 import {
@@ -41,6 +41,7 @@ import {
   supplierPulse, weightedAverageInventoryCost,
 } from "../lib/procurement";
 import { dateKeyInTimeZone } from "../lib/dates";
+import { assembleFinancialStatements, buildAgingReport } from "../lib/financial-reports";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -79,7 +80,8 @@ test("cashier permissions stop at the counter", () => {
 });
 
 test("custom payment methods preserve trusted tender and ledger rules", () => {
-  assert.equal(DEFAULT_PAYMENT_METHODS.length, 3);
+  assert.equal(DEFAULT_PAYMENT_METHODS.length, 4);
+  assert.equal(DEFAULT_PAYMENT_METHODS.find((method) => method.systemKey === "TNG")?.active, false);
   const wallet = paymentMethodSchema.safeParse({ code: " grab-pay ", name: "GrabPay", kind: "NON_CASH", accountCode: "1010", referenceRequired: true, sortOrder: "40" });
   assert.equal(wallet.success, true);
   if (wallet.success) {
@@ -90,6 +92,54 @@ test("custom payment methods preserve trusted tender and ledger rules", () => {
   assert.equal(paymentMethodSchema.safeParse({ code: "!", name: "X", kind: "CRYPTO", accountCode: "9999" }).success, false);
   const archiveOnly = paymentMethodUpdateSchema.safeParse({ id: "a".repeat(24), active: false });
   assert.equal(archiveOnly.success, true);
+  assert.equal(paymentMethodSchema.safeParse({ code: "DUITNOW", name: "DuitNow QR", kind: "NON_CASH", accountCode: "1010", verificationMode: "STATIC_QR", providerCode: "DUITNOW", qrPayload: "" }).success, false);
+  assert.equal(paymentMethodSchema.safeParse({ code: "DUITNOW", name: "DuitNow QR", kind: "NON_CASH", accountCode: "1010", verificationMode: "STATIC_QR", providerCode: "DUITNOW", qrPayload: "00020101021126580010MY.DUITNOW" }).success, true);
+});
+
+test("financial statements reconcile posted movements across all core reports", () => {
+  const report = assembleFinancialStatements({
+    currency: "SGD",
+    accounts: [
+      { code: "1000", name: "Cash", type: "ASSET", cashEquivalent: true },
+      { code: "1200", name: "Inventory", type: "ASSET" },
+      { code: "2100", name: "GST payable", type: "LIABILITY" },
+      { code: "3000", name: "Equity", type: "EQUITY" },
+      { code: "4000", name: "Sales", type: "REVENUE" },
+      { code: "5000", name: "Cost of goods sold", type: "EXPENSE" },
+    ],
+    movements: [
+      { code: "1000", periodDebit: 109 },
+      { code: "1200", periodCredit: 40 },
+      { code: "2100", periodCredit: 9 },
+      { code: "4000", periodCredit: 100 },
+      { code: "5000", periodDebit: 40 },
+    ],
+    cashMovements: [{ source: "POS", periodAmount: 109 }],
+  });
+  assert.equal(report.profitAndLoss.grossProfit, 60);
+  assert.equal(report.profitAndLoss.netProfit, 60);
+  assert.equal(report.balanceSheet.totalAssets, 69);
+  assert.equal(report.balanceSheet.totalLiabilities, 9);
+  assert.equal(report.balanceSheet.totalEquity, 60);
+  assert.equal(report.cashFlow.closingCash, 109);
+  assert.equal(report.tax.netMovement, 9);
+  assert.equal(report.trialBalance.periodDifference, 0);
+  assert.equal(report.integrity.balanced, true);
+});
+
+test("AR and AP aging place balances in mutually exclusive due-date buckets", () => {
+  const aging = buildAgingReport([
+    { id: "1", documentNo: "INV-1", party: "Current", dueDate: "2026-09-05", balance: 10 },
+    { id: "2", documentNo: "INV-2", party: "Recent", dueDate: "2026-08-16", balance: 20 },
+    { id: "3", documentNo: "INV-3", party: "Older", dueDate: "2026-07-16", balance: 30 },
+    { id: "4", documentNo: "INV-4", party: "Oldest", dueDate: "2026-05-31", balance: 40 },
+  ], "2026-08-31", "SGD");
+  assert.equal(aging.total, 100);
+  assert.equal(aging.buckets.find((bucket) => bucket.key === "CURRENT")?.amount, 10);
+  assert.equal(aging.buckets.find((bucket) => bucket.key === "1_30")?.amount, 20);
+  assert.equal(aging.buckets.find((bucket) => bucket.key === "31_60")?.amount, 30);
+  assert.equal(aging.buckets.find((bucket) => bucket.key === "OVER_90")?.amount, 40);
+  assert.equal(aging.rows.length, 4);
 });
 
 test("country profiles use valid ISO currencies and IANA time zones", () => {
@@ -179,6 +229,13 @@ test("provider verification codes are hashed and exact amounts must match", () =
   assert.equal(verificationCodeHash("pay-123"), verificationCodeHash(" PAY-123 "));
   assert.equal(paymentAmountsMatch(42.5, 42.50, "MYR"), true);
   assert.equal(paymentAmountsMatch(42.5, 42.49, "MYR"), false);
+});
+
+test("static recipient QR never counts as paid without a receiving-side check and reference", () => {
+  assert.equal(staticQrPaymentIsConfirmed("TNG-48291", true), true);
+  assert.equal(staticQrPaymentIsConfirmed("TNG-48291", false), false);
+  assert.equal(staticQrPaymentIsConfirmed("123", true), false);
+  assert.equal(staticQrPaymentIsConfirmed("", true), false);
 });
 
 test("POS drafts survive refresh, keep bounded history and clear only the active order", () => {

@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { currencyMinorUnits } from "@/lib/international";
 
-export const PAYMENT_VERIFICATION_MODES = ["NONE", "REFERENCE", "PROVIDER"] as const;
+export const PAYMENT_VERIFICATION_MODES = ["NONE", "REFERENCE", "STATIC_QR", "PROVIDER"] as const;
 export const PAYMENT_PROVIDERS = ["GENERIC", "PAYNOW", "DUITNOW", "TNG", "GRABPAY", "ALIPAY", "WECHATPAY", "UNIONPAY"] as const;
 export type PaymentVerificationMode = (typeof PAYMENT_VERIFICATION_MODES)[number];
 export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
@@ -29,4 +29,8 @@ export function verifyPaymentWebhook(rawBody: string, timestamp: string, signatu
 
 export function paymentAmountsMatch(expected: number, actual: number, currency: string) {
   return currencyMinorUnits(expected, currency) === currencyMinorUnits(actual, currency);
+}
+
+export function staticQrPaymentIsConfirmed(reference: string, receivingSideConfirmed: boolean) {
+  return receivingSideConfirmed && reference.trim().length >= 4 && reference.trim().length <= 80;
 }

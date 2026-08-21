@@ -11,7 +11,7 @@ import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { quoteAmount, readExchangeRate } from "@/lib/exchange-rates";
 import { currencyCodeSchema } from "@/lib/international";
 import { effectiveProvider, effectiveVerificationMode, ensureDefaultPaymentMethods, paymentCurrencies } from "@/lib/payment-methods";
-import { paymentAmountsMatch } from "@/lib/payment-verification";
+import { paymentAmountsMatch, staticQrPaymentIsConfirmed } from "@/lib/payment-verification";
 
 export const runtime = "nodejs";
 
@@ -20,6 +20,7 @@ const saleSchema = z.object({
   memberId: z.union([z.string().length(24), z.literal(""), z.null()]).optional(),
   paymentMethod: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{2,24}$/),
   paymentReference: z.string().trim().max(80).default(""),
+  manualPaymentConfirmed: z.boolean().default(false),
   tenderedAmount: z.coerce.number().min(0).max(100_000_000).optional(),
   tenderCurrency: currencyCodeSchema.optional(),
   paymentIntentId: z.union([z.string().length(24), z.literal("")]).default(""),
@@ -100,6 +101,8 @@ export async function POST(request: Request) {
     const verificationMode = effectiveVerificationMode(selectedPayment);
     const provider = effectiveProvider(selectedPayment);
     if (verificationMode === "REFERENCE" && !input.data.paymentReference) return fail(`${selectedPayment.name} requires a transaction reference.`, 422, { paymentReference: ["Enter the transaction or approval reference."] });
+    if (verificationMode === "STATIC_QR" && String(selectedPayment.qrPayload || "").length < 8) return fail(`${selectedPayment.name} does not have a valid recipient QR configured.`, 409);
+    if (verificationMode === "STATIC_QR" && !staticQrPaymentIsConfirmed(input.data.paymentReference, input.data.manualPaymentConfirmed)) return fail("Static QR payments require a receiving-side credit check and transaction reference. Do not release the order.", 422, { paymentReference: ["Confirm the real credit and enter its reference."] });
     if (verificationMode === "PROVIDER" && !ObjectId.isValid(input.data.paymentIntentId)) return fail(`${selectedPayment.name} requires a verified provider confirmation.`, 422, { paymentIntentId: ["Verify the exact payment before checkout."] });
     const ids = [...quantities.keys()].map((id) => new ObjectId(id));
     const products = await db.collection("products").find({ _id: { $in: ids }, active: { $ne: false } }).toArray();
@@ -212,6 +215,9 @@ export async function POST(request: Request) {
       paymentProvider: provider,
       paymentIntentId: paymentIntent?._id || null,
       paymentReference: paymentIntent?.externalReference || input.data.paymentReference,
+      paymentReferenceNormalized: verificationMode === "STATIC_QR" ? input.data.paymentReference.normalize("NFKC").trim().toUpperCase() : null,
+      manualPaymentConfirmed: verificationMode === "STATIC_QR" ? true : null,
+      manualPaymentConfirmedAt: verificationMode === "STATIC_QR" ? now : null,
       tenderCurrency,
       tenderTotal,
       exchangeRate: exchange.rate,
@@ -249,7 +255,7 @@ export async function POST(request: Request) {
     const mongoSession = client.startSession();
     try {
       await mongoSession.withTransaction(async () => {
-        const paymentStillActive = await db.collection("paymentMethods").findOne({ _id: selectedPayment._id, active: { $ne: false } }, { session: mongoSession });
+        const paymentStillActive = await db.collection("paymentMethods").findOne({ _id: selectedPayment._id, active: { $ne: false }, updatedAt: selectedPayment.updatedAt }, { session: mongoSession });
         if (!paymentStillActive) throw new PaymentError("The payment method became unavailable before checkout. Choose another method.");
         if (verificationMode === "PROVIDER") {
           const consumed = await db.collection("paymentIntents").updateOne(
@@ -346,7 +352,7 @@ export async function POST(request: Request) {
           createdBy: new ObjectId(auth.session.id),
           createdAt: now,
         }, { session: mongoSession });
-        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, total, currency: business.currency, tenderCurrency, tenderTotal, exchangeRate: exchange.rate, verificationMode, itemCount: items.length, couponCode: couponResult?.coupon.code || "", manualDiscount }, mongoSession);
+        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, total, currency: business.currency, tenderCurrency, tenderTotal, exchangeRate: exchange.rate, verificationMode, manualPaymentConfirmed: verificationMode === "STATIC_QR", itemCount: items.length, couponCode: couponResult?.coupon.code || "", manualDiscount }, mongoSession);
       });
     } finally {
       await mongoSession.endSession();
@@ -354,6 +360,7 @@ export async function POST(request: Request) {
     return created(serialise(sale));
   } catch (error) {
     if (error instanceof StockError || error instanceof CouponError || error instanceof PaymentError) return fail(error.message, 409);
+    if ((error as { code?: number; keyPattern?: Record<string, number> }).code === 11000 && (error as { keyPattern?: Record<string, number> }).keyPattern?.paymentReferenceNormalized) return fail("This static QR transaction reference was already used. Verify the receiving account and enter the reference for this payment.", 409);
     if ((error as { code?: number }).code === 11000 && clientRequestId) {
       const db = await getDb();
       const existing = await db.collection("sales").findOne({ clientRequestId, createdBy: new ObjectId(auth.session.id) });

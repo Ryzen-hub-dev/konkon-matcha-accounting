@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import QRCode from "qrcode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Banknote, CheckCircle2, ChevronRight, Cloud, CreditCard, ExternalLink, History,
-  Minus, Palette, Plus, ReceiptText, Search, ShieldCheck, ShoppingBasket,
+  AlertTriangle, Banknote, CheckCircle2, ChevronRight, Cloud, CreditCard, ExternalLink, History,
+  Minus, Palette, Plus, QrCode, ReceiptText, Search, ShieldCheck, ShoppingBasket,
   Smartphone, TicketPercent, Trash2, UserRound,
 } from "lucide-react";
 import { useBusiness } from "@/components/business-context";
@@ -16,6 +17,7 @@ import { quoteAmount } from "@/lib/exchange-rates";
 import { roundCurrency } from "@/lib/international";
 import type { PaymentMethodRecord } from "@/lib/payment-methods";
 import { clearPosDraft, posDraftStorageKey, readPosDraft, savePosDraft, type PosDraft } from "@/lib/pos-draft";
+import { playProductAddedTone } from "@/lib/pos-sound";
 import type { ReceiptTemplateRecord } from "@/lib/receipt-templates";
 import { calculateTaxTotals } from "@/lib/tax";
 import type { MemberRecord, ProductRecord } from "@/lib/types";
@@ -77,6 +79,8 @@ export function PosView({
   const [couponName, setCouponName] = useState("");
   const [tenderedAmount, setTenderedAmount] = useState(0);
   const [paymentReference, setPaymentReference] = useState("");
+  const [manualPaymentConfirmed, setManualPaymentConfirmed] = useState(false);
+  const [staticQrDataUrl, setStaticQrDataUrl] = useState("");
   const [paymentIntent, setPaymentIntent] = useState<PaymentIntent | null>(null);
   const [saleNote, setSaleNote] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
@@ -94,6 +98,7 @@ export function PosView({
   const suppressDraftRef = useRef(false);
   const restoredCouponRef = useRef("");
   const memberRevisionRef = useRef("");
+  const cartRef = useRef<CartLine[]>([]);
 
   function restoreDraft(
     draft: PosDraft,
@@ -110,6 +115,7 @@ export function PosView({
     const method = currentPayments.find((item) => item.code === draft.paymentMethod && item.active !== false);
     const currencies = method?.supportedCurrencies?.length ? method.supportedCurrencies : [currentExchange.baseCurrency];
     const currency = currencies.includes(draft.tenderCurrency) ? draft.tenderCurrency : currencies[0] || currentExchange.baseCurrency;
+    cartRef.current = restoredLines;
     setCart(restoredLines);
     setMemberId(currentMembers.some((member) => member._id === draft.memberId && member.active !== false) ? draft.memberId : "");
     setPayment(method?.code || currentPayments[0]?.code || "");
@@ -120,6 +126,7 @@ export function PosView({
     setSaleNote(draft.saleNote);
     setSelectedTemplateId(currentTemplates.some((template) => template._id === draft.templateId) ? draft.templateId : currentTemplates[0]?._id || "");
     setPaymentReference("");
+    setManualPaymentConfirmed(false);
     setPaymentIntent(null);
     draftIdRef.current = draft.draftId;
     if (restoredLines.length) show(`Restored ${restoredLines.length} saved product line${restoredLines.length === 1 ? "" : "s"} from this browser.`);
@@ -213,23 +220,47 @@ export function PosView({
     }
   }, [payment, paymentIntent, register.currency, tenderCurrency, tenderTotal, total]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setStaticQrDataUrl("");
+    if (verificationMode !== "STATIC_QR" || !selectedPayment?.qrPayload) return;
+    void QRCode.toDataURL(selectedPayment.qrPayload, { width: 360, margin: 1, errorCorrectionLevel: "M", color: { dark: "#173f2a", light: "#ffffff" } })
+      .then((url) => { if (!cancelled) setStaticQrDataUrl(url); })
+      .catch(() => { if (!cancelled) setStaticQrDataUrl(""); });
+    return () => { cancelled = true; };
+  }, [selectedPayment?.qrPayload, verificationMode]);
+
+  useEffect(() => {
+    setManualPaymentConfirmed(false);
+    if (verificationMode === "STATIC_QR") setPaymentReference("");
+  }, [payment, tenderCurrency, tenderTotal, verificationMode]);
+
   const add = useCallback((product: ProductRecord) => {
-    if (product.stock <= 0) return;
-    setCart((current) => {
-      const existing = current.find((line) => line._id === product._id);
-      return existing
-        ? current.map((line) => line._id === product._id ? { ...line, quantity: Math.min(product.stock, line.quantity + 1) } : line)
-        : [...current, { ...product, quantity: 1 }];
-    });
+    if (product.stock <= 0) return false;
+    const current = cartRef.current;
+    const existing = current.find((line) => line._id === product._id);
+    if (existing && existing.quantity >= product.stock) return false;
+    const next = existing
+      ? current.map((line) => line._id === product._id ? { ...line, quantity: line.quantity + 1 } : line)
+      : [...current, { ...product, quantity: 1 }];
+    cartRef.current = next;
+    setCart(next);
+    playProductAddedTone();
+    return true;
   }, []);
 
   function quantity(id: string, delta: number) {
-    setCart((current) => current.map((line) => line._id === id ? { ...line, quantity: Math.min(line.stock, Math.max(0, line.quantity + delta)) } : line).filter((line) => line.quantity > 0));
+    setCart((current) => {
+      const next = current.map((line) => line._id === id ? { ...line, quantity: Math.min(line.stock, Math.max(0, line.quantity + delta)) } : line).filter((line) => line.quantity > 0);
+      cartRef.current = next;
+      return next;
+    });
   }
 
   function selectPayment(method: PaymentMethodRecord) {
     setPayment(method.code);
     setPaymentReference("");
+    setManualPaymentConfirmed(false);
     setPaymentIntent(null);
     const currency = method.supportedCurrencies?.[0] || register.currency;
     setTenderCurrency(currency);
@@ -315,7 +346,7 @@ export function PosView({
     if (!code) return;
     if (paymentIntent?.status === "PENDING") { await verifyScannedPayment(code); return; }
     const product = products.find((item) => item.barcode?.toUpperCase() === code || item.sku.toUpperCase() === code);
-    if (product) { add(product); show(`${product.name} added from scan.`); return; }
+    if (product) { if (add(product)) show(`${product.name} added from scan.`); else show(`${product.name} is already at the available stock limit.`, "error"); return; }
     const member = members.find((item) => item.memberCardCode?.toUpperCase() === code || item.memberNo.toUpperCase() === code);
     if (member) { setMemberId(member._id); show(`${member.name} selected from member card.`); return; }
     if (await applyCoupon(code)) return;
@@ -336,6 +367,7 @@ export function PosView({
     if (!exchangeRate || !tenderTotal) return show("Configure an active exchange rate before checkout.", "error");
     if (isCashPayment && tenderedAmount < tenderTotal) return show("Enter enough cash to cover the amount due.", "error");
     if (verificationMode === "REFERENCE" && !paymentReference.trim()) return show(`Enter the ${selectedPayment.name} reference before checkout.`, "error");
+    if (verificationMode === "STATIC_QR" && (!manualPaymentConfirmed || paymentReference.trim().length < 4)) return show("See the successful credit in the receiving app, tick the confirmation and enter its transaction reference before checkout.", "error");
     if (verificationMode === "PROVIDER" && paymentIntent?.status !== "VERIFIED") return show("Provider confirmation is still missing. Do not release the order.", "error");
     setBusy(true);
     try {
@@ -346,6 +378,7 @@ export function PosView({
           memberId: memberId || null,
           paymentMethod: payment,
           paymentReference,
+          manualPaymentConfirmed,
           paymentIntentId: paymentIntent?._id || "",
           tenderCurrency,
           tenderedAmount: isCashPayment ? tenderedAmount : tenderTotal,
@@ -360,6 +393,7 @@ export function PosView({
       clearPosDraft(window.localStorage, draftKey);
       draftIdRef.current = crypto.randomUUID();
       setReceipt(result);
+      cartRef.current = [];
       setCart([]);
       setManualDiscount(0);
       setCouponCode("");
@@ -368,6 +402,7 @@ export function PosView({
       setCouponName("");
       setTenderedAmount(0);
       setPaymentReference("");
+      setManualPaymentConfirmed(false);
       setPaymentIntent(null);
       setSaleNote("");
       setMemberId("");
@@ -380,6 +415,7 @@ export function PosView({
   const checkoutLocked = !cart.length || !selectedTemplateId || !selectedPayment || busy || !exchangeRate
     || (isCashPayment && tenderedAmount < tenderTotal)
     || (verificationMode === "REFERENCE" && !paymentReference.trim())
+    || (verificationMode === "STATIC_QR" && (!manualPaymentConfirmed || paymentReference.trim().length < 4 || !staticQrDataUrl))
     || (verificationMode === "PROVIDER" && paymentIntent?.status !== "VERIFIED");
 
   return <div className="page page-enter pos-page">
@@ -396,9 +432,9 @@ export function PosView({
         <div className="cart-totals">{canManualDiscount ? <label><span>Manager discount · {register.currency}</span><div><span>{register.currency}</span><input type="number" min="0" max={Math.max(0, subtotal - couponDiscount)} step="0.01" value={manualDiscount || ""} onChange={(event) => setManualDiscount(Math.min(Math.max(0, subtotal - couponDiscount), Math.max(0, Number(event.target.value))))} placeholder="0.00" /></div></label> : null}<p><span>Subtotal</span><b>{money.format(subtotal)}</b></p>{discount > 0 ? <p><span>Discount</span><b>−{money.format(discount)}</b></p> : null}<p><span>{register.taxName} · {register.taxRate}%{register.taxMode === "INCLUSIVE" ? " included" : ""}</span><b>{money.format(tax)}</b></p><p className="grand-total"><span>Amount due</span><strong>{money.format(total)}</strong></p>{tenderCurrency !== register.currency ? <p className="foreign-total"><span>Settlement · 1 {register.currency} = {exchangeRate} {tenderCurrency}</span><strong>{exchangeRate ? tenderMoney.format(tenderTotal) : "Rate missing"}</strong></p> : null}</div>
         <div className="payment-methods"><span>PAYMENT</span><div>{paymentMethods.map((method) => { const Icon = method.kind === "CASH" ? Banknote : method.code.includes("CARD") ? CreditCard : Smartphone; return <button type="button" key={method._id} className={payment === method.code ? "active" : ""} onClick={() => selectPayment(method)} title={`Posts to ${method.accountCode} · ${method.accountName}`}><Icon size={17} />{method.name}</button>; })}</div></div>
         <label className="register-reference"><span>Settlement currency</span><select value={tenderCurrency} onChange={(event) => { setTenderCurrency(event.target.value); setPaymentIntent(null); }}>{availableCurrencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label>
-        {isCashPayment ? <div className="cash-tender"><label><span>Cash received · {tenderCurrency}</span><input type="number" min={tenderTotal} step="0.01" value={tenderedAmount || ""} onChange={(event) => setTenderedAmount(Math.max(0, Number(event.target.value)))} placeholder={tenderTotal.toFixed(2)} /></label><div>{cashOptions.map((value) => <button type="button" key={value} onClick={() => setTenderedAmount(value)}>{tenderMoney.format(value)}</button>)}</div><p><span>Change due</span><strong>{tenderMoney.format(Math.max(0, roundCurrency(tenderedAmount - tenderTotal, tenderCurrency)))}</strong></p></div> : verificationMode === "PROVIDER" ? <div className={`verified-payment ${paymentIntent?.status.toLowerCase() || "idle"}`}><div><ShieldCheck /><span><strong>{paymentIntent?.status === "VERIFIED" ? "Provider payment verified" : paymentIntent?.status === "PENDING" ? "Waiting for confirmed-payment code" : "Strict verification required"}</strong><small>{paymentIntent ? `${paymentIntent.intentNo} · ${paymentIntent.provider} · ${tenderMoney.format(paymentIntent.tenderAmount)}` : "A scanned image or static QR alone never unlocks checkout."}</small></span></div>{paymentIntent?.status === "VERIFIED" ? <CheckCircle2 /> : <button type="button" className="button button-primary" onClick={() => void beginProviderVerification()} disabled={!cart.length || !exchangeRate}>{paymentIntent ? "Restart verification" : "Start secure verification"}</button>}</div> : <label className="register-reference"><span>{selectedPayment?.name || "Payment"} reference · required</span><input value={paymentReference} maxLength={80} required onChange={(event) => setPaymentReference(event.target.value)} placeholder="Transaction or approval number" /></label>}
+        {isCashPayment ? <div className="cash-tender"><label><span>Cash received · {tenderCurrency}</span><input type="number" min={tenderTotal} step="0.01" value={tenderedAmount || ""} onChange={(event) => setTenderedAmount(Math.max(0, Number(event.target.value)))} placeholder={tenderTotal.toFixed(2)} /></label><div>{cashOptions.map((value) => <button type="button" key={value} onClick={() => setTenderedAmount(value)}>{tenderMoney.format(value)}</button>)}</div><p><span>Change due</span><strong>{tenderMoney.format(Math.max(0, roundCurrency(tenderedAmount - tenderTotal, tenderCurrency)))}</strong></p></div> : verificationMode === "PROVIDER" ? <div className={`verified-payment ${paymentIntent?.status.toLowerCase() || "idle"}`}><div><ShieldCheck /><span><strong>{paymentIntent?.status === "VERIFIED" ? "Provider payment verified" : paymentIntent?.status === "PENDING" ? "Waiting for confirmed-payment code" : "Strict verification required"}</strong><small>{paymentIntent ? `${paymentIntent.intentNo} · ${paymentIntent.provider} · ${tenderMoney.format(paymentIntent.tenderAmount)}` : "A scanned image or static QR alone never unlocks checkout."}</small></span></div>{paymentIntent?.status === "VERIFIED" ? <CheckCircle2 /> : <button type="button" className="button button-primary" onClick={() => void beginProviderVerification()} disabled={!cart.length || !exchangeRate}>{paymentIntent ? "Restart verification" : "Start secure verification"}</button>}</div> : verificationMode === "STATIC_QR" ? <div className="static-qr-payment"><div className="static-qr-code">{staticQrDataUrl ? <img src={staticQrDataUrl} alt={`${selectedPayment?.name || "Payment"} recipient QR`} /> : <QrCode />}</div><div className="static-qr-instructions"><span>SCAN TO PAY · STATIC RECIPIENT QR</span><strong>{tenderMoney.format(tenderTotal)}</strong><small>Customer scans this recipient QR and enters the exact amount shown. This screen alone is not proof of payment.</small><label><span>Transaction reference</span><input value={paymentReference} maxLength={80} required onChange={(event) => setPaymentReference(event.target.value)} placeholder="Reference shown in receiver app" /></label><label className="static-payment-confirm"><input type="checkbox" checked={manualPaymentConfirmed} onChange={(event) => setManualPaymentConfirmed(event.target.checked)} /><span><b>I saw the successful credit in the receiving bank or wallet app.</b><small>Do not tick from a customer screenshot, pending page or payment animation.</small></span></label><p><AlertTriangle />Without a bank or wallet API, only this manual receiving-side check can unlock checkout.</p></div></div> : <label className="register-reference"><span>{selectedPayment?.name || "Payment"} reference · required</span><input value={paymentReference} maxLength={80} required onChange={(event) => setPaymentReference(event.target.value)} placeholder="Transaction or approval number" /></label>}
         <div className="register-paper"><label><span>Receipt template</span><select value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}>{templates.map((template) => <option key={template._id} value={template._id}>{template.name}{template.isDefault ? " · default" : ""}</option>)}</select></label><label><span>Order note · optional</span><input value={saleNote} maxLength={300} onChange={(event) => setSaleNote(event.target.value)} placeholder="Collection or customer note" /></label></div>
-        <button className="checkout-button" disabled={checkoutLocked} onClick={checkout}><span>{busy ? "Posting sale…" : verificationMode === "PROVIDER" && paymentIntent?.status !== "VERIFIED" ? "Awaiting verified payment" : "Complete sale"}</span><strong>{tenderCurrency === register.currency ? money.format(total) : tenderMoney.format(tenderTotal)}</strong><ChevronRight size={20} /></button>
+        <button className="checkout-button" disabled={checkoutLocked} onClick={checkout}><span>{busy ? "Posting sale…" : verificationMode === "PROVIDER" && paymentIntent?.status !== "VERIFIED" ? "Awaiting verified payment" : verificationMode === "STATIC_QR" && !manualPaymentConfirmed ? "Confirm receiving-side credit" : "Complete sale"}</span><strong>{tenderCurrency === register.currency ? money.format(total) : tenderMoney.format(tenderTotal)}</strong><ChevronRight size={20} /></button>
       </aside>
     </div>}
     <Modal open={historyOpen} onClose={() => setHistoryOpen(false)} title="Browser draft history" kicker="THIS REGISTER ONLY"><div className="draft-history-list">{draftHistory.length ? draftHistory.map((draft) => <article key={`${draft.draftId}-${draft.updatedAt}`}><div><strong>{draft.lines.reduce((sum, line) => sum + line.quantity, 0)} items · {draft.paymentMethod || "No payment"}</strong><span>{new Intl.DateTimeFormat(register.locale, { dateStyle: "medium", timeStyle: "short", timeZone: register.timeZone }).format(new Date(draft.updatedAt))}</span></div><button className="button button-secondary" onClick={() => { restoreDraft(draft); setHistoryOpen(false); }}>Restore</button></article>) : <EmptyState title="No earlier drafts" detail="Periodic browser snapshots will appear here while an order changes." />}</div></Modal>
