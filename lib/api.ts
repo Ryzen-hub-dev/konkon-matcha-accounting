@@ -64,6 +64,8 @@ export function publicError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   const name = error instanceof Error ? error.name : "";
   const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+  const safeMessage = message.replace(/mongodb(?:\+srv)?:\/\/[^@\s]+@/gi, "mongodb://***@").slice(0, 500);
+  console.error("[request-error]", { name, code, message: safeMessage });
   if (message === "MONGODB_URI is not configured.") {
     return fail("The database is not configured on this deployment.", 503);
   }

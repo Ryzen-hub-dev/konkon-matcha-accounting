@@ -82,7 +82,7 @@ export async function ensureDefaultPaymentMethods(db: Db, ownerId?: unknown, ses
   const now = new Date();
   await db.collection("paymentMethods").bulkWrite(DEFAULT_PAYMENT_METHODS.map((method) => ({
     updateOne: {
-      filter: { systemKey: method.systemKey },
+      filter: { $or: [{ systemKey: method.systemKey }, { code: method.code }] },
       update: { $setOnInsert: { ...method, active: method.active !== false, createdBy: ownerId || null, createdAt: now, updatedAt: now } },
       upsert: true,
     },

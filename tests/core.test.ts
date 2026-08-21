@@ -21,7 +21,7 @@ import { computeCouponDiscount } from "../lib/coupons";
 import { createScannerToken, normaliseScanCode, scannerTokenHash } from "../lib/scanner";
 import { normalisePrivateIdentifier, privateIdentifierHash } from "../lib/sensitive";
 import { isWritePermission } from "../lib/system-control";
-import { DEFAULT_PAYMENT_METHODS, paymentMethodSchema, paymentMethodUpdateSchema } from "../lib/payment-methods";
+import { DEFAULT_PAYMENT_METHODS, ensureDefaultPaymentMethods, paymentMethodSchema, paymentMethodUpdateSchema } from "../lib/payment-methods";
 import { localDateTimeToUtcIso } from "../lib/dates";
 import { stocktakeDifference, stocktakeInputSchema } from "../lib/stocktake";
 import { scannerActivityAt, scannerPurposeFilter, selectScannerSession } from "../lib/scanner-routing";
@@ -94,6 +94,15 @@ test("custom payment methods preserve trusted tender and ledger rules", () => {
   assert.equal(archiveOnly.success, true);
   assert.equal(paymentMethodSchema.safeParse({ code: "DUITNOW", name: "DuitNow QR", kind: "NON_CASH", accountCode: "1010", verificationMode: "STATIC_QR", providerCode: "DUITNOW", qrPayload: "" }).success, false);
   assert.equal(paymentMethodSchema.safeParse({ code: "DUITNOW", name: "DuitNow QR", kind: "NON_CASH", accountCode: "1010", verificationMode: "STATIC_QR", providerCode: "DUITNOW", qrPayload: "00020101021126580010MY.DUITNOW" }).success, true);
+});
+
+test("default payment seeding adopts an existing code instead of creating a duplicate", async () => {
+  let operations: Array<{ updateOne: { filter: unknown; upsert?: boolean } }> = [];
+  const db = { collection: () => ({ bulkWrite: async (value: typeof operations) => { operations = value; } }) };
+  await ensureDefaultPaymentMethods(db as never);
+  assert.equal(operations.length, DEFAULT_PAYMENT_METHODS.length);
+  assert.deepEqual(operations.find((operation) => JSON.stringify(operation.updateOne.filter).includes('"TNG"'))?.updateOne.filter, { $or: [{ systemKey: "TNG" }, { code: "TNG" }] });
+  assert.equal(operations.every((operation) => operation.updateOne.upsert === true), true);
 });
 
 test("financial statements reconcile posted movements across all core reports", () => {
