@@ -7,15 +7,17 @@ import type { UserRole } from "@/lib/types";
 import { getSystemControl, isWritePermission } from "@/lib/system-control";
 
 export function ok<T>(data: T, init?: ResponseInit) {
-  return NextResponse.json({ ok: true, data }, { status: 200, ...init });
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Cache-Control")) headers.set("Cache-Control", "private, no-store, max-age=0");
+  return NextResponse.json({ ok: true, data }, { status: 200, ...init, headers });
 }
 
 export function created<T>(data: T) {
-  return NextResponse.json({ ok: true, data }, { status: 201 });
+  return NextResponse.json({ ok: true, data }, { status: 201, headers: { "Cache-Control": "private, no-store, max-age=0" } });
 }
 
 export function fail(error: string, status = 400, issues?: Record<string, string[]>) {
-  return NextResponse.json({ ok: false, error, ...(issues ? { issues } : {}) }, { status });
+  return NextResponse.json({ ok: false, error, ...(issues ? { issues } : {}) }, { status, headers: { "Cache-Control": "private, no-store, max-age=0" } });
 }
 
 export async function authorize(permission: Permission, options: { allowReadOnlyWrite?: boolean } = {}) {
