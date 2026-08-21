@@ -4,7 +4,8 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { CircleDollarSign, Clock3, Eye, FilePlus2, FileText, Palette, Plus, Trash2 } from "lucide-react";
 import { InvoiceTemplateStudio } from "@/components/invoice-template-studio";
-import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, money, Notice, PageHeader, shortDate, StatusPill, useNotice } from "@/components/ui";
+import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
+import { useBusiness } from "@/components/business-context";
 import type { InvoiceTemplateRecord } from "@/lib/invoice-templates";
 
 type InvoiceItem = { description: string; quantity: number; unitPrice: number };
@@ -26,6 +27,7 @@ function dueDateFrom(days: number) {
 }
 
 export function InvoicesView() {
+  const { money, shortDate } = useBusiness();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [templates, setTemplates] = useState<InvoiceTemplateRecord[]>([]);
   const [loading, setLoading] = useState(true);

@@ -7,15 +7,22 @@ import { asMoney, makeDocumentNo, serialise } from "@/lib/format";
 import { DEFAULT_RECEIPT_TEMPLATE, ensureDefaultReceiptTemplate, normaliseReceiptTemplate } from "@/lib/receipt-templates";
 import { calculateTaxTotals } from "@/lib/tax";
 import { CouponError, validateCoupon } from "@/lib/coupons";
-import { ensureDefaultPaymentMethods } from "@/lib/payment-methods";
+import { normaliseBusinessSettings } from "@/lib/business-settings";
+import { quoteAmount, readExchangeRate } from "@/lib/exchange-rates";
+import { currencyCodeSchema } from "@/lib/international";
+import { effectiveProvider, effectiveVerificationMode, ensureDefaultPaymentMethods, paymentCurrencies } from "@/lib/payment-methods";
+import { paymentAmountsMatch } from "@/lib/payment-verification";
 
 export const runtime = "nodejs";
 
 const saleSchema = z.object({
+  clientRequestId: z.string().uuid(),
   memberId: z.union([z.string().length(24), z.literal(""), z.null()]).optional(),
   paymentMethod: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{2,24}$/),
   paymentReference: z.string().trim().max(80).default(""),
   tenderedAmount: z.coerce.number().min(0).max(100_000_000).optional(),
+  tenderCurrency: currencyCodeSchema.optional(),
+  paymentIntentId: z.union([z.string().length(24), z.literal("")]).default(""),
   templateId: z.union([z.string().length(24), z.literal("")]).default(""),
   saleNote: z.string().trim().max(300).default(""),
   couponCode: z.string().trim().max(32).default(""),
@@ -72,9 +79,11 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return fail("This request was blocked.", 403);
   const body = await readBody(request);
   if (body.error) return body.error;
+  let clientRequestId = "";
   try {
     const input = saleSchema.safeParse(body.value);
     if (!input.success) return fail("Check the sale details.", 422, input.error.flatten().fieldErrors);
+    clientRequestId = input.data.clientRequestId;
     const quantities = new Map<string, number>();
     for (const item of input.data.items) {
       if (!ObjectId.isValid(item.productId)) return fail("A product in the cart is invalid.", 422);
@@ -82,11 +91,16 @@ export async function POST(request: Request) {
     }
 
     const db = await getDb();
+    const existingSale = await db.collection("sales").findOne({ clientRequestId, createdBy: new ObjectId(auth.session.id) });
+    if (existingSale) return ok(serialise(existingSale));
     await ensureDefaultReceiptTemplate(db, new ObjectId(auth.session.id));
     await ensureDefaultPaymentMethods(db, new ObjectId(auth.session.id));
     const selectedPayment = await db.collection("paymentMethods").findOne({ code: input.data.paymentMethod, active: { $ne: false } });
     if (!selectedPayment) return fail("Choose an active payment method.", 422, { paymentMethod: ["This payment method is unavailable."] });
-    if (selectedPayment.referenceRequired && !input.data.paymentReference) return fail(`${selectedPayment.name} requires a transaction reference.`, 422, { paymentReference: ["Enter the transaction or approval reference."] });
+    const verificationMode = effectiveVerificationMode(selectedPayment);
+    const provider = effectiveProvider(selectedPayment);
+    if (verificationMode === "REFERENCE" && !input.data.paymentReference) return fail(`${selectedPayment.name} requires a transaction reference.`, 422, { paymentReference: ["Enter the transaction or approval reference."] });
+    if (verificationMode === "PROVIDER" && !ObjectId.isValid(input.data.paymentIntentId)) return fail(`${selectedPayment.name} requires a verified provider confirmation.`, 422, { paymentIntentId: ["Verify the exact payment before checkout."] });
     const ids = [...quantities.keys()].map((id) => new ObjectId(id));
     const products = await db.collection("products").find({ _id: { $in: ids }, active: { $ne: false } }).toArray();
     if (products.length !== ids.length) return fail("One or more products are no longer available.", 409);
@@ -111,7 +125,7 @@ export async function POST(request: Request) {
     if (manualDiscount > 0 && !["OWNER", "ADMIN", "MANAGER"].includes(auth.session.role)) {
       return fail("A Manager must approve a manual discount. Use an active coupon instead.", 403);
     }
-    const business = await db.collection("settings").findOne({ key: "business" });
+    const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
     const requestedTemplate = input.data.templateId && ObjectId.isValid(input.data.templateId)
       ? await db.collection("receiptTemplates").findOne({ _id: new ObjectId(input.data.templateId), active: { $ne: false } })
       : null;
@@ -129,14 +143,35 @@ export async function POST(request: Request) {
     const couponDiscount = asMoney(couponResult?.discount || 0);
     const discount = asMoney(manualDiscount + couponDiscount);
     if (discount > subtotal) return fail("Combined discounts cannot exceed the subtotal.", 422);
-    const taxMode = business?.taxMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE";
-    const { taxRate, tax, netSales, total } = calculateTaxTotals(subtotal, discount, Number(business?.taxRate || 0), taxMode);
+    const taxMode = business.taxMode;
+    const { taxRate, tax, netSales, total } = calculateTaxTotals(subtotal, discount, business.taxRate, taxMode, business.currency);
+    const tenderCurrency = input.data.tenderCurrency || business.currency;
+    if (!paymentCurrencies(selectedPayment, business.currency, business.acceptedCurrencies).includes(tenderCurrency)) return fail("This payment method does not accept the selected currency.", 422);
+    const exchange = await readExchangeRate(db, business.currency, tenderCurrency);
+    if (!exchange) return fail(`No active ${business.currency}/${tenderCurrency} exchange rate is configured.`, 409);
+    const tenderTotal = quoteAmount(total, exchange.rate, tenderCurrency);
     const isCashPayment = selectedPayment.kind === "CASH";
-    const tenderedAmount = isCashPayment ? asMoney(input.data.tenderedAmount || 0) : total;
-    if (isCashPayment && tenderedAmount < total) {
+    const tenderedAmount = isCashPayment ? quoteAmount(Number(input.data.tenderedAmount || 0), 1, tenderCurrency) : tenderTotal;
+    if (isCashPayment && tenderedAmount < tenderTotal) {
       return fail("Cash received must cover the amount due.", 422, { tenderedAmount: ["Enter the cash received from the customer."] });
     }
-    const changeDue = isCashPayment ? asMoney(tenderedAmount - total) : 0;
+    const changeDue = isCashPayment ? quoteAmount(tenderedAmount - tenderTotal, 1, tenderCurrency) : 0;
+    const paymentIntent = verificationMode === "PROVIDER" ? await db.collection("paymentIntents").findOne({
+      _id: new ObjectId(input.data.paymentIntentId),
+      createdBy: new ObjectId(auth.session.id),
+      status: "VERIFIED",
+      consumedAt: { $exists: false },
+      expiresAt: { $gt: new Date() },
+      paymentMethod: selectedPayment.code,
+      provider,
+      baseCurrency: business.currency,
+      tenderCurrency,
+    }) : null;
+    if (verificationMode === "PROVIDER" && (!paymentIntent
+      || !paymentAmountsMatch(total, Number(paymentIntent.baseAmount), business.currency)
+      || !paymentAmountsMatch(tenderTotal, Number(paymentIntent.tenderAmount), tenderCurrency))) {
+      return fail("The verified payment does not match the current order total, method or currency. Do not release the order.", 409);
+    }
     const totalCost = asMoney(items.reduce((sum, item) => sum + item.lineCost, 0));
     const receiptNo = makeDocumentNo("KKM");
     const journalNo = makeDocumentNo("JE");
@@ -146,6 +181,7 @@ export async function POST(request: Request) {
     const saleId = new ObjectId();
     const sale = {
       _id: saleId,
+      clientRequestId,
       receiptNo,
       memberId: member?._id || null,
       memberName: member?.name || "Walk-in guest",
@@ -166,12 +202,21 @@ export async function POST(request: Request) {
       netSales,
       total,
       totalCost,
+      currency: business.currency,
       paymentMethod: input.data.paymentMethod,
       paymentMethodName: String(selectedPayment.name),
       paymentKind: selectedPayment.kind === "CASH" ? "CASH" : "NON_CASH",
       paymentAccountCode: String(selectedPayment.accountCode),
       paymentAccountName: String(selectedPayment.accountName),
-      paymentReference: input.data.paymentReference,
+      paymentVerificationMode: verificationMode,
+      paymentProvider: provider,
+      paymentIntentId: paymentIntent?._id || null,
+      paymentReference: paymentIntent?.externalReference || input.data.paymentReference,
+      tenderCurrency,
+      tenderTotal,
+      exchangeRate: exchange.rate,
+      exchangeRateSource: exchange.source,
+      exchangeRateEffectiveAt: exchange.effectiveAt,
       tenderedAmount,
       changeDue,
       saleNote: input.data.saleNote,
@@ -179,13 +224,20 @@ export async function POST(request: Request) {
       templateName: templateSnapshot.name,
       templateSnapshot,
       businessSnapshot: {
-        businessName: String(business?.businessName || "Kōn-Kōn Matchā"),
-        registrationNo: String(business?.registrationNo || ""),
-        email: String(business?.email || ""),
-        phone: String(business?.phone || ""),
-        address: String(business?.address || ""),
-        currency: String(business?.currency || "SGD"),
-        taxName: String(business?.taxName || "GST"),
+        businessName: business.businessName,
+        legalEntityName: business.legalEntityName,
+        registrationNo: business.registrationNo,
+        email: business.email,
+        phone: business.phone,
+        address: business.address,
+        countryCode: business.countryCode,
+        timeZone: business.timeZone,
+        locale: business.locale,
+        currency: business.currency,
+        taxName: business.taxName,
+        organizationType: business.organizationType,
+        franchiseBrand: business.franchiseBrand,
+        franchiseCode: business.franchiseCode,
       },
       status: "COMPLETED",
       createdBy: new ObjectId(auth.session.id),
@@ -199,6 +251,23 @@ export async function POST(request: Request) {
       await mongoSession.withTransaction(async () => {
         const paymentStillActive = await db.collection("paymentMethods").findOne({ _id: selectedPayment._id, active: { $ne: false } }, { session: mongoSession });
         if (!paymentStillActive) throw new PaymentError("The payment method became unavailable before checkout. Choose another method.");
+        if (verificationMode === "PROVIDER") {
+          const consumed = await db.collection("paymentIntents").updateOne(
+            {
+              _id: paymentIntent!._id,
+              createdBy: new ObjectId(auth.session.id),
+              status: "VERIFIED",
+              consumedAt: { $exists: false },
+              expiresAt: { $gt: now },
+              paymentMethod: selectedPayment.code,
+              baseCurrency: business.currency,
+              tenderCurrency,
+            },
+            { $set: { status: "CONSUMED", consumedAt: now, consumedBySaleId: saleId, updatedAt: now } },
+            { session: mongoSession },
+          );
+          if (!consumed.modifiedCount) throw new PaymentError("The verified payment was already used or expired. Do not release the order.");
+        }
         if (couponResult) {
           const refreshed = await validateCoupon(db, couponResult.coupon.code, subtotal, member?._id.toHexString() || null, mongoSession);
           if (!refreshed || refreshed.discount !== couponDiscount) throw new CouponError("The coupon changed before checkout. Review the order and try again.");
@@ -277,7 +346,7 @@ export async function POST(request: Request) {
           createdBy: new ObjectId(auth.session.id),
           createdAt: now,
         }, { session: mongoSession });
-        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, total, itemCount: items.length, couponCode: couponResult?.coupon.code || "", manualDiscount }, mongoSession);
+        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, total, currency: business.currency, tenderCurrency, tenderTotal, exchangeRate: exchange.rate, verificationMode, itemCount: items.length, couponCode: couponResult?.coupon.code || "", manualDiscount }, mongoSession);
       });
     } finally {
       await mongoSession.endSession();
@@ -285,7 +354,12 @@ export async function POST(request: Request) {
     return created(serialise(sale));
   } catch (error) {
     if (error instanceof StockError || error instanceof CouponError || error instanceof PaymentError) return fail(error.message, 409);
-    if ((error as { code?: number }).code === 11000) return fail("The receipt number collided. Please submit the sale again.", 409);
+    if ((error as { code?: number }).code === 11000 && clientRequestId) {
+      const db = await getDb();
+      const existing = await db.collection("sales").findOne({ clientRequestId, createdBy: new ObjectId(auth.session.id) });
+      if (existing) return ok(serialise(existing));
+      return fail("The receipt number collided. Please submit the sale again.", 409);
+    }
     return publicError(error);
   }
 }

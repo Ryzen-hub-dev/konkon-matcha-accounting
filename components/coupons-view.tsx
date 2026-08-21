@@ -2,7 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { Archive, BadgePercent, CalendarClock, Copy, Plus, Sparkles, TicketCheck } from "lucide-react";
-import { AddButton, apiRequest, EmptyState, LoadingPanel, money, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
+import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
+import { useBusiness } from "@/components/business-context";
+import { localDateTimeToUtcIso } from "@/lib/dates";
 
 type Coupon = { _id: string; code: string; name: string; type: "PERCENT" | "FIXED"; value: number; minSpend: number; usageLimit: number; perMemberLimit: number; usageCount: number; startsAt: string; expiresAt: string; active: boolean };
 
@@ -10,6 +12,7 @@ function localDateTime(date: Date) { const offset = date.getTimezoneOffset() * 6
 function randomCode() { const value = new Uint32Array(1); crypto.getRandomValues(value); return `MATCHA-${value[0].toString(36).toUpperCase().slice(0, 7)}`; }
 
 export function CouponsView({ canManage = false }: { canManage?: boolean }) {
+  const { money } = useBusiness();
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -18,8 +21,33 @@ export function CouponsView({ canManage = false }: { canManage?: boolean }) {
   const { notice, show } = useNotice();
   async function load() { setLoading(true); try { setCoupons(await apiRequest<Coupon[]>("/api/coupons")); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not load coupons.", "error"); } finally { setLoading(false); } }
   useEffect(() => { void load(); }, []);
-  async function create(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setBusy(true); const data = Object.fromEntries(new FormData(event.currentTarget)); try { await apiRequest("/api/coupons", { method: "POST", body: JSON.stringify({ ...data, code, active: true }) }); show("Coupon generated and ready for server-side validation."); setOpen(false); setCode(randomCode()); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not generate the coupon.", "error"); } finally { setBusy(false); } }
+  async function create(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    try {
+      await apiRequest("/api/coupons", {
+        method: "POST",
+        body: JSON.stringify({
+          ...data,
+          code,
+          startsAt: localDateTimeToUtcIso(String(data.startsAt || "")),
+          expiresAt: localDateTimeToUtcIso(String(data.expiresAt || "")),
+          active: true,
+        }),
+      });
+      show("Coupon generated and ready to use at the register.");
+      setOpen(false);
+      setCode(randomCode());
+      await load();
+    } catch (reason) {
+      show(reason instanceof Error ? reason.message : "Could not generate the coupon.", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function toggle(coupon: Coupon) { try { await apiRequest("/api/coupons", { method: "PATCH", body: JSON.stringify({ id: coupon._id, active: !coupon.active }) }); show(coupon.active ? "Coupon paused." : "Coupon activated."); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not update the coupon.", "error"); } }
+  async function startNow(coupon: Coupon) { try { await apiRequest("/api/coupons", { method: "PATCH", body: JSON.stringify({ id: coupon._id, startsAt: new Date(Date.now() - 60_000).toISOString() }) }); show(`${coupon.code} is active now.`); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not start the coupon.", "error"); } }
   async function archive(coupon: Coupon) { if (!window.confirm(`Archive coupon ${coupon.code}? Existing receipt records remain unchanged.`)) return; try { await apiRequest("/api/coupons", { method: "DELETE", body: JSON.stringify({ id: coupon._id }) }); show("Coupon archived."); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not archive the coupon.", "error"); } }
   const now = new Date();
   const active = coupons.filter((coupon) => coupon.active && new Date(coupon.startsAt) <= now && new Date(coupon.expiresAt) > now).length;
@@ -28,7 +56,7 @@ export function CouponsView({ canManage = false }: { canManage?: boolean }) {
     <PageHeader eyebrow="PROMOTIONS" title="Coupons & vouchers" description="Generate controlled discounts that the server re-validates during checkout." action={canManage ? <AddButton onClick={() => setOpen(true)}>Generate coupon</AddButton> : undefined} />
     {notice ? <Notice {...notice} /> : null}
     <section className="coupon-hero"><div><Sparkles /><span>ACTIVE OFFERS</span><strong>{active}</strong></div><i /><div><TicketCheck /><span>TOTAL REDEMPTIONS</span><strong>{redeemed}</strong></div><i /><p><b>Trusted totals</b><span>Cashiers cannot alter coupon values in the browser. Dates, limits, member eligibility and discount amounts are calculated again inside checkout.</span></p></section>
-    <section className="panel resource-panel">{loading ? <LoadingPanel /> : coupons.length ? <div className="coupon-list">{coupons.map((coupon) => { const expired = new Date(coupon.expiresAt) <= now; return <article className="coupon-ticket" key={coupon._id}><div className="coupon-cut" aria-hidden="true" /><header><span>{coupon.name}</span><StatusPill value={expired ? "EXPIRED" : coupon.active ? "ACTIVE" : "PAUSED"} /></header><div className="coupon-value"><BadgePercent /><strong>{coupon.type === "PERCENT" ? `${coupon.value}%` : money.format(coupon.value)}</strong><span>OFF</span></div><button className="coupon-code" onClick={() => navigator.clipboard.writeText(coupon.code)} title="Copy coupon code"><b>{coupon.code}</b><Copy size={14} /></button><dl><div><dt>Minimum</dt><dd>{money.format(coupon.minSpend)}</dd></div><div><dt>Used</dt><dd>{coupon.usageCount || 0}{coupon.usageLimit ? ` / ${coupon.usageLimit}` : " / ∞"}</dd></div><div><dt>Per member</dt><dd>{coupon.perMemberLimit || "Unlimited"}</dd></div><div><dt>Expires</dt><dd>{new Intl.DateTimeFormat("en-SG", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(coupon.expiresAt))}</dd></div></dl>{canManage ? <footer><button className="button button-secondary" onClick={() => toggle(coupon)}>{coupon.active ? "Pause" : "Activate"}</button><button className="button button-quiet danger" onClick={() => archive(coupon)}><Archive size={14} />Archive</button></footer> : null}</article>; })}</div> : <EmptyState title="No coupons yet" detail="Generate a controlled percentage or fixed-value offer for the counter." action={canManage ? <AddButton onClick={() => setOpen(true)}>Generate coupon</AddButton> : undefined} />}</section>
+    <section className="panel resource-panel">{loading ? <LoadingPanel /> : coupons.length ? <div className="coupon-list">{coupons.map((coupon) => { const expired = new Date(coupon.expiresAt) <= now; const scheduled = new Date(coupon.startsAt) > now; return <article className="coupon-ticket" key={coupon._id}><div className="coupon-cut" aria-hidden="true" /><header><span>{coupon.name}</span><StatusPill value={expired ? "EXPIRED" : scheduled ? "SCHEDULED" : coupon.active ? "ACTIVE" : "PAUSED"} /></header><div className="coupon-value"><BadgePercent /><strong>{coupon.type === "PERCENT" ? `${coupon.value}%` : money.format(coupon.value)}</strong><span>OFF</span></div><button className="coupon-code" onClick={() => navigator.clipboard.writeText(coupon.code)} title="Copy coupon code"><b>{coupon.code}</b><Copy size={14} /></button><dl><div><dt>Minimum</dt><dd>{money.format(coupon.minSpend)}</dd></div><div><dt>Used</dt><dd>{coupon.usageCount || 0}{coupon.usageLimit ? ` / ${coupon.usageLimit}` : " / ∞"}</dd></div><div><dt>Per member</dt><dd>{coupon.perMemberLimit || "Unlimited"}</dd></div><div><dt>Expires</dt><dd>{new Intl.DateTimeFormat("en-SG", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(coupon.expiresAt))}</dd></div></dl>{canManage ? <footer>{scheduled && !expired ? <button className="button button-primary" onClick={() => startNow(coupon)}>Start now</button> : null}<button className="button button-secondary" onClick={() => toggle(coupon)}>{coupon.active ? "Pause" : "Activate"}</button><button className="button button-quiet danger" onClick={() => archive(coupon)}><Archive size={14} />Archive</button></footer> : null}</article>; })}</div> : <EmptyState title="No coupons yet" detail="Generate a controlled percentage or fixed-value offer for the counter." action={canManage ? <AddButton onClick={() => setOpen(true)}>Generate coupon</AddButton> : undefined} />}</section>
     <Modal open={open} onClose={() => setOpen(false)} title="Generate coupon" kicker="CONTROLLED OFFER"><form className="modal-form" onSubmit={create}><div className="coupon-code-builder"><label className="field"><span>Coupon code</span><input value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} pattern="[A-Z0-9_-]{3,32}" required autoFocus /></label><button type="button" className="button button-secondary" onClick={() => setCode(randomCode())}><Sparkles size={15} />Generate</button></div><label className="field"><span>Offer name</span><input name="name" placeholder="Weekend ceremonial matcha" required /></label><div className="form-grid two"><label className="field"><span>Discount type</span><select name="type" defaultValue="PERCENT"><option value="PERCENT">Percentage</option><option value="FIXED">Fixed amount</option></select></label><label className="field"><span>Discount value</span><input name="value" type="number" min="0.01" max="1000000" step="0.01" required /></label></div><div className="form-grid three"><label className="field"><span>Minimum spend</span><input name="minSpend" type="number" min="0" step="0.01" defaultValue="0" /></label><label className="field"><span>Total uses · 0 unlimited</span><input name="usageLimit" type="number" min="0" step="1" defaultValue="0" /></label><label className="field"><span>Per member · 0 unlimited</span><input name="perMemberLimit" type="number" min="0" step="1" defaultValue="0" /></label></div><div className="form-grid two"><label className="field"><span>Starts</span><input name="startsAt" type="datetime-local" defaultValue={localDateTime(now)} required /></label><label className="field"><span>Expires</span><input name="expiresAt" type="datetime-local" defaultValue={localDateTime(new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000))} required /></label></div><p className="form-hint"><CalendarClock size={14} /> Dates and limits are enforced by the checkout API, including requests made outside this interface.</p><footer><button type="button" className="button button-secondary" onClick={() => setOpen(false)}>Cancel</button><button className="button button-primary" disabled={busy}><Plus size={16} />{busy ? "Generating…" : "Generate coupon"}</button></footer></form></Modal>
   </div>;
 }

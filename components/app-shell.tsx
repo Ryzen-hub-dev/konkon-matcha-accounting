@@ -5,10 +5,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   BarChart3, BookOpen, Boxes, ChevronLeft, ChevronRight, CircleDollarSign,
-  FileText, LayoutDashboard, LogOut, Menu, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
+  FileText, LayoutDashboard, LogOut, MapPinned, Menu, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
   Users, WalletCards, X,
 } from "lucide-react";
 import type { SessionUser, UserRole } from "@/lib/types";
+import { BusinessProvider } from "@/components/business-context";
+import type { BusinessSettings } from "@/lib/business-settings";
+import { countryProfile } from "@/lib/international";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; roles?: UserRole[] };
 
@@ -24,10 +27,11 @@ const nav: NavItem[] = [
   { href: "/invoices", label: "Invoices", icon: FileText, roles: ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT"] },
   { href: "/reports", label: "Reports", icon: BarChart3, roles: ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT"] },
   { href: "/team", label: "Team & access", icon: Users, roles: ["OWNER", "ADMIN", "MANAGER"] },
+  { href: "/locations", label: "Locations & franchises", icon: MapPinned, roles: ["OWNER", "ADMIN"] },
   { href: "/settings", label: "Workspace", icon: Settings, roles: ["OWNER", "ADMIN"] },
 ];
 
-export function AppShell({ user, children }: { user: SessionUser; children: React.ReactNode }) {
+export function AppShell({ user, business, children }: { user: SessionUser; business: BusinessSettings; children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
@@ -41,14 +45,15 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
     router.refresh();
   }
 
-  return (
+  const country = countryProfile(business.countryCode);
+  return <BusinessProvider profile={business}>
     <div className={`app-frame ${collapsed ? "sidebar-collapsed" : ""}`}>
       <button className="mobile-menu" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu /></button>
       {mobileOpen ? <button className="mobile-scrim" onClick={() => setMobileOpen(false)} aria-label="Close navigation" /> : null}
       <aside className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
         <div className="brand-lockup">
           <div className="brand-mark"><Sprout size={21} /></div>
-          <div className="brand-words"><strong>KŌN-KŌN</strong><span>Matchā ledger</span></div>
+          <div className="brand-words"><strong>{business.franchiseBrand || business.businessName}</strong><span>{business.organizationType === "FRANCHISEE" ? `Franchise · ${business.franchiseCode}` : "Enterprise ledger"}</span></div>
           <button className="mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X size={19} /></button>
         </div>
         <div className="sidebar-rule"><span>MENU</span></div>
@@ -77,11 +82,11 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
       <div className="app-main">
         <header className="topbar">
           <div><span className="topbar-kicker">OPERATIONS /</span><strong>{current}</strong></div>
-          <div className="topbar-meta"><span className="live-dot" />LIVE LEDGER <i /> <span>{new Intl.DateTimeFormat("en-SG", { weekday: "short", day: "2-digit", month: "short" }).format(new Date())}</span></div>
+          <div className="topbar-meta"><span className="live-dot" />LIVE LEDGER <i /> <span>{new Intl.DateTimeFormat(business.locale, { weekday: "short", day: "2-digit", month: "short", timeZone: business.timeZone }).format(new Date())}</span></div>
         </header>
         <main>{children}</main>
-        <footer className="app-footer"><span>KŌN-KŌN MATCHĀ · SINGAPORE</span><span>Books kept fresh, one whisk at a time.</span></footer>
+        <footer className="app-footer"><span>{business.businessName.toUpperCase()} · {country.name.toUpperCase()}</span><span>{business.currency} · {business.timeZone}</span></footer>
       </div>
     </div>
-  );
+  </BusinessProvider>;
 }

@@ -1,12 +1,14 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Archive, Barcode, Boxes, CircleDollarSign, PackagePlus, Pencil, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
-import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, money, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
+import { AlertTriangle, Archive, Barcode, Boxes, CircleDollarSign, ClipboardCheck, PackagePlus, Pencil, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
+import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
+import { useBusiness } from "@/components/business-context";
 import { ScannerBridge } from "@/components/scanner-bridge";
 import type { ProductRecord } from "@/lib/types";
 
 export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
+  const { money } = useBusiness();
   const [products, setProducts] = useState<ProductRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -14,6 +16,8 @@ export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<ProductRecord | null>(null);
   const [adjusting, setAdjusting] = useState<ProductRecord | null>(null);
+  const [stocktakeOpen, setStocktakeOpen] = useState(false);
+  const [stocktakeCounts, setStocktakeCounts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [draftBarcode, setDraftBarcode] = useState("");
   const { notice, show } = useNotice();
@@ -61,10 +65,43 @@ export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
     catch (reason) { show(reason instanceof Error ? reason.message : "Could not restore the product.", "error"); }
   }
 
+  async function postStocktake(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const lines = Object.entries(stocktakeCounts)
+      .filter(([, countedStock]) => countedStock !== "")
+      .map(([productId, countedStock]) => ({ productId, countedStock }));
+    if (!lines.length) return show("Enter or scan at least one physical count.", "error");
+    setBusy(true);
+    const data = new FormData(event.currentTarget);
+    try {
+      const result = await apiRequest<{ stocktakeNo: string; adjustedLineCount: number; absoluteVariance: number }>("/api/stocktakes", {
+        method: "POST",
+        body: JSON.stringify({ note: data.get("note"), lines }),
+      });
+      show(`${result.stocktakeNo} posted · ${result.adjustedLineCount} adjusted item${result.adjustedLineCount === 1 ? "" : "s"} · ${result.absoluteVariance} unit variance.`);
+      setStocktakeOpen(false);
+      setStocktakeCounts({});
+      await load();
+    } catch (reason) {
+      show(reason instanceof Error ? reason.message : "Could not post the stocktake.", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const handleInventoryScan = useCallback((rawCode: string) => {
     const code = rawCode.trim().toUpperCase();
     if (!code) return;
     const product = products.find((item) => item.barcode?.toUpperCase() === code || item.sku.toUpperCase() === code);
+    if (stocktakeOpen) {
+      if (!product || product.active === false) {
+        show(`No active inventory product matches ${code}.`, "error");
+        return;
+      }
+      setStocktakeCounts((current) => ({ ...current, [product._id]: String(Number(current[product._id] || 0) + 1) }));
+      show(`${product.name} counted from scan.`);
+      return;
+    }
     if (product) {
       if (product.active === false) {
         setShowArchived(true);
@@ -82,7 +119,7 @@ export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
     setDraftBarcode(code);
     setAddOpen(true);
     show(`${code} captured for a new product.`);
-  }, [products, show]);
+  }, [products, show, stocktakeOpen]);
 
   const productForm = (mode: "add" | "edit") => {
     const product = mode === "edit" ? editing : null;
@@ -96,9 +133,9 @@ export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
   };
 
   return <div className="page page-enter">
-    <PageHeader eyebrow="TEA STORE" title="Inventory" description="Edit the catalogue, capture barcodes and preserve every stock movement." action={canWrite ? <AddButton onClick={() => { setDraftBarcode(""); setAddOpen(true); }}>New product</AddButton> : undefined} />
+    <PageHeader eyebrow="TEA STORE" title="Inventory" description="Edit the catalogue, capture barcodes and preserve every stock movement." action={canWrite ? <div className="pos-page-actions"><button className="button button-secondary" onClick={() => { setStocktakeCounts({}); setStocktakeOpen(true); }}><ClipboardCheck size={17} />Stocktake</button><AddButton onClick={() => { setDraftBarcode(""); setAddOpen(true); }}>New product</AddButton></div> : undefined} />
     {notice ? <Notice {...notice} /> : null}
-    {canWrite ? <ScannerBridge contextLabel="Inventory editor" purpose="INVENTORY" enabled={!loading} placeholder="Scan a product · existing opens edit, new opens add" onScan={handleInventoryScan} onFeedback={show} /> : null}
+    {canWrite ? <ScannerBridge contextLabel={stocktakeOpen ? "Inventory stocktake" : "Inventory editor"} purpose="INVENTORY" enabled={!loading} placeholder={stocktakeOpen ? "Scan each physical unit to count it" : "Scan a product · existing opens edit, new fills barcode"} onScan={handleInventoryScan} onFeedback={show} /> : null}
     <section className="mini-stat-row"><article><Boxes /><span>Units on hand</span><strong>{active.reduce((sum, product) => sum + product.stock, 0).toLocaleString()}</strong></article><article><CircleDollarSign /><span>Stock at cost</span><strong>{money.format(active.reduce((sum, product) => sum + product.cost * product.stock, 0))}</strong></article><article className={low ? "warn" : ""}><AlertTriangle /><span>At or below reorder</span><strong>{low}</strong></article></section>
     <section className="panel resource-panel"><div className="resource-toolbar"><label className="search-box"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search product, barcode, category or SKU" /></label>{canWrite ? <div className="archive-toggle"><button className={!showArchived ? "active" : ""} onClick={() => setShowArchived(false)}>Active</button><button className={showArchived ? "active" : ""} onClick={() => setShowArchived(true)}>Archived</button></div> : <span>{filtered.length} active SKUs</span>}</div>
       {loading ? <LoadingPanel /> : filtered.length ? <div className="data-list inventory-list"><div className="data-list-head"><span>Product</span><span>Category</span><span>On hand</span><span>Retail / cost</span><span>Barcode</span><span>Actions</span></div>{filtered.map((product) => <div className={`data-row ${!product.active ? "is-archived" : ""}`} key={product._id}><div className="product-cell"><i>{product.name.toLowerCase().includes("hojicha") ? "焙" : "抹"}</i><div><strong>{product.name}</strong><small>{product.sku}</small></div></div><span>{product.category}</span><div><strong>{product.stock} {product.unit}</strong>{product.active && product.stock <= product.reorderLevel ? <small className="low-label">Reorder at {product.reorderLevel}</small> : <small>{product.active ? "Healthy" : "Preserved"}</small>}</div><div><strong>{money.format(product.price)}</strong><small>{money.format(product.cost)} cost</small></div><div><strong className="barcode-value">{product.barcode || "NO BARCODE"}</strong><small><StatusPill value={product.active ? "ACTIVE" : "ARCHIVED"} /></small></div>{canWrite ? <div className="row-actions">{product.active ? <><button className="icon-button" title="Edit product" onClick={() => { setDraftBarcode(product.barcode || ""); setEditing(product); }}><Pencil size={15} /></button><button className="icon-button" title="Adjust stock" onClick={() => setAdjusting(product)}><SlidersHorizontal size={15} /></button><button className="icon-button danger" title="Archive product" onClick={() => archive(product)}><Archive size={15} /></button></> : <button className="button button-secondary" onClick={() => restore(product)}><RotateCcw size={15} />Restore</button>}</div> : <span />}</div>)}</div> : <EmptyState title={showArchived ? "No archived products" : "The shelf is empty"} detail={showArchived ? "Archived catalogue items will remain available for audit here." : "Add the first product to begin tracking stock."} action={!showArchived && canWrite ? <AddButton onClick={() => { setDraftBarcode(""); setAddOpen(true); }}>New product</AddButton> : undefined} />}
@@ -106,5 +143,6 @@ export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
     <Modal open={addOpen} onClose={() => { setAddOpen(false); setDraftBarcode(""); }} title="New product" kicker="SCAN OR ADD"><>{productForm("add")}</></Modal>
     <Modal open={Boolean(editing)} onClose={() => { setEditing(null); setDraftBarcode(""); }} title={`Edit ${editing?.name || "product"}`} kicker="CATALOGUE"><>{productForm("edit")}</></Modal>
     <Modal open={Boolean(adjusting)} onClose={() => setAdjusting(null)} title={`Adjust ${adjusting?.name || "stock"}`} kicker="STOCK MOVEMENT"><form className="modal-form" onSubmit={adjust}><p className="form-hint">Current balance: <strong>{adjusting?.stock} {adjusting?.unit}</strong>. Use a negative number for wastage or a positive number for received stock.</p><label className="field"><span>Quantity change</span><input name="adjustment" type="number" step="1" placeholder="e.g. 12 or -2" required autoFocus /></label><label className="field"><span>Reason</span><input name="reason" placeholder="Supplier delivery, damaged tin…" required /></label><footer><button type="button" className="button button-secondary" onClick={() => setAdjusting(null)}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Posting…" : "Post movement"}</button></footer></form></Modal>
+    <Modal open={stocktakeOpen} onClose={() => { setStocktakeOpen(false); setStocktakeCounts({}); }} title="Physical stocktake" kicker="CONTROLLED COUNT"><form className="modal-form wide-form" onSubmit={postStocktake}><div className="stocktake-intro"><ClipboardCheck /><div><strong>Count what is physically on the shelf</strong><p>Type a final quantity, or scan each unit through the Inventory scanner above. Only counted rows are posted and every variance creates a stock movement.</p></div></div><div className="stocktake-toolbar"><span>{Object.values(stocktakeCounts).filter((value) => value !== "").length} of {active.length} products counted</span><div><button type="button" className="button button-quiet" onClick={() => setStocktakeCounts({})}>Clear</button><button type="button" className="button button-secondary" onClick={() => setStocktakeCounts(Object.fromEntries(active.map((product) => [product._id, String(product.stock)])))}>Copy book counts</button></div></div><div className="stocktake-list"><div className="stocktake-head"><span>Product</span><span>Book</span><span>Physical count</span><span>Variance</span></div>{active.map((product) => { const value = stocktakeCounts[product._id] ?? ""; const variance = value === "" ? null : Number(value) - product.stock; return <label className="stocktake-row" key={product._id}><span><strong>{product.name}</strong><small>{product.sku}{product.barcode ? ` · ${product.barcode}` : ""}</small></span><b>{product.stock} {product.unit}</b><input aria-label={`${product.name} physical count`} type="number" min="0" step="1" value={value} onChange={(event) => setStocktakeCounts((current) => ({ ...current, [product._id]: event.target.value }))} placeholder="Not counted" /><em className={variance === null ? "" : variance > 0 ? "positive" : variance < 0 ? "negative" : "balanced"}>{variance === null ? "—" : variance > 0 ? `+${variance}` : variance}</em></label>; })}</div><label className="field"><span>Count note · optional</span><input name="note" maxLength={300} placeholder="Month-end count, shelf audit, delivery check…" /></label><footer><button type="button" className="button button-secondary" onClick={() => { setStocktakeOpen(false); setStocktakeCounts({}); }}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Posting count…" : "Post stocktake"}</button></footer></form></Modal>
   </div>;
 }

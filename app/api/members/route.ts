@@ -47,6 +47,15 @@ export async function GET(request: Request) {
   try {
     const db = await getDb();
     const url = new URL(request.url);
+    if (url.searchParams.get("revision") === "1") {
+      const [latest, count] = await Promise.all([
+        db.collection("members").find({}, { projection: { updatedAt: 1, createdAt: 1 } }).sort({ updatedAt: -1, createdAt: -1 }).limit(1).next(),
+        db.collection("members").countDocuments({ active: { $ne: false } }),
+      ]);
+      const response = ok({ revision: new Date(latest?.updatedAt || latest?.createdAt || 0).toISOString(), count });
+      response.headers.set("Cache-Control", "private, no-store, max-age=0");
+      return response;
+    }
     const id = url.searchParams.get("id") || "";
     const identity = url.searchParams.get("identity")?.trim() || "";
     const q = url.searchParams.get("q")?.trim().slice(0, 80) || "";

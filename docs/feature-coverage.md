@@ -8,12 +8,19 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Owner transfer cooling period and workspace open/read-only/closed controls
 - Members, protected identity lookup, renewable printable member cards and points
 - Products, barcode/SKU scanning, stock movements, archive/restore and low-stock indicators
+- Physical stocktake with scan-to-count, typed final counts, transactional variance posting and audit history
 - POS, tenders, trusted coupons/manual discounts, tax calculation and transactional posting
 - Custom invoice and receipt templates, print/reprint, refund and historical snapshots
 - Manual journals, chart of accounts and core management reports
 - 24-hour token-restricted phone scanner passes compatible with Vercel serverless
 - Low-latency auto-connected POS/Inventory scanner bridge with native + ZXing camera decoding
-- Administrator-defined payment methods with reference controls and ledger-account routing
+- QR/link-based phone connection and active POS/Inventory routing, including new-product barcode capture
+- Cashier-scoped POS browser drafts/history and live member-list refresh without a full POS reload
+- Country, locale, IANA time-zone, base/accepted-currency and immutable settings history
+- Locked foreign-exchange rates with base/tender sale snapshots and currency-aware rounding
+- Provider-verified transfer/wallet foundation with signed callbacks, replay protection, exact payment matching and one-time consumption
+- Multi-country headquarters, branch, warehouse and franchise hierarchy with cycle/archive safeguards
+- Administrator-defined payment methods with reference/provider controls, settlement currencies and ledger-account routing
 
 ## AutoCount comparison baseline (reviewed 22 August 2026)
 
@@ -48,7 +55,7 @@ This count is a delivery benchmark, not a claim of AutoCount parity. Accounting,
 - Bank import/feed, reconciliation and cash-flow forecast
 - Fixed-asset register, depreciation and disposal journals
 - Expense claims, approvals, attachments and payment runs
-- Multi-location stock transfer, batch/lot/expiry, serial number and stocktake
+- Multi-location stock transfer, batch/lot/expiry and serial-number tracking
 - Multi-company consolidation, intercompany journals and elimination entries
 - Payroll, leave, statutory contribution and employee self-service
 - Budgeting, dimensions/cost centres, projects and variance reporting

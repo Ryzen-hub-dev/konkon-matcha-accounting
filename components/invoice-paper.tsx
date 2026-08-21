@@ -2,7 +2,6 @@
 
 import type { CSSProperties } from "react";
 import { Leaf } from "lucide-react";
-import { shortDate } from "@/components/ui";
 import { DEFAULT_INVOICE_TEMPLATE, type InvoiceTemplateInput } from "@/lib/invoice-templates";
 
 export type InvoicePaperItem = {
@@ -25,6 +24,7 @@ export type InvoicePaperDocument = {
   items: InvoicePaperItem[];
   subtotal: number;
   taxRate: number;
+  taxMode?: "EXCLUSIVE" | "INCLUSIVE";
   tax: number;
   total: number;
   notes?: string;
@@ -36,6 +36,10 @@ export type InvoicePaperDocument = {
     address?: string;
     currency?: string;
     taxName?: string;
+    locale?: string;
+    timeZone?: string;
+    franchiseBrand?: string;
+    franchiseCode?: string;
   };
 };
 
@@ -47,13 +51,16 @@ export function InvoicePaper({ document, template = DEFAULT_INVOICE_TEMPLATE, co
   const business = document.businessSnapshot || {};
   const paperStyle = { "--invoice-accent": template.accentColor } as CSSProperties;
   const currency = /^[A-Z]{3}$/.test(business.currency || "") ? business.currency! : "SGD";
-  const money = new Intl.NumberFormat("en-SG", { style: "currency", currency });
+  const locale = business.locale || "en-SG";
+  const timeZone = business.timeZone || "Asia/Singapore";
+  const money = new Intl.NumberFormat(locale, { style: "currency", currency });
+  const shortDate = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", timeZone });
   return (
     <article className={`invoice-paper invoice-layout-${template.layout.toLowerCase()} invoice-tone-${template.paperTone.toLowerCase()} ${compact ? "invoice-paper-compact" : ""}`} style={paperStyle}>
       <header className="invoice-paper-header">
         <div className="invoice-paper-brand">
           {template.logoDataUrl ? <img src={template.logoDataUrl} alt={`${business.businessName || "Business"} logo`} /> : <span className="invoice-paper-mark"><Leaf size={18} /></span>}
-          <div><small>{template.headerText}</small><strong>{business.businessName || "Kōn-Kōn Matchā"}</strong></div>
+          <div><small>{template.headerText}</small><strong>{business.businessName || "Kōn-Kōn Matchā"}</strong>{business.franchiseCode ? <span>{business.franchiseBrand || "Franchise"} · {business.franchiseCode}</span> : null}</div>
         </div>
         <div className="invoice-paper-title"><small>{document.status || "DRAFT"}</small><h2>{template.documentTitle}</h2><span>{document.invoiceNo}</span></div>
       </header>
@@ -73,7 +80,7 @@ export function InvoicePaper({ document, template = DEFAULT_INVOICE_TEMPLATE, co
           {template.showNotes && document.notes ? <><small>NOTES</small><p>{document.notes}</p></> : null}
           {template.paymentInstructions ? <><small>PAYMENT</small><p>{template.paymentInstructions}</p></> : null}
         </div>
-        <dl><div><dt>Subtotal</dt><dd>{money.format(document.subtotal)}</dd></div>{template.showTaxBreakdown ? <div><dt>{business.taxName || "Tax"} · {document.taxRate}%</dt><dd>{money.format(document.tax)}</dd></div> : null}<div className="invoice-paper-grand-total"><dt>Total</dt><dd>{money.format(document.total)}</dd></div></dl>
+        <dl><div><dt>Subtotal</dt><dd>{money.format(document.subtotal)}</dd></div>{template.showTaxBreakdown ? <div><dt>{business.taxName || "Tax"} · {document.taxRate}%{document.taxMode === "INCLUSIVE" ? " included" : ""}</dt><dd>{money.format(document.tax)}</dd></div> : null}<div className="invoice-paper-grand-total"><dt>Total</dt><dd>{money.format(document.total)}</dd></div></dl>
       </section>
 
       <footer className="invoice-paper-footer">

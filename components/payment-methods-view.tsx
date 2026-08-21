@@ -1,15 +1,20 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Archive, Banknote, CreditCard, Landmark, Pencil, Plus, ReceiptText, RotateCcw, ShieldCheck } from "lucide-react";
+import { Archive, Banknote, CreditCard, Globe2, Landmark, Pencil, Plus, ReceiptText, RotateCcw, ShieldCheck } from "lucide-react";
 import { apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
 import type { PaymentMethodRecord } from "@/lib/payment-methods";
+import { CURRENCY_OPTIONS } from "@/lib/international";
+import { PAYMENT_PROVIDERS, PAYMENT_VERIFICATION_MODES } from "@/lib/payment-verification";
 
 type AssetAccount = { _id: string; code: string; name: string; type: "ASSET" };
+type ExchangeRate = { _id?: string; baseCurrency: string; quoteCurrency: string; rate: number; source: string; effectiveAt: string };
+type ExchangeData = { baseCurrency: string; acceptedCurrencies: string[]; rates: ExchangeRate[] };
 
 export function PaymentMethodsView() {
   const [methods, setMethods] = useState<PaymentMethodRecord[]>([]);
   const [accounts, setAccounts] = useState<AssetAccount[]>([]);
+  const [exchange, setExchange] = useState<ExchangeData | null>(null);
   const [editing, setEditing] = useState<PaymentMethodRecord | null>(null);
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -19,12 +24,14 @@ export function PaymentMethodsView() {
   async function load() {
     setLoading(true);
     try {
-      const [paymentData, accountData] = await Promise.all([
+      const [paymentData, accountData, exchangeData] = await Promise.all([
         apiRequest<PaymentMethodRecord[]>("/api/payment-methods?includeArchived=1"),
         apiRequest<AssetAccount[]>("/api/payment-methods/accounts"),
+        apiRequest<ExchangeData>("/api/exchange-rates"),
       ]);
       setMethods(paymentData);
       setAccounts(accountData);
+      setExchange(exchangeData);
     } catch (reason) { show(reason instanceof Error ? reason.message : "Could not load payment methods.", "error"); }
     finally { setLoading(false); }
   }
@@ -43,6 +50,9 @@ export function PaymentMethodsView() {
       accountCode: form.get("accountCode"),
       sortOrder: form.get("sortOrder"),
       referenceRequired: form.has("referenceRequired"),
+      verificationMode: form.get("verificationMode"),
+      providerCode: form.get("providerCode") || undefined,
+      supportedCurrencies: form.getAll("supportedCurrencies"),
     };
     try {
       await apiRequest("/api/payment-methods", { method: editing ? "PATCH" : "POST", body: JSON.stringify(body) });
@@ -62,6 +72,16 @@ export function PaymentMethodsView() {
     } catch (reason) { show(reason instanceof Error ? reason.message : "Could not change the payment method.", "error"); }
   }
 
+  async function saveRate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try {
+      await apiRequest("/api/exchange-rates", { method: "PATCH", body: JSON.stringify({ quoteCurrency: form.get("quoteCurrency"), rate: form.get("rate"), source: form.get("source") }) });
+      show("Exchange rate locked for new POS payments. Existing receipts keep their original rate.");
+      await load();
+    } catch (reason) { show(reason instanceof Error ? reason.message : "Could not save the exchange rate.", "error"); }
+  }
+
   const active = methods.filter((method) => method.active !== false);
   const referenceCount = active.filter((method) => method.referenceRequired).length;
   const selected = editing;
@@ -74,17 +94,20 @@ export function PaymentMethodsView() {
       const Icon = method.kind === "CASH" ? Banknote : method.code.includes("CARD") ? CreditCard : Landmark;
       return <article key={method._id} className={method.active === false ? "archived" : ""}>
         <div className="payment-route-stamp"><Icon /></div>
-        <div><span>{method.code}</span><strong>{method.name}</strong><small>{method.referenceRequired ? "Transaction reference required" : "Reference optional"}</small></div>
+        <div><span>{method.code}</span><strong>{method.name}</strong><small>{method.verificationMode === "PROVIDER" ? `${method.providerCode || "Provider"} confirmation required` : method.referenceRequired ? "Transaction reference required" : "Reference optional"}</small></div>
         <div className="payment-route-line"><i /><ReceiptText /><i /></div>
-        <div><span>LEDGER DESTINATION</span><strong>{method.accountCode} · {method.accountName}</strong><small>{method.kind === "CASH" ? "Cash tender · change enabled" : "Non-cash tender · exact amount"}</small></div>
+        <div><span>LEDGER DESTINATION</span><strong>{method.accountCode} · {method.accountName}</strong><small>{method.kind === "CASH" ? "Cash tender · change enabled" : "Non-cash tender · exact amount"} · {(method.supportedCurrencies || []).join(" / ") || exchange?.baseCurrency}</small></div>
         <StatusPill value={method.active === false ? "ARCHIVED" : "ACTIVE"} />
         <div className="row-actions">{method.active === false ? <button className="button button-secondary" onClick={() => void setActive(method, true)}><RotateCcw />Restore</button> : <><button className="icon-button" title="Edit payment method" onClick={() => { setAdding(false); setEditing(method); }}><Pencil /></button><button className="icon-button danger" title="Archive payment method" onClick={() => void setActive(method, false)}><Archive /></button></>}</div>
       </article>;
     })}</section> : <EmptyState title="No payment routes" detail="Add at least one cash or non-cash method before using the register." action={<button className="button button-primary" onClick={() => setAdding(true)}><Plus />Add payment method</button>} />}
+    {exchange ? <section className="panel exchange-rate-panel"><header className="panel-header"><div><span className="eyebrow">CROSS-BORDER SETTLEMENT</span><h2>{exchange.baseCurrency} exchange rates</h2></div><Globe2 /></header><p>Rates are quoted as foreign currency per 1 {exchange.baseCurrency}. Every completed receipt stores the exact rate used.</p><div className="exchange-rate-list">{exchange.rates.map((rate) => <div key={rate.quoteCurrency}><strong>{rate.baseCurrency}/{rate.quoteCurrency}</strong><span>{rate.rate.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span><small>{rate.source}</small></div>)}</div>{exchange.acceptedCurrencies.some((currency) => currency !== exchange.baseCurrency) ? <form className="exchange-rate-form" onSubmit={saveRate}><label className="field"><span>Settlement currency</span><select name="quoteCurrency" defaultValue={exchange.acceptedCurrencies.find((currency) => currency !== exchange.baseCurrency)}>{exchange.acceptedCurrencies.filter((currency) => currency !== exchange.baseCurrency).map((currency) => <option key={currency}>{currency}</option>)}</select></label><label className="field"><span>Rate per 1 {exchange.baseCurrency}</span><input name="rate" type="number" min="0.00000001" max="1000000000" step="0.00000001" required /></label><label className="field"><span>Source</span><input name="source" defaultValue="MANUAL TREASURY RATE" maxLength={60} required /></label><button className="button button-primary">Save locked rate</button></form> : <p className="form-hint">Add another accepted currency in Workspace settings before creating an FX rate.</p>}</section> : null}
     <Modal open={adding || Boolean(editing)} onClose={() => { setAdding(false); setEditing(null); }} title={selected ? `Edit ${selected.name}` : "New payment method"} kicker="TENDER + LEDGER">
       <form className="modal-form" onSubmit={save} key={selected?._id || "new-payment"}>
         <div className="form-grid two"><label className="field"><span>Display name</span><input name="name" defaultValue={selected?.name} placeholder="GrabPay" minLength={2} maxLength={60} required /></label><label className="field"><span>Code</span><input name="code" defaultValue={selected?.code} placeholder="GRABPAY" pattern="[A-Za-z0-9_-]{2,24}" required /></label></div>
         <div className="form-grid two"><label className="field"><span>Payment behaviour</span><select name="kind" defaultValue={selected?.kind || "NON_CASH"}><option value="CASH">Cash · tender and change</option><option value="NON_CASH">Non-cash · exact amount</option></select></label><label className="field"><span>Asset account</span><select name="accountCode" defaultValue={selected?.accountCode || accounts[0]?.code} required>{accounts.map((account) => <option key={account._id} value={account.code}>{account.code} · {account.name}</option>)}</select></label></div>
+        <div className="form-grid two"><label className="field"><span>Verification control</span><select name="verificationMode" defaultValue={selected?.verificationMode || "NONE"}>{PAYMENT_VERIFICATION_MODES.map((mode) => <option key={mode} value={mode}>{mode === "PROVIDER" ? "Provider-confirmed · strict" : mode === "REFERENCE" ? "Staff-entered reference" : "No external verification"}</option>)}</select></label><label className="field"><span>Provider</span><select name="providerCode" defaultValue={selected?.providerCode || "GENERIC"}>{PAYMENT_PROVIDERS.map((provider) => <option key={provider}>{provider}</option>)}</select></label></div>
+        <label className="field"><span>Accepted currencies for this method</span><select name="supportedCurrencies" multiple size={5} defaultValue={selected?.supportedCurrencies?.length ? selected.supportedCurrencies : [exchange?.baseCurrency || "SGD"]}>{CURRENCY_OPTIONS.filter((currency) => exchange?.acceptedCurrencies.includes(currency)).map((currency) => <option key={currency}>{currency}</option>)}</select><small>Provider verification checks this currency and the exact converted amount.</small></label>
         <label className="field"><span>POS order</span><input name="sortOrder" type="number" min="0" max="999" step="1" defaultValue={selected?.sortOrder ?? 100} required /></label>
         <label className="check-row"><input type="checkbox" name="referenceRequired" defaultChecked={selected?.referenceRequired} /><span><strong>Require a transaction reference</strong><small>Checkout remains locked until staff enter an approval, cheque or wallet reference.</small></span></label>
         <footer><button type="button" className="button button-secondary" onClick={() => { setAdding(false); setEditing(null); }}>Cancel</button><button className="button button-primary" disabled={busy || !accounts.length}>{busy ? "Saving…" : "Save payment method"}</button></footer>

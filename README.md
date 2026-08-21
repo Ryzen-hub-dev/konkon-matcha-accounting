@@ -23,6 +23,10 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Product cart, member selection, administrator-defined payment methods and optional/required payment references.
 - Payment-method routing to an active cash/bank asset account, revalidated by the API and snapshotted on each sale for accurate refunds.
 - Server-calculated prices, coupon discounts, tax, cash received and change due.
+- Cash and non-cash settlement in configured ISO currencies using administrator-locked exchange rates, with base/tender amounts snapshotted on the receipt.
+- Provider-verified transfer/wallet foundations with signed callbacks, replay protection, exact amount/currency matching and one-time confirmation consumption.
+- Cashier-scoped browser order recovery and bounded draft history across refreshes and page changes; sensitive payment references and verification codes are not cached.
+- Idempotent checkout requests prevent a network retry from creating a second receipt or double-deducting stock.
 - Manager-only manual discounts; Cashiers cannot submit arbitrary discount values.
 - Percentage and fixed coupons with start/end time, minimum spend, total-use limit and per-member limit.
 - Transactional stock deductions, member points, coupon redemption and double-entry posting.
@@ -55,6 +59,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 
 - Product create/edit, optional barcode, SKU, category, unit, retail price, cost and reorder level.
 - Stock adjustment journal with mandatory reason.
+- Physical stocktake with typed or scan-to-count quantities, variance posting and auditable stock movements.
 - Product archive/restore preserving stock and transaction history.
 - Manual balanced journals and a seeded chart of accounts.
 - Draft/sent/paid/void invoices with custom uploadable JSON templates and printable documents.
@@ -76,10 +81,11 @@ Core endpoints:
 
 - `/api/setup`, `/api/auth/login`, `/api/auth/logout`, `/api/profile`
 - `/api/users`, `/api/system-control`, `/api/ownership-transfer`
-- `/api/products`, `/api/members`, `/api/coupons`, `/api/payment-methods`
+- `/api/products`, `/api/stocktakes`, `/api/members`, `/api/coupons`, `/api/payment-methods`, `/api/exchange-rates`
 - `/api/scanner-sessions`, `/api/mobile-scans`
-- `/api/sales`, `/api/refunds`, `/api/receipt-templates`
+- `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`
 - `/api/invoices`, `/api/invoice-templates`, `/api/journals`, `/api/reports`
+- `/api/settings`, `/api/settings/history`, `/api/locations`
 
 Write requests require a same-origin browser request and authenticated role permission, except the token-restricted mobile scan sender. Public errors do not include stack traces, secrets or database internals.
 
@@ -89,7 +95,7 @@ Requirements: Node.js 20.9 or newer and MongoDB Atlas (or a compatible MongoDB r
 
 1. Run `npm install`.
 2. Copy `.env.example` to `.env.local`.
-3. Supply a new MongoDB URI, a random `AUTH_SECRET`, and a different stable `IDENTITY_LOOKUP_SECRET`, each at least 32 characters.
+3. Supply a new MongoDB URI, a random `AUTH_SECRET`, and different stable `IDENTITY_LOOKUP_SECRET` and `PAYMENT_WEBHOOK_SECRET` values, each at least 32 characters.
 4. Run `npm run dev`.
 5. Open `http://localhost:3000/setup` once to create the Owner.
 
@@ -103,13 +109,13 @@ npm test
 npm run build
 ```
 
-The current suite covers authentication errors, origin protection, RBAC, MongoDB namespace isolation, invoice/receipt template validation, tax math, coupon bounds, scanner token handling, protected identity lookup normalization and system write-mode classification.
+The current suite covers authentication errors, origin protection, RBAC, MongoDB namespace isolation, invoice/receipt template validation, currency precision, tax math, coupon bounds, scanner token/routing, provider webhook signatures and exact amounts, POS draft recovery, franchise hierarchy safety, protected identity lookup normalization and system write-mode classification.
 
 ## Vercel Hobby design
 
 - Node.js routes are short-lived and stateless; MongoDB owns durable scanner and transaction state.
 - MongoDB client reuse is global per warm function instance with `maxPoolSize: 5`, `minPoolSize: 0` and idle cleanup.
-- POS and Inventory automatically select the newest live phone pass. A bounded three-second wait returns scans in 250 ms slices, aborts when the page unmounts and pauses while the tab is hidden.
+- POS and Inventory automatically route the newest live phone pass to the active workflow. Each event snapshots its POS/Inventory destination so simultaneous pages cannot consume the wrong scan. A bounded three-second wait returns scans in 250 ms slices, aborts when the page unmounts and pauses while the tab is hidden.
 - TTL indexes automatically remove expired scanner sessions/events, authentication throttles and sensitive lookup events.
 - No long-running server, filesystem persistence, WebSocket server or background worker is required.
 - `vercel.json` pins functions to Singapore and enables Fluid Compute.

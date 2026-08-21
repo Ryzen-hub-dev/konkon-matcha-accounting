@@ -3,8 +3,11 @@ import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
 import { getDb, getMongoClient } from "@/lib/db";
-import { asMoney, makeDocumentNo, serialise } from "@/lib/format";
+import { makeDocumentNo, serialise } from "@/lib/format";
 import { DEFAULT_INVOICE_TEMPLATE, normaliseInvoiceTemplate } from "@/lib/invoice-templates";
+import { normaliseBusinessSettings } from "@/lib/business-settings";
+import { roundCurrency } from "@/lib/international";
+import { calculateTaxTotals } from "@/lib/tax";
 
 export const runtime = "nodejs";
 
@@ -62,19 +65,17 @@ export async function POST(request: Request) {
   try {
     const input = invoiceSchema.safeParse(body.value);
     if (!input.success) return fail("Check the invoice details.", 422, input.error.flatten().fieldErrors);
-    const items = input.data.items.map((item) => ({ ...item, unitPrice: asMoney(item.unitPrice), lineTotal: asMoney(item.quantity * item.unitPrice) }));
     const db = await getDb();
-    const subtotal = asMoney(items.reduce((sum, item) => sum + item.lineTotal, 0));
-    const business = await db.collection("settings").findOne({ key: "business" });
+    const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
+    const items = input.data.items.map((item) => ({ ...item, unitPrice: roundCurrency(item.unitPrice, business.currency), lineTotal: roundCurrency(item.quantity * item.unitPrice, business.currency) }));
+    const subtotal = roundCurrency(items.reduce((sum, item) => sum + item.lineTotal, 0), business.currency);
     const requestedTemplate = input.data.templateId && ObjectId.isValid(input.data.templateId)
       ? await db.collection("invoiceTemplates").findOne({ _id: new ObjectId(input.data.templateId), active: { $ne: false } })
       : null;
     if (input.data.templateId && !requestedTemplate) return fail("Choose an available invoice template.", 422);
     const defaultTemplate = requestedTemplate || await db.collection("invoiceTemplates").findOne({ isDefault: true, active: { $ne: false } });
     const templateSnapshot = normaliseInvoiceTemplate(defaultTemplate || DEFAULT_INVOICE_TEMPLATE);
-    const taxRate = Math.max(0, Math.min(100, Number(business?.taxRate || 0)));
-    const tax = asMoney(subtotal * (taxRate / 100));
-    const total = asMoney(subtotal + tax);
+    const { taxRate, tax, taxMode, netSales, total } = calculateTaxTotals(subtotal, 0, business.taxRate, business.taxMode, business.currency);
     const now = new Date();
     const document = {
       invoiceNo: makeDocumentNo("INV"),
@@ -89,18 +90,27 @@ export async function POST(request: Request) {
       templateName: templateSnapshot.name,
       templateSnapshot,
       businessSnapshot: {
-        businessName: String(business?.businessName || "Kōn-Kōn Matchā"),
-        registrationNo: String(business?.registrationNo || ""),
-        email: String(business?.email || ""),
-        phone: String(business?.phone || ""),
-        address: String(business?.address || ""),
-        currency: String(business?.currency || "SGD"),
-        taxName: String(business?.taxName || "GST"),
+        businessName: business.businessName,
+        legalEntityName: business.legalEntityName,
+        registrationNo: business.registrationNo,
+        email: business.email,
+        phone: business.phone,
+        address: business.address,
+        countryCode: business.countryCode,
+        timeZone: business.timeZone,
+        locale: business.locale,
+        currency: business.currency,
+        taxName: business.taxName,
+        organizationType: business.organizationType,
+        franchiseBrand: business.franchiseBrand,
+        franchiseCode: business.franchiseCode,
       },
       items,
       subtotal,
       taxRate,
+      taxMode,
       tax,
+      netSales,
       total,
       paidAmount: 0,
       status: "DRAFT",
@@ -150,7 +160,7 @@ export async function PATCH(request: Request) {
             reference: current.invoiceNo, source: "INVOICE", status: "POSTED",
             lines: [
               { accountCode: "1010", accountName: "Bank", debit: current.total, credit: 0 },
-              { accountCode: "4000", accountName: "Product sales", debit: 0, credit: current.subtotal },
+              { accountCode: "4000", accountName: "Product sales", debit: 0, credit: Number(current.netSales ?? Number(current.subtotal) - tax) },
               ...(tax > 0 ? [{ accountCode: "2100", accountName: "GST payable", debit: 0, credit: tax }] : []),
             ],
             totalDebit: current.total, totalCredit: current.total,

@@ -5,12 +5,14 @@ import { writeAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { serialise } from "@/lib/format";
 import { createScannerToken, scannerTokenHash, SCANNER_SESSION_MS } from "@/lib/scanner";
+import { scannerActivityAt } from "@/lib/scanner-routing";
 import { getSystemControl } from "@/lib/system-control";
 
 export const runtime = "nodejs";
 
 const purposeSchema = z.enum(["POS", "INVENTORY"]);
 const createSchema = z.object({ label: z.string().trim().min(2).max(60).default("Mobile scanner"), purpose: purposeSchema.default("POS") });
+const routeSchema = z.object({ id: z.string().length(24), purpose: purposeSchema });
 const revokeSchema = z.object({ id: z.string().length(24) });
 
 export async function GET(request: Request) {
@@ -27,9 +29,11 @@ export async function GET(request: Request) {
       revokedAt: { $exists: false },
       expiresAt: { $gt: now },
       generation: control.scannerGeneration,
-      ...(requestedPurpose.data === "POS" ? { $or: [{ purpose: "POS" }, { purpose: { $exists: false } }] } : { purpose: "INVENTORY" }),
     }, { projection: { tokenHash: 0 } }).sort({ createdAt: -1 }).limit(10).toArray();
-    return ok(serialise({ sessions, mode: control.mode }));
+    const normalised = sessions
+      .map((session) => ({ ...session, purpose: session.purpose === "INVENTORY" ? "INVENTORY" : "POS" }))
+      .sort((left, right) => scannerActivityAt(right) - scannerActivityAt(left));
+    return ok(serialise({ sessions: normalised, mode: control.mode }));
   } catch (error) {
     return publicError(error);
   }
@@ -64,6 +68,36 @@ export async function POST(request: Request) {
     await writeAudit(db, auth.session, "scanner.issue", "scannerSession", result.insertedId.toHexString(), { label: document.label, purpose: document.purpose, expiresAt: document.expiresAt });
     const url = new URL(`/scan/${token}`, request.url).toString();
     return created(serialise({ session: { _id: result.insertedId, ...document, tokenHash: undefined }, url }));
+  } catch (error) {
+    return publicError(error);
+  }
+}
+
+export async function PATCH(request: Request) {
+  const auth = await authorize("pos.sell");
+  if (auth.error) return auth.error;
+  if (!sameOrigin(request)) return fail("This request was blocked.", 403);
+  try {
+    const input = routeSchema.safeParse(await request.json());
+    if (!input.success || !ObjectId.isValid(input.data?.id || "")) return fail("Choose an active scanner destination.", 422);
+    const db = await getDb();
+    const control = await getSystemControl(db);
+    if (control.mode !== "OPEN") return fail("Scanner routing can only change while the workspace is open.", 423);
+    const now = new Date();
+    const session = await db.collection("scannerSessions").findOneAndUpdate(
+      {
+        _id: new ObjectId(input.data.id),
+        createdBy: new ObjectId(auth.session.id),
+        revokedAt: { $exists: false },
+        expiresAt: { $gt: now },
+        generation: control.scannerGeneration,
+      },
+      { $set: { purpose: input.data.purpose, routedAt: now, updatedAt: now } },
+      { returnDocument: "after", projection: { tokenHash: 0 } },
+    );
+    if (!session) return fail("The scanner link is no longer active.", 410);
+    await writeAudit(db, auth.session, "scanner.route", "scannerSession", input.data.id, { purpose: input.data.purpose });
+    return ok(serialise({ ...session, purpose: input.data.purpose }));
   } catch (error) {
     return publicError(error);
   }

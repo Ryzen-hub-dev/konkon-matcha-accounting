@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Boxes, CircleDollarSign, Landmark, ReceiptText, TrendingUp } from "lucide-react";
-import { apiRequest, EmptyState, LoadingPanel, money, Notice, PageHeader, StatCard, useNotice } from "@/components/ui";
+import { apiRequest, EmptyState, LoadingPanel, Notice, PageHeader, StatCard, useNotice } from "@/components/ui";
+import { useBusiness } from "@/components/business-context";
 
 type ReportData = {
   days: number;
@@ -14,6 +15,7 @@ type ReportData = {
 };
 
 export function ReportsView() {
+  const { money } = useBusiness();
   const [days, setDays] = useState(30); const [data, setData] = useState<ReportData | null>(null); const [loading, setLoading] = useState(true); const { notice, show } = useNotice();
   useEffect(() => { setLoading(true); apiRequest<ReportData>(`/api/reports?days=${days}`).then(setData).catch((reason) => show(reason.message, "error")).finally(() => setLoading(false)); }, [days, show]);
   const max = useMemo(() => Math.max(...(data?.trend.map((point) => point.revenue) || [1]), 1), [data]);

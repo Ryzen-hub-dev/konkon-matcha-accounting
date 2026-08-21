@@ -2,6 +2,7 @@ import type { ClientSession, Db } from "mongodb";
 import { ensureDefaultInvoiceTemplate } from "@/lib/invoice-templates";
 import { ensureDefaultReceiptTemplate } from "@/lib/receipt-templates";
 import { ensureDefaultPaymentMethods } from "@/lib/payment-methods";
+import { DEFAULT_BUSINESS_SETTINGS } from "@/lib/business-settings";
 
 const starterProducts = [
   { sku: "MATCHA-A-30", name: "Gurēdo A Ceremonial · 30g", category: "Matcha powder", unit: "tin", price: 46.9, cost: 24, stock: 18, reorderLevel: 6 },
@@ -28,7 +29,12 @@ export async function seedWorkspace(db: Db, ownerId: unknown, businessName: stri
   );
   await db.collection("settings").updateOne(
     { key: "business" },
-    { $setOnInsert: { key: "business", businessName, currency: "SGD", taxName: "GST", taxRate: 0, taxMode: "EXCLUSIVE", pointsPerDollar: 1, createdAt: now }, $set: { updatedAt: now } },
+    { $setOnInsert: { ...DEFAULT_BUSINESS_SETTINGS, businessName, createdAt: now }, $set: { updatedAt: now } },
+    { upsert: true, ...(session ? { session } : {}) },
+  );
+  await db.collection("locations").updateOne(
+    { systemKey: "HEADQUARTERS" },
+    { $setOnInsert: { code: "HQ", name: `${businessName} HQ`, type: "HEADQUARTERS", countryCode: "SG", timeZone: "Asia/Singapore", locale: "en-SG", currency: "SGD", address: "", active: true, systemKey: "HEADQUARTERS", createdBy: ownerId, createdAt: now, updatedAt: now } },
     { upsert: true, ...(session ? { session } : {}) },
   );
   await db.collection("chartOfAccounts").bulkWrite(chartOfAccounts.map(([code, name, type]) => ({

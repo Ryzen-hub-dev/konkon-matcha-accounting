@@ -1,16 +1,18 @@
 import { asMoney } from "@/lib/format";
+import { roundCurrency } from "@/lib/international";
 
 export type TaxMode = "EXCLUSIVE" | "INCLUSIVE";
 
-export function calculateTaxTotals(subtotalValue: number, discountValue: number, taxRateValue: number, taxMode: TaxMode) {
-  const subtotal = Math.max(0, asMoney(subtotalValue));
-  const discount = Math.min(subtotal, Math.max(0, asMoney(discountValue)));
+export function calculateTaxTotals(subtotalValue: number, discountValue: number, taxRateValue: number, taxMode: TaxMode, currency = "SGD") {
+  const money = currency === "SGD" ? asMoney : (value: unknown) => roundCurrency(value, currency);
+  const subtotal = Math.max(0, money(subtotalValue));
+  const discount = Math.min(subtotal, Math.max(0, money(discountValue)));
   const taxRate = Math.max(0, Math.min(100, Number(taxRateValue || 0)));
-  const discountedTotal = asMoney(subtotal - discount);
+  const discountedTotal = money(subtotal - discount);
   const tax = taxMode === "INCLUSIVE"
-    ? asMoney(taxRate ? discountedTotal * (taxRate / (100 + taxRate)) : 0)
-    : asMoney(discountedTotal * (taxRate / 100));
-  const netSales = taxMode === "INCLUSIVE" ? asMoney(discountedTotal - tax) : discountedTotal;
-  const total = taxMode === "INCLUSIVE" ? discountedTotal : asMoney(discountedTotal + tax);
+    ? money(taxRate ? discountedTotal * (taxRate / (100 + taxRate)) : 0)
+    : money(discountedTotal * (taxRate / 100));
+  const netSales = taxMode === "INCLUSIVE" ? money(discountedTotal - tax) : discountedTotal;
+  const total = taxMode === "INCLUSIVE" ? discountedTotal : money(discountedTotal + tax);
   return { subtotal, discount, discountedTotal, taxRate, taxMode, tax, netSales, total };
 }

@@ -26,6 +26,11 @@ export type ReceiptPaperDocument = {
   paymentMethodName?: string;
   paymentKind?: "CASH" | "NON_CASH";
   paymentReference?: string;
+  paymentProvider?: string;
+  paymentVerificationMode?: "NONE" | "REFERENCE" | "PROVIDER";
+  tenderCurrency?: string;
+  tenderTotal?: number;
+  exchangeRate?: number;
   tenderedAmount?: number;
   changeDue?: number;
   saleNote?: string;
@@ -37,6 +42,11 @@ export type ReceiptPaperDocument = {
     address?: string;
     currency?: string;
     taxName?: string;
+    locale?: string;
+    timeZone?: string;
+    countryCode?: string;
+    franchiseBrand?: string;
+    franchiseCode?: string;
   };
 };
 
@@ -47,8 +57,12 @@ export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, co
 }) {
   const business = document.businessSnapshot || {};
   const currency = /^[A-Z]{3}$/.test(business.currency || "") ? business.currency! : "SGD";
-  const money = new Intl.NumberFormat("en-SG", { style: "currency", currency });
-  const dateTime = new Intl.DateTimeFormat("en-SG", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const locale = business.locale || "en-SG";
+  const timeZone = business.timeZone || "Asia/Singapore";
+  const tenderCurrency = /^[A-Z]{3}$/.test(document.tenderCurrency || "") ? document.tenderCurrency! : currency;
+  const money = new Intl.NumberFormat(locale, { style: "currency", currency });
+  const tenderMoney = new Intl.NumberFormat(locale, { style: "currency", currency: tenderCurrency });
+  const dateTime = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone });
   const style = { "--receipt-accent": template.accentColor } as CSSProperties;
   const isCash = document.paymentKind ? document.paymentKind === "CASH" : document.paymentMethod === "CASH";
 
@@ -56,6 +70,7 @@ export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, co
     <header className="receipt-paper-header">
       {template.logoDataUrl ? <img src={template.logoDataUrl} alt={`${business.businessName || "Business"} logo`} /> : <span className="receipt-leaf-mark"><Leaf size={18} /></span>}
       <strong>{business.businessName || "Kōn-Kōn Matchā"}</strong>
+      {business.franchiseCode ? <span>{business.franchiseBrand || "Franchise"} · {business.franchiseCode}</span> : null}
       {template.headerText ? <small>{template.headerText}</small> : null}
       {template.showBusinessAddress && business.address ? <p>{business.address}</p> : null}
       <span>{[business.phone, business.email].filter(Boolean).join(" · ")}</span>
@@ -93,7 +108,9 @@ export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, co
     {template.showPaymentDetails ? <dl className="receipt-paper-payment">
       <div><dt>Paid by</dt><dd>{document.paymentMethodName || document.paymentMethod}</dd></div>
       {document.paymentReference ? <div><dt>Reference</dt><dd>{document.paymentReference}</dd></div> : null}
-      {isCash ? <><div><dt>Cash received</dt><dd>{money.format(document.tenderedAmount || document.total)}</dd></div><div><dt>Change</dt><dd>{money.format(document.changeDue || 0)}</dd></div></> : null}
+      {document.paymentVerificationMode === "PROVIDER" ? <div><dt>Verification</dt><dd>{document.paymentProvider || "Provider"} confirmed</dd></div> : null}
+      {tenderCurrency !== currency ? <><div><dt>Settlement</dt><dd>{tenderMoney.format(document.tenderTotal || 0)}</dd></div><div><dt>FX rate</dt><dd>1 {currency} = {document.exchangeRate} {tenderCurrency}</dd></div></> : null}
+      {isCash ? <><div><dt>Cash received</dt><dd>{tenderMoney.format(document.tenderedAmount || document.tenderTotal || document.total)}</dd></div><div><dt>Change</dt><dd>{tenderMoney.format(document.changeDue || 0)}</dd></div></> : null}
     </dl> : null}
 
     {template.showPoints && document.pointsEarned ? <section className="receipt-points"><Leaf size={13} /><span><strong>+{document.pointsEarned} points</strong>{document.pointsBalance !== undefined ? ` · Balance ${document.pointsBalance}` : ""}</span></section> : null}

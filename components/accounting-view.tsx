@@ -2,7 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { BookOpen, CheckCircle2, Plus, Scale, Trash2 } from "lucide-react";
-import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, money, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
+import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
+import { useBusiness } from "@/components/business-context";
 
 type Account = { _id: string; code: string; name: string; type: string };
 type Line = { account: string; debit: number; credit: number };
@@ -10,6 +11,7 @@ type Entry = { _id: string; entryNo: string; date: string; memo: string; referen
 type JournalData = { entries: Entry[]; accounts: Account[] };
 
 export function AccountingView() {
+  const { money } = useBusiness();
   const [data, setData] = useState<JournalData>({ entries: [], accounts: [] }); const [loading, setLoading] = useState(true); const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false);
   const [lines, setLines] = useState<Line[]>([{ account: "", debit: 0, credit: 0 }, { account: "", debit: 0, credit: 0 }]); const { notice, show } = useNotice();
   async function load() { setLoading(true); try { setData(await apiRequest<JournalData>("/api/journals")); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not load the journal.", "error"); } finally { setLoading(false); } }

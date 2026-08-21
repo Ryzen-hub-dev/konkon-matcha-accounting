@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, Boxes, CircleDollarSign, ReceiptText, ShoppingBag, Users } from "lucide-react";
-import { apiRequest, dateTime, EmptyState, LoadingPanel, money, PageHeader, StatCard } from "@/components/ui";
+import { apiRequest, EmptyState, LoadingPanel, PageHeader, StatCard } from "@/components/ui";
+import { useBusiness } from "@/components/business-context";
 
 type DashboardData = {
   today: { revenue: number; transactions: number; averageSale: number };
@@ -31,6 +32,7 @@ function SalesChart({ points }: { points: DashboardData["dailySales"] }) {
 }
 
 export function DashboardView() {
+  const { money, dateTime } = useBusiness();
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState("");
   useEffect(() => { apiRequest<DashboardData>("/api/dashboard").then(setData).catch((reason) => setError(reason.message)); }, []);

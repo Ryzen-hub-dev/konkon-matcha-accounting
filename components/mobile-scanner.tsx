@@ -36,9 +36,9 @@ export function MobileScanner({ token }: { token: string }) {
     if (lastRef.current.code === code && now - lastRef.current.at < 1_500) return;
     busyRef.current = true;
     try {
-      await apiRequest("/api/mobile-scans", { method: "POST", body: JSON.stringify({ token, code }) });
+      const result = await apiRequest<{ purpose: "POS" | "INVENTORY" }>("/api/mobile-scans", { method: "POST", body: JSON.stringify({ token, code }) });
       lastRef.current = { code, at: now };
-      setStatus(`${code} sent instantly to the active screen.`);
+      setStatus(`${code} sent to ${result.purpose === "INVENTORY" ? "Inventory" : "Point of sale"}.`);
       setTone("good");
       navigator.vibrate?.([45, 30, 45]);
     } catch (reason) {

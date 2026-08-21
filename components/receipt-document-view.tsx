@@ -4,7 +4,8 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Printer, RotateCcw, ShoppingBasket } from "lucide-react";
 import { ReceiptPaper, type ReceiptPaperDocument } from "@/components/receipt-paper";
-import { apiRequest, EmptyState, LoadingPanel, Modal, money, Notice, shortDate, useNotice } from "@/components/ui";
+import { apiRequest, EmptyState, LoadingPanel, Modal, Notice, useNotice } from "@/components/ui";
+import { useBusiness } from "@/components/business-context";
 import { DEFAULT_RECEIPT_TEMPLATE, type ReceiptTemplateInput } from "@/lib/receipt-templates";
 
 type RefundableItem = ReceiptPaperDocument["items"][number] & { productId: string; refundedQuantity?: number };
@@ -25,6 +26,7 @@ type RefundRecord = {
 };
 
 export function ReceiptDocumentView({ id, canRefund = false, canSell = false }: { id: string; canRefund?: boolean; canSell?: boolean }) {
+  const { money, shortDate } = useBusiness();
   const [receipt, setReceipt] = useState<SaleReceipt | null>(null);
   const [refunds, setRefunds] = useState<RefundRecord[]>([]);
   const [loading, setLoading] = useState(true);

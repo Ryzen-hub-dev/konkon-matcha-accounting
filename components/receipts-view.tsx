@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { Banknote, Eye, ReceiptText, Search, ShoppingBasket } from "lucide-react";
-import { apiRequest, EmptyState, LoadingPanel, money, Notice, PageHeader, shortDate, StatusPill, useNotice } from "@/components/ui";
+import { apiRequest, EmptyState, LoadingPanel, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
+import { useBusiness } from "@/components/business-context";
 
 type Sale = {
   _id: string;
@@ -20,6 +21,7 @@ type Sale = {
 };
 
 export function ReceiptsView({ canSell = false }: { canSell?: boolean }) {
+  const { money, shortDate } = useBusiness();
   const [sales, setSales] = useState<Sale[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);

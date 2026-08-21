@@ -5,6 +5,7 @@ import { writeAudit } from "@/lib/audit";
 import { getDb, getMongoClient } from "@/lib/db";
 import { serialise } from "@/lib/format";
 import { ensureDefaultReceiptTemplate, receiptTemplateInputSchema } from "@/lib/receipt-templates";
+import { normaliseBusinessSettings } from "@/lib/business-settings";
 
 export const runtime = "nodejs";
 
@@ -28,13 +29,17 @@ export async function GET() {
       db.collection("receiptTemplates").find({ active: { $ne: false } }).sort({ isDefault: -1, updatedAt: -1 }).limit(100).toArray(),
       db.collection("settings").findOne({ key: "business" }),
     ]);
+    const profile = normaliseBusinessSettings(business);
     return ok(serialise({
       templates,
       register: {
-        currency: String(business?.currency || "SGD"),
-        taxName: String(business?.taxName || "GST"),
-        taxRate: Number(business?.taxRate || 0),
-        taxMode: business?.taxMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE",
+        currency: profile.currency,
+        acceptedCurrencies: profile.acceptedCurrencies,
+        locale: profile.locale,
+        timeZone: profile.timeZone,
+        taxName: profile.taxName,
+        taxRate: profile.taxRate,
+        taxMode: profile.taxMode,
       },
     }));
   } catch (error) {
