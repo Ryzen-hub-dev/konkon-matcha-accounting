@@ -6,7 +6,7 @@ import { useState } from "react";
 import {
   BarChart3, BookOpen, Boxes, ChevronLeft, ChevronRight, CircleDollarSign,
   FileText, LayoutDashboard, LogOut, Menu, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
-  Users, X,
+  Users, WalletCards, X,
 } from "lucide-react";
 import type { SessionUser, UserRole } from "@/lib/types";
 
@@ -16,6 +16,7 @@ const nav: NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/pos", label: "Point of sale", icon: ShoppingBasket, roles: ["OWNER", "ADMIN", "MANAGER", "CASHIER"] },
   { href: "/coupons", label: "Coupons", icon: TicketPercent, roles: ["OWNER", "ADMIN", "MANAGER", "CASHIER"] },
+  { href: "/payments", label: "Payment methods", icon: WalletCards, roles: ["OWNER", "ADMIN"] },
   { href: "/receipts", label: "Receipts", icon: ReceiptText, roles: ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT", "CASHIER"] },
   { href: "/members", label: "Members", icon: Users },
   { href: "/inventory", label: "Inventory", icon: Boxes },

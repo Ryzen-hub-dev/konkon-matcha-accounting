@@ -12,6 +12,34 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Custom invoice and receipt templates, print/reprint, refund and historical snapshots
 - Manual journals, chart of accounts and core management reports
 - 24-hour token-restricted phone scanner passes compatible with Vercel serverless
+- Low-latency auto-connected POS/Inventory scanner bridge with native + ZXing camera decoding
+- Administrator-defined payment methods with reference controls and ledger-account routing
+
+## AutoCount comparison baseline (reviewed 22 August 2026)
+
+AutoCount does not publish one honest, edition-independent “total feature count.” Its official Accounting pages state that there are up to 15 document-entry types and more than 1,000 report combinations, while editions, POS and add-ons provide different sets. Treating those report combinations as 1,000 separate software functions would be misleading.
+
+For a reproducible comparison, this project counts the 72 individual entries in AutoCount's official POS “Features Summary” once each. Against that fixed POS list, the current Kōn-Kōn web application has:
+
+- 38 fully covered entries
+- 4 partially covered entries
+- 30 not yet covered entries
+- 42 of 72 entries with at least partial coverage (58.3%)
+
+Breakdown by the official POS headings:
+
+- Receipt printing: 5 full, 1 partial, 1 missing
+- Transactions: 3 full, 0 partial, 7 missing
+- Data entry: 3 full, 2 partial, 6 missing
+- Multiple payment methods: 1 full, 0 partial, 0 missing
+- Routine operation: 2 full, 0 partial, 3 missing
+- Back-end maintenance: 11 full, 1 partial, 3 missing
+- POS reports: 9 full, 0 partial, 5 missing
+- Stock reports: 4 full, 0 partial, 5 missing
+
+“Partial” is used when the safe web workflow covers only part of the named desktop feature—for example quantity changes without per-line price override, or scanner-pass terminal control without full multi-outlet terminal maintenance. The comparison source is AutoCount's [official POS feature summary](https://member.autocountsoft.com/products/ac_pos/helpfile/pos_introduction.htm). The wider roadmap is also checked against the [official AutoCount Cloud Accounting feature and plan page](https://www.autocountsoft.com/pro-cloud-acc.html) and the [official Accounting feature pages](https://member.autocountsoft.com/products/ac_accounting/info/features1.aspx).
+
+This count is a delivery benchmark, not a claim of AutoCount parity. Accounting, country compliance and optional plug-ins are tracked below and must pass their own acceptance tests before being counted as shipped.
 
 ## Next accounting modules
 

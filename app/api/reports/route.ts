@@ -25,7 +25,7 @@ export async function GET(request: Request) {
       ]).toArray(),
       db.collection("sales").aggregate([
         { $match: { status: { $in: ["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] }, createdAt: { $gte: from } } },
-        { $group: { _id: "$paymentMethod", value: { $sum: { $subtract: ["$total", { $ifNull: ["$refundedAmount", 0] }] } }, count: { $sum: 1 } } },
+        { $group: { _id: { $ifNull: ["$paymentMethodName", "$paymentMethod"] }, value: { $sum: { $subtract: ["$total", { $ifNull: ["$refundedAmount", 0] }] } }, count: { $sum: 1 } } },
         { $sort: { value: -1 } },
       ]).toArray(),
       db.collection("products").aggregate([

@@ -9,21 +9,25 @@ import { getSystemControl } from "@/lib/system-control";
 
 export const runtime = "nodejs";
 
-const createSchema = z.object({ label: z.string().trim().min(2).max(60).default("Mobile scanner") });
+const purposeSchema = z.enum(["POS", "INVENTORY"]);
+const createSchema = z.object({ label: z.string().trim().min(2).max(60).default("Mobile scanner"), purpose: purposeSchema.default("POS") });
 const revokeSchema = z.object({ id: z.string().length(24) });
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await authorize("pos.sell");
   if (auth.error) return auth.error;
   try {
     const db = await getDb();
     const control = await getSystemControl(db);
     const now = new Date();
+    const requestedPurpose = purposeSchema.safeParse(new URL(request.url).searchParams.get("purpose") || "POS");
+    if (!requestedPurpose.success) return fail("Choose a valid scanner purpose.", 422);
     const sessions = await db.collection("scannerSessions").find({
       createdBy: new ObjectId(auth.session.id),
       revokedAt: { $exists: false },
       expiresAt: { $gt: now },
       generation: control.scannerGeneration,
+      ...(requestedPurpose.data === "POS" ? { $or: [{ purpose: "POS" }, { purpose: { $exists: false } }] } : { purpose: "INVENTORY" }),
     }, { projection: { tokenHash: 0 } }).sort({ createdAt: -1 }).limit(10).toArray();
     return ok(serialise({ sessions, mode: control.mode }));
   } catch (error) {
@@ -47,6 +51,7 @@ export async function POST(request: Request) {
     const now = new Date();
     const document = {
       label: input.data.label,
+      purpose: input.data.purpose,
       tokenHash: scannerTokenHash(token),
       generation: control.scannerGeneration,
       createdBy: new ObjectId(auth.session.id),
@@ -56,7 +61,7 @@ export async function POST(request: Request) {
       updatedAt: now,
     };
     const result = await db.collection("scannerSessions").insertOne(document);
-    await writeAudit(db, auth.session, "scanner.issue", "scannerSession", result.insertedId.toHexString(), { label: document.label, expiresAt: document.expiresAt });
+    await writeAudit(db, auth.session, "scanner.issue", "scannerSession", result.insertedId.toHexString(), { label: document.label, purpose: document.purpose, expiresAt: document.expiresAt });
     const url = new URL(`/scan/${token}`, request.url).toString();
     return created(serialise({ session: { _id: result.insertedId, ...document, tokenHash: undefined }, url }));
   } catch (error) {

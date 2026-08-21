@@ -21,6 +21,7 @@ import { computeCouponDiscount } from "../lib/coupons";
 import { createScannerToken, normaliseScanCode, scannerTokenHash } from "../lib/scanner";
 import { normalisePrivateIdentifier, privateIdentifierHash } from "../lib/sensitive";
 import { isWritePermission } from "../lib/system-control";
+import { DEFAULT_PAYMENT_METHODS, paymentMethodSchema, paymentMethodUpdateSchema } from "../lib/payment-methods";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -45,12 +46,28 @@ test("document numbers are recognisable and collision resistant", () => {
 
 test("cashier permissions stop at the counter", () => {
   assert.equal(hasPermission("CASHIER", "pos.sell"), true);
+  assert.equal(hasPermission("CASHIER", "payments.read"), true);
+  assert.equal(hasPermission("CASHIER", "payments.manage"), false);
   assert.equal(hasPermission("CASHIER", "coupons.read"), true);
   assert.equal(hasPermission("CASHIER", "coupons.manage"), false);
   assert.equal(hasPermission("CASHIER", "receipts.read"), true);
   assert.equal(hasPermission("CASHIER", "receipts.manage"), false);
   assert.equal(hasPermission("CASHIER", "accounting.write"), false);
   assert.equal(hasPermission("CASHIER", "team.write"), false);
+});
+
+test("custom payment methods preserve trusted tender and ledger rules", () => {
+  assert.equal(DEFAULT_PAYMENT_METHODS.length, 3);
+  const wallet = paymentMethodSchema.safeParse({ code: " grab-pay ", name: "GrabPay", kind: "NON_CASH", accountCode: "1010", referenceRequired: true, sortOrder: "40" });
+  assert.equal(wallet.success, true);
+  if (wallet.success) {
+    assert.equal(wallet.data.code, "GRAB-PAY");
+    assert.equal(wallet.data.referenceRequired, true);
+    assert.equal(wallet.data.sortOrder, 40);
+  }
+  assert.equal(paymentMethodSchema.safeParse({ code: "!", name: "X", kind: "CRYPTO", accountCode: "9999" }).success, false);
+  const archiveOnly = paymentMethodUpdateSchema.safeParse({ id: "a".repeat(24), active: false });
+  assert.equal(archiveOnly.success, true);
 });
 
 test("coupon discounts are bounded and calculated on the server model", () => {
@@ -86,6 +103,7 @@ test("system modes recognise every business mutation as a write", () => {
   assert.equal(isWritePermission("pos.sell"), true);
   assert.equal(isWritePermission("inventory.write"), true);
   assert.equal(isWritePermission("coupons.manage"), true);
+  assert.equal(isWritePermission("payments.manage"), true);
   assert.equal(isWritePermission("reports.read"), false);
 });
 

@@ -3,6 +3,8 @@ import type { UserRole } from "@/lib/types";
 export const PERMISSIONS = [
   "dashboard.read",
   "pos.sell",
+  "payments.read",
+  "payments.manage",
   "coupons.read",
   "coupons.manage",
   "receipts.read",
@@ -30,13 +32,13 @@ const rolePermissions: Record<UserRole, ReadonlySet<Permission>> = {
   MANAGER: new Set([
     "dashboard.read", "pos.sell", "members.read", "members.write", "inventory.read",
     "inventory.write", "invoices.read", "invoices.write", "reports.read", "team.read",
-    "receipts.read", "receipts.manage", "coupons.read", "coupons.manage",
+    "receipts.read", "receipts.manage", "coupons.read", "coupons.manage", "payments.read",
   ]),
   ACCOUNTANT: new Set([
     "dashboard.read", "members.read", "inventory.read", "accounting.read",
-    "accounting.write", "invoices.read", "invoices.write", "reports.read", "receipts.read",
+    "accounting.write", "invoices.read", "invoices.write", "reports.read", "receipts.read", "payments.read",
   ]),
-  CASHIER: new Set(["dashboard.read", "pos.sell", "coupons.read", "receipts.read", "members.read", "members.write", "inventory.read"]),
+  CASHIER: new Set(["dashboard.read", "pos.sell", "payments.read", "coupons.read", "receipts.read", "members.read", "members.write", "inventory.read"]),
 };
 
 export function hasPermission(role: UserRole, permission: Permission) {

@@ -134,6 +134,7 @@ export async function POST(request: Request) {
           total: totals.total,
           totalCost: lineCost,
           paymentMethod: sale.paymentMethod,
+          paymentMethodName: sale.paymentMethodName || sale.paymentMethod,
           pointsReversed,
           createdBy: new ObjectId(auth.session.id),
           createdByName: auth.session.fullName,
@@ -188,7 +189,7 @@ export async function POST(request: Request) {
           );
         }
 
-        const cashAccount = sale.paymentMethod === "CASH" ? ["1000", "Cash on hand"] : ["1010", "Bank"];
+        const paymentAccount = [String(sale.paymentAccountCode || (sale.paymentMethod === "CASH" ? "1000" : "1010")), String(sale.paymentAccountName || (sale.paymentMethod === "CASH" ? "Cash on hand" : "Bank"))];
         await db.collection("journalEntries").insertOne({
           entryNo: journalNo,
           date: now,
@@ -199,7 +200,7 @@ export async function POST(request: Request) {
           lines: [
             { accountCode: "4000", accountName: "Product sales", debit: totals.netSales, credit: 0 },
             ...(totals.tax > 0 ? [{ accountCode: "2100", accountName: "GST payable", debit: totals.tax, credit: 0 }] : []),
-            { accountCode: cashAccount[0], accountName: cashAccount[1], debit: 0, credit: totals.total },
+            { accountCode: paymentAccount[0], accountName: paymentAccount[1], debit: 0, credit: totals.total },
             { accountCode: "1200", accountName: "Inventory", debit: lineCost, credit: 0 },
             { accountCode: "5000", accountName: "Cost of goods sold", debit: 0, credit: lineCost },
           ],

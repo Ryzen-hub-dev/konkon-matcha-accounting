@@ -23,6 +23,8 @@ export type ReceiptPaperDocument = {
   total: number;
   refundedAmount?: number;
   paymentMethod: string;
+  paymentMethodName?: string;
+  paymentKind?: "CASH" | "NON_CASH";
   paymentReference?: string;
   tenderedAmount?: number;
   changeDue?: number;
@@ -48,7 +50,7 @@ export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, co
   const money = new Intl.NumberFormat("en-SG", { style: "currency", currency });
   const dateTime = new Intl.DateTimeFormat("en-SG", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const style = { "--receipt-accent": template.accentColor } as CSSProperties;
-  const isCash = document.paymentMethod === "CASH";
+  const isCash = document.paymentKind ? document.paymentKind === "CASH" : document.paymentMethod === "CASH";
 
   return <article className={`thermal-receipt receipt-width-${template.paperWidth.toLowerCase()} receipt-density-${template.density.toLowerCase()} ${compact ? "thermal-receipt-compact" : ""}`} style={style}>
     <header className="receipt-paper-header">
@@ -89,7 +91,7 @@ export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, co
     </dl>
 
     {template.showPaymentDetails ? <dl className="receipt-paper-payment">
-      <div><dt>Paid by</dt><dd>{document.paymentMethod}</dd></div>
+      <div><dt>Paid by</dt><dd>{document.paymentMethodName || document.paymentMethod}</dd></div>
       {document.paymentReference ? <div><dt>Reference</dt><dd>{document.paymentReference}</dd></div> : null}
       {isCash ? <><div><dt>Cash received</dt><dd>{money.format(document.tenderedAmount || document.total)}</dd></div><div><dt>Change</dt><dd>{money.format(document.changeDue || 0)}</dd></div></> : null}
     </dl> : null}

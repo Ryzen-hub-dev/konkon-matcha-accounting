@@ -7,12 +7,13 @@ import { asMoney, makeDocumentNo, serialise } from "@/lib/format";
 import { DEFAULT_RECEIPT_TEMPLATE, ensureDefaultReceiptTemplate, normaliseReceiptTemplate } from "@/lib/receipt-templates";
 import { calculateTaxTotals } from "@/lib/tax";
 import { CouponError, validateCoupon } from "@/lib/coupons";
+import { ensureDefaultPaymentMethods } from "@/lib/payment-methods";
 
 export const runtime = "nodejs";
 
 const saleSchema = z.object({
   memberId: z.union([z.string().length(24), z.literal(""), z.null()]).optional(),
-  paymentMethod: z.enum(["CASH", "CARD", "PAYNOW", "OTHER"]),
+  paymentMethod: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{2,24}$/),
   paymentReference: z.string().trim().max(80).default(""),
   tenderedAmount: z.coerce.number().min(0).max(100_000_000).optional(),
   templateId: z.union([z.string().length(24), z.literal("")]).default(""),
@@ -27,6 +28,7 @@ const saleSchema = z.object({
 });
 
 class StockError extends Error {}
+class PaymentError extends Error {}
 
 async function readBody(request: Request) {
   try {
@@ -81,6 +83,10 @@ export async function POST(request: Request) {
 
     const db = await getDb();
     await ensureDefaultReceiptTemplate(db, new ObjectId(auth.session.id));
+    await ensureDefaultPaymentMethods(db, new ObjectId(auth.session.id));
+    const selectedPayment = await db.collection("paymentMethods").findOne({ code: input.data.paymentMethod, active: { $ne: false } });
+    if (!selectedPayment) return fail("Choose an active payment method.", 422, { paymentMethod: ["This payment method is unavailable."] });
+    if (selectedPayment.referenceRequired && !input.data.paymentReference) return fail(`${selectedPayment.name} requires a transaction reference.`, 422, { paymentReference: ["Enter the transaction or approval reference."] });
     const ids = [...quantities.keys()].map((id) => new ObjectId(id));
     const products = await db.collection("products").find({ _id: { $in: ids }, active: { $ne: false } }).toArray();
     if (products.length !== ids.length) return fail("One or more products are no longer available.", 409);
@@ -125,11 +131,12 @@ export async function POST(request: Request) {
     if (discount > subtotal) return fail("Combined discounts cannot exceed the subtotal.", 422);
     const taxMode = business?.taxMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE";
     const { taxRate, tax, netSales, total } = calculateTaxTotals(subtotal, discount, Number(business?.taxRate || 0), taxMode);
-    const tenderedAmount = input.data.paymentMethod === "CASH" ? asMoney(input.data.tenderedAmount || 0) : total;
-    if (input.data.paymentMethod === "CASH" && tenderedAmount < total) {
+    const isCashPayment = selectedPayment.kind === "CASH";
+    const tenderedAmount = isCashPayment ? asMoney(input.data.tenderedAmount || 0) : total;
+    if (isCashPayment && tenderedAmount < total) {
       return fail("Cash received must cover the amount due.", 422, { tenderedAmount: ["Enter the cash received from the customer."] });
     }
-    const changeDue = input.data.paymentMethod === "CASH" ? asMoney(tenderedAmount - total) : 0;
+    const changeDue = isCashPayment ? asMoney(tenderedAmount - total) : 0;
     const totalCost = asMoney(items.reduce((sum, item) => sum + item.lineCost, 0));
     const receiptNo = makeDocumentNo("KKM");
     const journalNo = makeDocumentNo("JE");
@@ -160,6 +167,10 @@ export async function POST(request: Request) {
       total,
       totalCost,
       paymentMethod: input.data.paymentMethod,
+      paymentMethodName: String(selectedPayment.name),
+      paymentKind: selectedPayment.kind === "CASH" ? "CASH" : "NON_CASH",
+      paymentAccountCode: String(selectedPayment.accountCode),
+      paymentAccountName: String(selectedPayment.accountName),
       paymentReference: input.data.paymentReference,
       tenderedAmount,
       changeDue,
@@ -186,6 +197,8 @@ export async function POST(request: Request) {
     const mongoSession = client.startSession();
     try {
       await mongoSession.withTransaction(async () => {
+        const paymentStillActive = await db.collection("paymentMethods").findOne({ _id: selectedPayment._id, active: { $ne: false } }, { session: mongoSession });
+        if (!paymentStillActive) throw new PaymentError("The payment method became unavailable before checkout. Choose another method.");
         if (couponResult) {
           const refreshed = await validateCoupon(db, couponResult.coupon.code, subtotal, member?._id.toHexString() || null, mongoSession);
           if (!refreshed || refreshed.discount !== couponDiscount) throw new CouponError("The coupon changed before checkout. Review the order and try again.");
@@ -241,7 +254,7 @@ export async function POST(request: Request) {
             { session: mongoSession },
           );
         }
-        const cashAccount = input.data.paymentMethod === "CASH" ? ["1000", "Cash on hand"] : ["1010", "Bank"];
+        const paymentAccount = [String(selectedPayment.accountCode), String(selectedPayment.accountName)];
         const revenueLines = [
           { accountCode: "4000", accountName: "Product sales", debit: 0, credit: netSales },
           ...(tax > 0 ? [{ accountCode: "2100", accountName: "GST payable", debit: 0, credit: tax }] : []),
@@ -254,7 +267,7 @@ export async function POST(request: Request) {
           source: "POS",
           status: "POSTED",
           lines: [
-            { accountCode: cashAccount[0], accountName: cashAccount[1], debit: total, credit: 0 },
+            { accountCode: paymentAccount[0], accountName: paymentAccount[1], debit: total, credit: 0 },
             ...revenueLines,
             { accountCode: "5000", accountName: "Cost of goods sold", debit: totalCost, credit: 0 },
             { accountCode: "1200", accountName: "Inventory", debit: 0, credit: totalCost },
@@ -271,7 +284,7 @@ export async function POST(request: Request) {
     }
     return created(serialise(sale));
   } catch (error) {
-    if (error instanceof StockError || error instanceof CouponError) return fail(error.message, 409);
+    if (error instanceof StockError || error instanceof CouponError || error instanceof PaymentError) return fail(error.message, 409);
     if ((error as { code?: number }).code === 11000) return fail("The receipt number collided. Please submit the sale again.", 409);
     return publicError(error);
   }

@@ -1,0 +1,94 @@
+"use client";
+
+import { FormEvent, useEffect, useState } from "react";
+import { Archive, Banknote, CreditCard, Landmark, Pencil, Plus, ReceiptText, RotateCcw, ShieldCheck } from "lucide-react";
+import { apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
+import type { PaymentMethodRecord } from "@/lib/payment-methods";
+
+type AssetAccount = { _id: string; code: string; name: string; type: "ASSET" };
+
+export function PaymentMethodsView() {
+  const [methods, setMethods] = useState<PaymentMethodRecord[]>([]);
+  const [accounts, setAccounts] = useState<AssetAccount[]>([]);
+  const [editing, setEditing] = useState<PaymentMethodRecord | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const { notice, show } = useNotice();
+
+  async function load() {
+    setLoading(true);
+    try {
+      const [paymentData, accountData] = await Promise.all([
+        apiRequest<PaymentMethodRecord[]>("/api/payment-methods?includeArchived=1"),
+        apiRequest<AssetAccount[]>("/api/payment-methods/accounts"),
+      ]);
+      setMethods(paymentData);
+      setAccounts(accountData);
+    } catch (reason) { show(reason instanceof Error ? reason.message : "Could not load payment methods.", "error"); }
+    finally { setLoading(false); }
+  }
+  useEffect(() => { void load(); }, []);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    const form = new FormData(event.currentTarget);
+    const body = {
+      ...(editing ? { id: editing._id } : {}),
+      code: String(form.get("code") || "").toUpperCase(),
+      name: form.get("name"),
+      kind: form.get("kind"),
+      accountCode: form.get("accountCode"),
+      sortOrder: form.get("sortOrder"),
+      referenceRequired: form.has("referenceRequired"),
+    };
+    try {
+      await apiRequest("/api/payment-methods", { method: editing ? "PATCH" : "POST", body: JSON.stringify(body) });
+      show(editing ? "Payment method updated." : "Payment method added to the register.");
+      setEditing(null); setAdding(false); await load();
+    } catch (reason) { show(reason instanceof Error ? reason.message : "Could not save the payment method.", "error"); }
+    finally { setBusy(false); }
+  }
+
+  async function setActive(method: PaymentMethodRecord, active: boolean) {
+    if (!active && !window.confirm(`Archive ${method.name}? Existing receipts and journal entries will remain unchanged.`)) return;
+    try {
+      if (active) await apiRequest("/api/payment-methods", { method: "PATCH", body: JSON.stringify({ id: method._id, active: true }) });
+      else await apiRequest("/api/payment-methods", { method: "DELETE", body: JSON.stringify({ id: method._id }) });
+      show(active ? `${method.name} is available at POS again.` : `${method.name} archived.`);
+      await load();
+    } catch (reason) { show(reason instanceof Error ? reason.message : "Could not change the payment method.", "error"); }
+  }
+
+  const active = methods.filter((method) => method.active !== false);
+  const referenceCount = active.filter((method) => method.referenceRequired).length;
+  const selected = editing;
+
+  return <div className="page page-enter payment-page">
+    <PageHeader eyebrow="REGISTER ROUTING" title="Payment methods" description="Add the tender names staff see at checkout and control exactly where each amount posts in the ledger." action={<button className="button button-primary" onClick={() => { setEditing(null); setAdding(true); }}><Plus />New payment method</button>} />
+    {notice ? <Notice {...notice} /> : null}
+    <section className="payment-route-hero"><div><Banknote /><span>ACTIVE TENDERS</span><strong>{active.length}</strong></div><i /><div><ShieldCheck /><span>REFERENCE CONTROL</span><strong>{referenceCount}</strong></div><i /><p><b>One sale, one trusted route.</b><span>Every POS payment is revalidated by the API and debited to the chosen cash or bank asset account.</span></p></section>
+    {loading ? <LoadingPanel label="Reading the till routes…" /> : methods.length ? <section className="payment-route-list">{methods.map((method) => {
+      const Icon = method.kind === "CASH" ? Banknote : method.code.includes("CARD") ? CreditCard : Landmark;
+      return <article key={method._id} className={method.active === false ? "archived" : ""}>
+        <div className="payment-route-stamp"><Icon /></div>
+        <div><span>{method.code}</span><strong>{method.name}</strong><small>{method.referenceRequired ? "Transaction reference required" : "Reference optional"}</small></div>
+        <div className="payment-route-line"><i /><ReceiptText /><i /></div>
+        <div><span>LEDGER DESTINATION</span><strong>{method.accountCode} · {method.accountName}</strong><small>{method.kind === "CASH" ? "Cash tender · change enabled" : "Non-cash tender · exact amount"}</small></div>
+        <StatusPill value={method.active === false ? "ARCHIVED" : "ACTIVE"} />
+        <div className="row-actions">{method.active === false ? <button className="button button-secondary" onClick={() => void setActive(method, true)}><RotateCcw />Restore</button> : <><button className="icon-button" title="Edit payment method" onClick={() => { setAdding(false); setEditing(method); }}><Pencil /></button><button className="icon-button danger" title="Archive payment method" onClick={() => void setActive(method, false)}><Archive /></button></>}</div>
+      </article>;
+    })}</section> : <EmptyState title="No payment routes" detail="Add at least one cash or non-cash method before using the register." action={<button className="button button-primary" onClick={() => setAdding(true)}><Plus />Add payment method</button>} />}
+    <Modal open={adding || Boolean(editing)} onClose={() => { setAdding(false); setEditing(null); }} title={selected ? `Edit ${selected.name}` : "New payment method"} kicker="TENDER + LEDGER">
+      <form className="modal-form" onSubmit={save} key={selected?._id || "new-payment"}>
+        <div className="form-grid two"><label className="field"><span>Display name</span><input name="name" defaultValue={selected?.name} placeholder="GrabPay" minLength={2} maxLength={60} required /></label><label className="field"><span>Code</span><input name="code" defaultValue={selected?.code} placeholder="GRABPAY" pattern="[A-Za-z0-9_-]{2,24}" required /></label></div>
+        <div className="form-grid two"><label className="field"><span>Payment behaviour</span><select name="kind" defaultValue={selected?.kind || "NON_CASH"}><option value="CASH">Cash · tender and change</option><option value="NON_CASH">Non-cash · exact amount</option></select></label><label className="field"><span>Asset account</span><select name="accountCode" defaultValue={selected?.accountCode || accounts[0]?.code} required>{accounts.map((account) => <option key={account._id} value={account.code}>{account.code} · {account.name}</option>)}</select></label></div>
+        <label className="field"><span>POS order</span><input name="sortOrder" type="number" min="0" max="999" step="1" defaultValue={selected?.sortOrder ?? 100} required /></label>
+        <label className="check-row"><input type="checkbox" name="referenceRequired" defaultChecked={selected?.referenceRequired} /><span><strong>Require a transaction reference</strong><small>Checkout remains locked until staff enter an approval, cheque or wallet reference.</small></span></label>
+        <footer><button type="button" className="button button-secondary" onClick={() => { setAdding(false); setEditing(null); }}>Cancel</button><button className="button button-primary" disabled={busy || !accounts.length}>{busy ? "Saving…" : "Save payment method"}</button></footer>
+      </form>
+    </Modal>
+  </div>;
+}

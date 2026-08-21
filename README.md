@@ -20,7 +20,8 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 
 ### POS, receipts and promotions
 
-- Product cart, member selection, Cash/Card/PayNow tenders and payment references.
+- Product cart, member selection, administrator-defined payment methods and optional/required payment references.
+- Payment-method routing to an active cash/bank asset account, revalidated by the API and snapshotted on each sale for accurate refunds.
 - Server-calculated prices, coupon discounts, tax, cash received and change due.
 - Manager-only manual discounts; Cashiers cannot submit arbitrary discount values.
 - Percentage and fixed coupons with start/end time, minimum spend, total-use limit and per-member limit.
@@ -31,13 +32,15 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 ### Barcode and mobile scanning
 
 - Optional unique barcode on each product; products without manufacturer codes remain supported.
-- USB/Bluetooth keyboard-wedge scanner input in product setup and POS.
-- A single POS scan dock recognises a product barcode/SKU, member card/member number or coupon code.
+- USB/Bluetooth keyboard-wedge scanner input in Inventory and POS.
+- A shared live scanner bridge recognises a product barcode/SKU, member card/member number or coupon code in POS.
+- Inventory scans open an existing product editor or open a new product form with the new barcode already populated.
 - Up to five active mobile-scanner passes per operator.
 - Mobile pass contains a 256-bit random bearer token; MongoDB stores only its SHA-256 hash.
 - Pass expires after 24 hours, can be revoked immediately and is invalidated whenever the Owner changes system mode.
 - The public mobile page can only send codes. It cannot read the catalogue, member data, pricing or reports.
-- MongoDB polling is used instead of WebSockets to remain compatible with Vercel Hobby/serverless execution.
+- Three-second bounded long polling lowers average delivery latency to roughly one polling slice (250 ms) without a persistent WebSocket server, remaining compatible with Vercel Hobby/serverless execution.
+- Mobile camera decoding uses native multi-format detection where available and dynamically loads ZXing 1D/2D fallback support elsewhere; previously granted camera permission starts automatically.
 
 ### Members and data protection
 
@@ -73,7 +76,7 @@ Core endpoints:
 
 - `/api/setup`, `/api/auth/login`, `/api/auth/logout`, `/api/profile`
 - `/api/users`, `/api/system-control`, `/api/ownership-transfer`
-- `/api/products`, `/api/members`, `/api/coupons`
+- `/api/products`, `/api/members`, `/api/coupons`, `/api/payment-methods`
 - `/api/scanner-sessions`, `/api/mobile-scans`
 - `/api/sales`, `/api/refunds`, `/api/receipt-templates`
 - `/api/invoices`, `/api/invoice-templates`, `/api/journals`, `/api/reports`
@@ -106,7 +109,7 @@ The current suite covers authentication errors, origin protection, RBAC, MongoDB
 
 - Node.js routes are short-lived and stateless; MongoDB owns durable scanner and transaction state.
 - MongoDB client reuse is global per warm function instance with `maxPoolSize: 5`, `minPoolSize: 0` and idle cleanup.
-- Mobile scanning polls only while a POS operator selects a live pass, every four seconds, and stops when the tab is hidden.
+- POS and Inventory automatically select the newest live phone pass. A bounded three-second wait returns scans in 250 ms slices, aborts when the page unmounts and pauses while the tab is hidden.
 - TTL indexes automatically remove expired scanner sessions/events, authentication throttles and sensitive lookup events.
 - No long-running server, filesystem persistence, WebSocket server or background worker is required.
 - `vercel.json` pins functions to Singapore and enables Fluid Compute.

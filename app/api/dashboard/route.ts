@@ -28,7 +28,7 @@ export async function GET() {
       ]).next(),
       db.collection("members").countDocuments({ active: { $ne: false } }),
       db.collection("products").countDocuments({ active: { $ne: false }, $expr: { $lte: ["$stock", "$reorderLevel"] } }),
-      db.collection("sales").find({ status: { $in: ["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] } }).sort({ createdAt: -1 }).limit(6).project({ receiptNo: 1, memberName: 1, total: 1, refundedAmount: 1, paymentMethod: 1, status: 1, createdAt: 1 }).toArray(),
+      db.collection("sales").find({ status: { $in: ["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] } }).sort({ createdAt: -1 }).limit(6).project({ receiptNo: 1, memberName: 1, total: 1, refundedAmount: 1, paymentMethod: 1, paymentMethodName: 1, status: 1, createdAt: 1 }).toArray(),
       db.collection("sales").aggregate([
         { $match: { status: { $in: ["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"] }, createdAt: { $gte: new Date(Date.now() - 6 * 86400000) } } },
         { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "+08:00" } }, total: { $sum: { $subtract: ["$total", { $ifNull: ["$refundedAmount", 0] }] } } } },

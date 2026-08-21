@@ -36,7 +36,8 @@ export async function apiRequest<T>(url: string, init?: RequestInit): Promise<T>
   let response: Response;
   try {
     response = await fetch(url, { ...init, credentials: "same-origin", headers });
-  } catch {
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === "AbortError") throw reason;
     throw new ApiRequestError("Could not reach the server. Check your connection and try again.", 0);
   }
 
