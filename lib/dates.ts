@@ -1,5 +1,18 @@
 const LOCAL_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
 
+export function dateKeyInTimeZone(value: string | number | Date, timeZone: string) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error("Choose a valid date.");
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
+  return `${read("year")}-${read("month")}-${read("day")}`;
+}
+
 export function localDateTimeToUtcIso(value: string, timezoneOffsetMinutes?: number) {
   const trimmed = value.trim();
   const parts = LOCAL_DATE_TIME.exec(trimmed);

@@ -42,6 +42,7 @@ Indexes are created automatically on first connection. The application stores:
 - `users`, `systemLocks` and `auditLogs`
 - `settings`, `settingsHistory`, `locations`, `exchangeRates` and `chartOfAccounts`
 - `products` and `stockMovements`
+- `suppliers`, `purchaseOrders`, `goodsReceipts`, `accountsPayableBills` and `supplierPayments`
 - `members`, `sales`, `journalEntries` and `invoices`
 - `coupons` and `couponRedemptions`
 - `scannerSessions` and short-lived `scannerEvents`
@@ -64,4 +65,6 @@ No database exports or real customer records belong in Git.
 - Refreshing or changing pages restores the active POS order from the current cashier's browser without persisting payment references or provider confirmation codes.
 - Read-only mode blocks writes; closed mode blocks business APIs; reopening restores access.
 - A paid invoice creates a cash-basis bank/revenue journal, including GST payable when configured.
+- A supplier can be created, a purchase order approved, partially received and completed; each retry returns the original receipt without increasing stock twice.
+- Each goods receipt creates one supplier bill and balanced inventory/input-tax/AP journal, and each bill payment creates one balanced cash/bank/AP journal with any realised FX difference.
 - `npm run build` passes in the deployment log.

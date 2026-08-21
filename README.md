@@ -65,6 +65,16 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Draft/sent/paid/void invoices with custom uploadable JSON templates and printable documents.
 - Sales, margin, tender, inventory-value and receivable reports.
 
+### Purchasing and accounts payable
+
+- Auditable supplier master records with country, currency, tax/registration details, terms, lead time and archive/restore controls.
+- Draft, maker-checker approve, cancel and partially receive purchase orders with immutable supplier, product, location, time-zone, tax and exchange-rate snapshots.
+- Atomic goods receipt posting: stock, weighted-average cost, stock movement, supplier bill, input tax, accounts payable, journal and audit event succeed or roll back together.
+- Duplicate-request and duplicate-supplier-invoice protection prevents double receipts, duplicate inventory and repeated payables.
+- Partial/full supplier settlement from approved cash/bank accounts with unique bank-reference protection, payment-time FX rates and automatic exchange-gain/loss journals.
+- Smart Replenishment combines reorder thresholds, trailing 30-day unit demand and supplier lead time, then deducts quantities already inbound on open purchase orders.
+- Supply Pulse scores suppliers from actual on-time receipts, average lateness and overdue commitments.
+
 ## API contract
 
 Every application endpoint returns JSON in one of these forms:
@@ -85,6 +95,7 @@ Core endpoints:
 - `/api/scanner-sessions`, `/api/mobile-scans`
 - `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`
 - `/api/invoices`, `/api/invoice-templates`, `/api/journals`, `/api/reports`
+- `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`
 - `/api/settings`, `/api/settings/history`, `/api/locations`
 
 Write requests require a same-origin browser request and authenticated role permission, except the token-restricted mobile scan sender. Public errors do not include stack traces, secrets or database internals.
@@ -109,7 +120,7 @@ npm test
 npm run build
 ```
 
-The current suite covers authentication errors, origin protection, RBAC, MongoDB namespace isolation, invoice/receipt template validation, currency precision, tax math, coupon bounds, scanner token/routing, provider webhook signatures and exact amounts, POS draft recovery, franchise hierarchy safety, protected identity lookup normalization and system write-mode classification.
+The current suite covers authentication errors, origin protection, RBAC, MongoDB namespace isolation, invoice/receipt template validation, currency precision, tax math, coupon bounds, scanner token/routing, provider webhook signatures and exact amounts, POS draft recovery, franchise hierarchy safety, protected identity lookup normalization, procurement validation, smart replenishment, supplier risk scoring, weighted inventory costing, AP foreign-exchange settlement and system write-mode classification.
 
 ## Vercel Hobby design
 
@@ -128,7 +139,7 @@ See [docs/deployment-vercel.md](docs/deployment-vercel.md) and [SECURITY.md](SEC
 
 The shipped workspace is configured for a Singapore-style SGD/GST ledger, but tax rate and tax-inclusive/exclusive pricing remain explicit settings. Generated reports are management reports; they are **not** automatically certified tax returns.
 
-Country-pack installation, statutory forms, e-invoicing networks, payroll, bank feeds, fixed assets, purchasing/AP, consolidation and jurisdiction-specific electronic filing remain separate implementation phases. Each country pack must be versioned, sourced from the relevant tax authority and reviewed by a qualified local accountant before the UI can label it filing-ready. See [docs/feature-coverage.md](docs/feature-coverage.md).
+Country-pack installation, statutory forms, e-invoicing networks, payroll, bank feeds, fixed assets, consolidation and jurisdiction-specific electronic filing remain separate implementation phases. Each country pack must be versioned, sourced from the relevant tax authority and reviewed by a qualified local accountant before the UI can label it filing-ready. See [docs/feature-coverage.md](docs/feature-coverage.md).
 
 ## Legacy prototype
 

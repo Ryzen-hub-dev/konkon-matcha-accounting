@@ -35,6 +35,12 @@ import {
   verificationCodeHash, verifyPaymentWebhook,
 } from "../lib/payment-verification";
 import { locationParentChainIsValid } from "../lib/locations";
+import {
+  allocateSupplierPayment, approvalRequiresDifferentMaker, purchaseOrderInputSchema,
+  suggestedReorderAfterInbound, suggestedReorderQuantity, supplierInputSchema,
+  supplierPulse, weightedAverageInventoryCost,
+} from "../lib/procurement";
+import { dateKeyInTimeZone } from "../lib/dates";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -67,6 +73,9 @@ test("cashier permissions stop at the counter", () => {
   assert.equal(hasPermission("CASHIER", "receipts.manage"), false);
   assert.equal(hasPermission("CASHIER", "accounting.write"), false);
   assert.equal(hasPermission("CASHIER", "team.write"), false);
+  assert.equal(hasPermission("MANAGER", "purchasing.approve"), true);
+  assert.equal(hasPermission("MANAGER", "payables.write"), false);
+  assert.equal(hasPermission("ACCOUNTANT", "payables.write"), true);
 });
 
 test("custom payment methods preserve trusted tender and ledger rules", () => {
@@ -98,6 +107,48 @@ test("cross-border conversion respects each currency's minor units", () => {
   assert.equal(roundCurrency(100.6, "JPY"), 101);
   assert.equal(roundCurrency(1.2346, "KWD"), 1.235);
   assert.equal(currencyMinorUnits(1.235, "KWD"), 1235);
+});
+
+test("procurement masters and orders reject invalid or duplicate product data", () => {
+  assert.equal(supplierInputSchema.safeParse({ code: "uji_01", name: "Uji Tea Cooperative", countryCode: "JP", currency: "JPY" }).success, true);
+  assert.equal(supplierInputSchema.safeParse({ code: "!", name: "X", countryCode: "XX", currency: "RMB" }).success, false);
+  const item = { productId: "a".repeat(24), quantity: 10, unitCost: 12.5 };
+  const base = { clientRequestId: "11111111-1111-4111-8111-111111111111", supplierId: "b".repeat(24), locationId: "c".repeat(24), expectedDate: "2026-09-01", items: [item] };
+  assert.equal(purchaseOrderInputSchema.safeParse(base).success, true);
+  assert.equal(purchaseOrderInputSchema.safeParse({ ...base, items: [item, item] }).success, false);
+  assert.equal(purchaseOrderInputSchema.safeParse({ ...base, items: [{ ...item, unitCost: 0 }] }).success, false);
+});
+
+test("smart replenishment combines thresholds, demand and supplier lead time", () => {
+  assert.equal(suggestedReorderQuantity(4, 5), 6);
+  assert.equal(suggestedReorderQuantity(4, 5, 60, 14), 29);
+  assert.equal(suggestedReorderQuantity(6, 5, 600, 30), 0);
+  assert.equal(suggestedReorderAfterInbound(4, 5, 60, 14, 20), 9);
+  assert.equal(suggestedReorderAfterInbound(4, 5, 60, 14, 29), 0);
+});
+
+test("purchase controls use business dates and maker-checker approval", () => {
+  assert.equal(dateKeyInTimeZone("2026-08-22T01:00:00.000Z", "America/New_York"), "2026-08-21");
+  assert.equal(dateKeyInTimeZone("2026-08-22T01:00:00.000Z", "Asia/Singapore"), "2026-08-22");
+  assert.equal(approvalRequiresDifferentMaker("MANAGER"), true);
+  assert.equal(approvalRequiresDifferentMaker("ADMIN"), true);
+  assert.equal(approvalRequiresDifferentMaker("OWNER"), false);
+});
+
+test("supplier Supply Pulse is deterministic and explains delivery risk", () => {
+  assert.deepEqual(supplierPulse({ receiptCount: 10, onTimeReceiptCount: 10, lateDaysTotal: 0, overdueOrderCount: 0 }), { score: 100, risk: "STABLE", punctuality: 100, averageLateDays: 0 });
+  const risk = supplierPulse({ receiptCount: 10, onTimeReceiptCount: 4, lateDaysTotal: 30, overdueOrderCount: 2 });
+  assert.equal(risk.risk, "AT_RISK");
+  assert.equal(risk.punctuality, 40);
+  assert.equal(risk.averageLateDays, 3);
+});
+
+test("receiving uses weighted inventory cost and AP settlement balances FX", () => {
+  assert.equal(weightedAverageInventoryCost(10, 5, 5, 40, "SGD"), 6);
+  const loss = allocateSupplierPayment({ total: 500, baseTotal: 100, balance: 500, baseBalance: 100, amount: 250, exchangeRate: 4.8, currency: "MYR", baseCurrency: "SGD" });
+  assert.deepEqual(loss, { amount: 250, finalPayment: false, carryingBaseAmount: 50, baseCashAmount: 52.08, exchangeLoss: 2.08, exchangeGain: 0 });
+  const gain = allocateSupplierPayment({ total: 500, baseTotal: 100, balance: 250, baseBalance: 50, amount: 250, exchangeRate: 5.2, currency: "MYR", baseCurrency: "SGD" });
+  assert.deepEqual(gain, { amount: 250, finalPayment: true, carryingBaseAmount: 50, baseCashAmount: 48.08, exchangeLoss: 0, exchangeGain: 1.92 });
 });
 
 test("location hierarchies reject self, descendant and corrupt parent cycles", async () => {

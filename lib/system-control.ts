@@ -40,5 +40,5 @@ export async function getSystemControl(db: Db): Promise<SystemControl> {
 }
 
 export function isWritePermission(permission: string) {
-  return permission.endsWith(".write") || permission.endsWith(".manage") || permission === "pos.sell";
+  return permission.endsWith(".write") || permission.endsWith(".manage") || permission.endsWith(".approve") || permission === "pos.sell";
 }

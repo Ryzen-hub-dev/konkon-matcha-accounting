@@ -15,9 +15,12 @@ const starterProducts = [
 const chartOfAccounts = [
   ["1000", "Cash on hand", "ASSET"], ["1010", "Bank", "ASSET"],
   ["1200", "Inventory", "ASSET"], ["2000", "Accounts payable", "LIABILITY"],
+  ["1300", "Input tax recoverable", "ASSET"],
   ["2100", "GST payable", "LIABILITY"],
   ["3000", "Owner's equity", "EQUITY"], ["4000", "Product sales", "REVENUE"],
+  ["4100", "Foreign exchange gain", "REVENUE"],
   ["5000", "Cost of goods sold", "EXPENSE"], ["6100", "Operating expenses", "EXPENSE"],
+  ["6200", "Foreign exchange loss", "EXPENSE"],
 ];
 
 export async function seedWorkspace(db: Db, ownerId: unknown, businessName: string, seedProducts: boolean, session?: ClientSession) {
@@ -40,6 +43,11 @@ export async function seedWorkspace(db: Db, ownerId: unknown, businessName: stri
   await db.collection("chartOfAccounts").bulkWrite(chartOfAccounts.map(([code, name, type]) => ({
     updateOne: { filter: { code }, update: { $setOnInsert: { code, name, type, active: true, createdAt: now } }, upsert: true },
   })), session ? { session } : undefined);
+  await db.collection("chartOfAccounts").updateMany(
+    { code: { $in: ["1000", "1010"] } },
+    { $set: { cashEquivalent: true } },
+    session ? { session } : undefined,
+  );
   await ensureDefaultInvoiceTemplate(db, ownerId, session);
   await ensureDefaultReceiptTemplate(db, ownerId, session);
   await ensureDefaultPaymentMethods(db, ownerId, session);

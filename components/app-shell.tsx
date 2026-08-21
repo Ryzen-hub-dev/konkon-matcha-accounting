@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   BarChart3, BookOpen, Boxes, ChevronLeft, ChevronRight, CircleDollarSign,
-  FileText, LayoutDashboard, LogOut, MapPinned, Menu, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
+  FileText, LayoutDashboard, LogOut, MapPinned, Menu, PackageCheck, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
   Users, WalletCards, X,
 } from "lucide-react";
 import type { SessionUser, UserRole } from "@/lib/types";
@@ -23,6 +23,7 @@ const nav: NavItem[] = [
   { href: "/receipts", label: "Receipts", icon: ReceiptText, roles: ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT", "CASHIER"] },
   { href: "/members", label: "Members", icon: Users },
   { href: "/inventory", label: "Inventory", icon: Boxes },
+  { href: "/procurement", label: "Purchasing & payables", icon: PackageCheck, roles: ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT"] },
   { href: "/accounting", label: "Accounting", icon: BookOpen, roles: ["OWNER", "ADMIN", "ACCOUNTANT"] },
   { href: "/invoices", label: "Invoices", icon: FileText, roles: ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT"] },
   { href: "/reports", label: "Reports", icon: BarChart3, roles: ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT"] },
