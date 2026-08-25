@@ -10,6 +10,7 @@
     "test": "node --test --import tsx tests/*.test.ts",
     "smoke:user": "node --import tsx scripts/user-smoke.ts",
     "bridge:payments": "node --import tsx scripts/local-payment-bridge.ts",
+    "build:listener": "esbuild scripts/local-payment-bridge.ts --bundle --platform=node --format=cjs --target=node20 --minify --outfile=public/downloads/konkon-payment-listener.cjs && node -e globalThis.f=require('fs');globalThis.p='public/downloads/konkon-payment-listener.cjs';f.writeFileSync(p,f.readFileSync(p,'utf8').replace(/[\\x20\\t]+$/gm,''))",
     "smoke:bridge": "node --import tsx scripts/local-payment-bridge-smoke.ts"
   },
   "engines": {

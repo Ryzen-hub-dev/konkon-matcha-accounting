@@ -48,6 +48,8 @@ export function LocalPaymentBridgePanel() {
   const [token, setToken] = useState("");
   const [connected, setConnected] = useState(false);
   const [usbReady, setUsbReady] = useState(false);
+  const [usbCode, setUsbCode] = useState("");
+  const [usbDetail, setUsbDetail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [recent, setRecent] = useState<StoredEvent[]>([]);
@@ -72,7 +74,7 @@ export function LocalPaymentBridgePanel() {
     if (!/^\d{6}$/.test(pairCode)) return setError("Enter the six-digit pairing code shown in the local terminal.");
     setBusy(true);
     try {
-      const result = await localRequest<{ token: string; cursor: number; usbReady: boolean }>(bridgeUrl, "/pair", {
+      const result = await localRequest<{ token: string; cursor: number; usbReady: boolean; usbCode: string; usbDetail: string }>(bridgeUrl, "/pair", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: pairCode }),
@@ -83,6 +85,8 @@ export function LocalPaymentBridgePanel() {
       setToken(result.token);
       setConnected(true);
       setUsbReady(result.usbReady);
+      setUsbCode(result.usbCode);
+      setUsbDetail(result.usbDetail);
       setPairCode("");
     } catch (reason) {
       setConnected(false);
@@ -95,6 +99,8 @@ export function LocalPaymentBridgePanel() {
     setToken("");
     setConnected(false);
     setUsbReady(false);
+    setUsbCode("");
+    setUsbDetail("");
     cursorRef.current = 0;
   }, []);
 
@@ -105,7 +111,7 @@ export function LocalPaymentBridgePanel() {
 
     async function poll() {
       try {
-      const result = await localRequest<{ events: BridgeEvent[]; cursor: number; usbReady: boolean }>(bridgeUrl, `/events?after=${cursorRef.current}`, {
+        const result = await localRequest<{ events: BridgeEvent[]; cursor: number; usbReady: boolean; usbCode: string; usbDetail: string }>(bridgeUrl, `/events?after=${cursorRef.current}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         for (const event of result.events) {
@@ -115,6 +121,8 @@ export function LocalPaymentBridgePanel() {
         }
         cursorRef.current = result.cursor;
         setUsbReady(result.usbReady);
+        setUsbCode(result.usbCode);
+        setUsbDetail(result.usbDetail);
         setError("");
         if (result.events.length) await loadRecent();
       } catch (reason) {
@@ -148,6 +156,7 @@ export function LocalPaymentBridgePanel() {
         <div className="local-bridge-instruction"><b>3</b><span><strong>Pair this browser</strong><small>The browser token stays in this tab session and can only connect to localhost.</small></span></div>
         <div className="local-bridge-fields"><label className="field"><span>Local listener</span><input value={bridgeUrl} disabled={connected} onChange={(event) => setBridgeUrl(event.target.value)} inputMode="url" /></label><label className="field"><span>Pairing code</span><input value={pairCode} disabled={connected} onChange={(event) => setPairCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" placeholder="000000" /></label></div>
         <div className="local-bridge-actions"><a className="button button-secondary" href="/downloads/konkon-payment-listener.cjs" download><Download />Download listener</a>{connected ? <button className="button button-secondary" onClick={disconnect}><Unplug />Disconnect</button> : <button className="button button-primary" disabled={busy} onClick={() => void connect()}><Cable />{busy ? "Pairing…" : "Pair local listener"}</button>}<button className="button button-secondary" onClick={() => void loadRecent()}><RefreshCw />Refresh evidence</button></div>
+        {connected && !usbReady ? <p className="local-bridge-usb-warning"><CircleAlert /><span><strong>{usbCode === "ADB_MISSING" ? "Android Platform-Tools required" : "USB data link is not ready"}</strong><small>{usbDetail || "Check the Android connection and restart the listener."}{usbCode === "ADB_MISSING" ? <> <a href="https://developer.android.com/tools/releases/platform-tools" target="_blank" rel="noreferrer">Download ADB from Android</a>.</> : null}</small></span></p> : connected ? <p className="local-bridge-usb-ready"><CheckCircle2 /><span><strong>USB reverse verified</strong><small>{usbDetail}</small></span></p> : null}
         <p className="local-bridge-assurance"><ShieldCheck /><span><strong>The cloud never receives the original message.</strong><small>Local notifications are supporting evidence only. They remain REQUIRES REVIEW and never mark a sale paid by themselves. SmsForwarder is evaluation-only unless its owner grants a commercial licence.</small></span></p>
         {error ? <p className="local-bridge-error"><CircleAlert />{error}</p> : null}
       </div>

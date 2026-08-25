@@ -135,13 +135,29 @@ function enqueueSanitisedPayment(value: { sender: string; content: string; times
 }
 
 function setupUsbReverse() {
-  if (process.env.LOCAL_PAYMENT_SKIP_ADB === "1") return { ready: false, detail: "ADB setup skipped by configuration." };
+  if (process.env.LOCAL_PAYMENT_SKIP_ADB === "1") return { ready: false, code: "SKIPPED", detail: "ADB setup skipped by configuration." };
   const args = [...(adbSerial ? ["-s", adbSerial] : []), "reverse", `tcp:${port}`, `tcp:${port}`];
   const result = spawnSync(adbCommand, args, { encoding: "utf8", windowsHide: true, timeout: 2_000 });
-  if (result.error || result.status !== 0) {
-    return { ready: false, detail: "ADB was not found or no authorised Android device is connected. Run adb reverse manually after authorising USB debugging." };
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+    return { ready: false, code: "ADB_MISSING", detail: "ADB is not installed or is not available on PATH. Install Android SDK Platform-Tools, then restart this listener." };
   }
-  return { ready: true, detail: `USB reverse active on tcp:${port}.` };
+  if (result.error) {
+    return { ready: false, code: "ADB_FAILED", detail: `ADB could not start: ${result.error.message}` };
+  }
+  if (result.status !== 0) {
+    const message = `${result.stderr || result.stdout || ""}`.trim().toLocaleLowerCase("en-US");
+    if (message.includes("unauthorized")) {
+      return { ready: false, code: "DEVICE_UNAUTHORIZED", detail: "The Android device has not authorised USB debugging. Unlock it and accept the RSA prompt." };
+    }
+    if (message.includes("no devices") || message.includes("device not found")) {
+      return { ready: false, code: "NO_DEVICE", detail: "No Android debugging device was found. Enable USB debugging and use a data-capable USB cable." };
+    }
+    if (message.includes("more than one device")) {
+      return { ready: false, code: "MULTIPLE_DEVICES", detail: "More than one Android device is connected. Set LOCAL_PAYMENT_ADB_SERIAL to the intended device serial." };
+    }
+    return { ready: false, code: "ADB_FAILED", detail: "ADB reverse failed. Confirm USB debugging, device authorisation and the selected device serial." };
+  }
+  return { ready: true, code: "READY", detail: `USB reverse active on tcp:${port}.` };
 }
 
 let usb = setupUsbReverse();
@@ -173,6 +189,8 @@ const server = createServer(async (request, response) => {
       data: {
         service: "Kōn-Kōn private payment listener",
         usbReady: currentUsb.ready,
+        usbCode: currentUsb.code,
+        usbDetail: currentUsb.detail,
         privacy: "Raw messages, OTPs and private content never leave this process.",
       },
     });
@@ -231,7 +249,8 @@ const server = createServer(async (request, response) => {
       const token = randomBytes(32).toString("base64url");
       browserTokens.clear();
       browserTokens.add(token);
-      return json(response, 200, { ok: true, data: { token, cursor: nextSequence - 1, usbReady: currentUsbStatus().ready } });
+      const currentUsb = currentUsbStatus();
+      return json(response, 200, { ok: true, data: { token, cursor: nextSequence - 1, usbReady: currentUsb.ready, usbCode: currentUsb.code, usbDetail: currentUsb.detail } });
     } catch {
       return json(response, 400, { ok: false, error: "The pairing request is invalid." });
     }
@@ -242,7 +261,8 @@ const server = createServer(async (request, response) => {
     const token = bearerToken(request);
     if (!token || !browserTokens.has(token)) return json(response, 401, { ok: false, error: "Pair this browser again." });
     const after = Math.max(0, Number(url.searchParams.get("after") || 0));
-    return json(response, 200, { ok: true, data: { events: events.filter((event) => event.sequence > after).slice(0, 25), cursor: nextSequence - 1, usbReady: currentUsbStatus().ready } });
+    const currentUsb = currentUsbStatus();
+    return json(response, 200, { ok: true, data: { events: events.filter((event) => event.sequence > after).slice(0, 25), cursor: nextSequence - 1, usbReady: currentUsb.ready, usbCode: currentUsb.code, usbDetail: currentUsb.detail } });
   }
 
   return json(response, 404, { ok: false, error: "This local bridge endpoint does not exist." });

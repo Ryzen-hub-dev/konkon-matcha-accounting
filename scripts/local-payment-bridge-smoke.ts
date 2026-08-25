@@ -28,6 +28,8 @@ assert.equal(paired.response.status, 200, paired.body.error);
 const token = String(paired.body.data?.token || "");
 const cursor = Number(paired.body.data?.cursor || 0);
 assert.match(token, /^[A-Za-z0-9_-]{32,128}$/);
+assert.equal(paired.body.data?.usbCode, "SKIPPED");
+assert.match(String(paired.body.data?.usbDetail || ""), /skipped/i);
 
 const timestamp = new Date().toISOString();
 const paymentBody = {

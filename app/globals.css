@@ -591,6 +591,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .local-bridge-fields input { font-family: var(--utility); }
 .local-bridge-fields label:last-child input { letter-spacing: .2em; text-align: center; }
 .local-bridge-actions { margin-top: 11px; display: flex; gap: 8px; flex-wrap: wrap; }
+.local-bridge-usb-warning, .local-bridge-usb-ready { margin: 11px 0 0; padding: 10px 12px; border: 1px solid #e3c38c; border-radius: 8px; display: flex; align-items: flex-start; gap: 9px; color: #6d4b1f; background: #fff7e8; }
+.local-bridge-usb-ready { color: #285a3d; border-color: #a8cbb2; background: #eef8f0; }
+.local-bridge-usb-warning > svg, .local-bridge-usb-ready > svg { width: 17px; flex: 0 0 auto; }
+.local-bridge-usb-warning > span, .local-bridge-usb-ready > span { display: grid; gap: 2px; }
+.local-bridge-usb-warning strong, .local-bridge-usb-ready strong { font-size: 9px; }
+.local-bridge-usb-warning small, .local-bridge-usb-ready small { font-size: 8px; line-height: 1.5; }
+.local-bridge-usb-warning a { color: inherit; font-weight: 900; text-decoration: underline; }
 .local-bridge-assurance { margin: 13px 0 0; padding: 11px; border: 1px solid #b9cdbb; border-radius: 8px; display: flex; align-items: flex-start; gap: 9px; color: #27503b; background: #eef5ea; }
 .local-bridge-assurance svg { width: 18px; flex: 0 0 auto; }
 .local-bridge-assurance span { display: grid; gap: 3px; }
