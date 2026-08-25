@@ -248,6 +248,23 @@ const server = createServer(async (request, response) => {
   return json(response, 404, { ok: false, error: "This local bridge endpoint does not exist." });
 });
 
+server.on("error", (error: NodeJS.ErrnoException) => {
+  if (error.code === "EADDRINUSE") {
+    process.stderr.write([
+      "",
+      `Kōn-Kōn could not start because http://${host}:${port} is already in use.`,
+      "A payment listener may already be running. Close its terminal before starting another copy.",
+      `To keep both listeners, set LOCAL_PAYMENT_BRIDGE_PORT to another port and use that same URL in Payments (for example ${port + 1}).`,
+      "No new pairing code was created.",
+      "",
+    ].join("\n"));
+    process.exitCode = 1;
+    return;
+  }
+  process.stderr.write(`Kōn-Kōn listener failed to start: ${error.message}\n`);
+  process.exitCode = 1;
+});
+
 server.listen(port, host, () => {
   process.stdout.write([
     "",
