@@ -343,6 +343,23 @@ test("local payment notifications are sanitised before leaving the computer", ()
   assert.equal(localPaymentEventSchema.safeParse({ ...result.event, content: "must never reach MongoDB" }).success, false);
 });
 
+test("TNG notifications are identified from the installed Android package name", () => {
+  const result = parseLocalPaymentNotification({
+    sender: "my.com.tngdigital.ewallet",
+    content: "Payment received. RM 18.80 credited. Transaction ID TXN-88210",
+    timestamp: Date.parse("2026-08-25T10:00:00.000Z"),
+  }, {
+    secret: "local-bridge-test-secret-at-least-16",
+    allowedSenders: ["my.com.tngdigital.ewallet"],
+  });
+
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  assert.equal(result.event.provider, "TNG");
+  assert.equal(result.event.amount, 18.8);
+  assert.equal(result.event.currency, "MYR");
+});
+
 test("local payment notifications accept epoch seconds and normalise them to milliseconds", () => {
   const paidAt = Math.floor(Date.now() / 1_000);
   const parsed = parseLocalPaymentNotification({

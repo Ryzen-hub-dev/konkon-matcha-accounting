@@ -44,7 +44,7 @@ const AMOUNT_PATTERNS: Array<{ currency: string; pattern: RegExp }> = [
 ];
 
 const PROVIDER_PATTERNS: Array<{ provider: (typeof PAYMENT_PROVIDERS)[number]; pattern: RegExp }> = [
-  { provider: "TNG", pattern: /touch\s*['’]?n\s*go|\btng\b/i },
+  { provider: "TNG", pattern: /my\.com\.tngdigital\.ewallet|touch\s*['’]?n\s*go|\btng\b/i },
   { provider: "PAYNOW", pattern: /paynow/i },
   { provider: "DUITNOW", pattern: /duitnow/i },
   { provider: "ALIPAY", pattern: /alipay/i },
