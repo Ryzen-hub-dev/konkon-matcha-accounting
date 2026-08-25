@@ -24,6 +24,7 @@ export function PaymentDisplayBridge({
   paymentMethod,
   amount,
   currency,
+  displayRequested,
   completedAt,
   onFeedback,
 }: {
@@ -31,6 +32,7 @@ export function PaymentDisplayBridge({
   paymentMethod?: PaymentMethodRecord;
   amount: number;
   currency: string;
+  displayRequested: boolean;
   completedAt: number;
   onFeedback?: (message: string, tone?: "success" | "error") => void;
 }) {
@@ -45,6 +47,7 @@ export function PaymentDisplayBridge({
   const selectedIdRef = useRef("");
   const lastSignatureRef = useRef("");
   const completionRef = useRef(0);
+  const holdUntilRef = useRef(0);
   const storageKey = useMemo(() => `konkon:payment-display:${userId}`, [userId]);
 
   const feedback = useCallback((message: string, tone: "success" | "error" = "success") => onFeedback?.(message, tone), [onFeedback]);
@@ -88,6 +91,7 @@ export function PaymentDisplayBridge({
     if (!selectedId || !completedAt || completedAt === completionRef.current) return;
     completionRef.current = completedAt;
     const until = Date.now() + 5_000;
+    holdUntilRef.current = until;
     setHoldUntil(until);
     lastSignatureRef.current = "";
     setBridgeState("SYNCING");
@@ -105,14 +109,14 @@ export function PaymentDisplayBridge({
   useEffect(() => {
     if (!holdUntil) return;
     const remaining = holdUntil - Date.now();
-    if (remaining <= 0) { lastSignatureRef.current = ""; setHoldUntil(0); return; }
-    const timer = window.setTimeout(() => { lastSignatureRef.current = ""; setHoldUntil(0); }, remaining + 100);
+    if (remaining <= 0) { holdUntilRef.current = 0; lastSignatureRef.current = ""; setHoldUntil(0); return; }
+    const timer = window.setTimeout(() => { holdUntilRef.current = 0; lastSignatureRef.current = ""; setHoldUntil(0); }, remaining + 100);
     return () => window.clearTimeout(timer);
   }, [holdUntil]);
 
   useEffect(() => {
-    if (!selectedId || holdUntil > Date.now()) return;
-    const canDisplay = paymentMethod?.verificationMode === "STATIC_QR" && Boolean(paymentMethod.qrPayload) && amount > 0;
+    if (!selectedId || holdUntilRef.current > Date.now()) return;
+    const canDisplay = displayRequested && paymentMethod?.verificationMode === "STATIC_QR" && Boolean(paymentMethod.qrPayload) && amount > 0;
     const body = canDisplay
       ? { id: selectedId, action: "DISPLAY", paymentMethodCode: paymentMethod.code, amount, currency }
       : { id: selectedId, action: "WELCOME" };
@@ -133,7 +137,7 @@ export function PaymentDisplayBridge({
         });
     }, 220);
     return () => window.clearTimeout(timer);
-  }, [amount, currency, feedback, holdUntil, paymentMethod, selectedId]);
+  }, [amount, currency, displayRequested, feedback, holdUntil, paymentMethod, selectedId]);
 
   async function createSession(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

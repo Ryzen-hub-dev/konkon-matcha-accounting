@@ -50,6 +50,7 @@ import {
 } from "../lib/local-payment-bridge";
 import { buildAmountLockedDuitNowQr, inspectDuitNowQr } from "../lib/duitnow-qr";
 import { createPaymentDisplayToken, paymentDisplayTokenHash } from "../lib/payment-display";
+import { customerQrDisplaySignature, staticQrInputSignature } from "../lib/customer-payment-qr";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -277,6 +278,18 @@ test("payment display passes use unguessable hashed tokens", () => {
   assert.match(token, /^[A-Za-z0-9_-]{32,128}$/);
   assert.notEqual(paymentDisplayTokenHash(token), token);
   assert.equal(paymentDisplayTokenHash(token), paymentDisplayTokenHash(token));
+});
+
+test("customer payment QR requests become stale when amount, currency or lock state changes", () => {
+  const base = { paymentMethodId: "method-tng", recipientPayload: "000202010211DUITNOW", currency: "MYR", amount: 18.8 };
+  const current = staticQrInputSignature(base);
+  assert.ok(current);
+  assert.equal(staticQrInputSignature(base), current);
+  assert.notEqual(staticQrInputSignature({ ...base, amount: 18.81 }), current);
+  assert.notEqual(staticQrInputSignature({ ...base, currency: "SGD" }), current);
+  assert.notEqual(customerQrDisplaySignature(current, true), customerQrDisplaySignature(current, false));
+  assert.equal(staticQrInputSignature({ ...base, amount: 0 }), "");
+  assert.equal(customerQrDisplaySignature("", true), "");
 });
 
 test("local payment notifications are sanitised before leaving the computer", () => {
