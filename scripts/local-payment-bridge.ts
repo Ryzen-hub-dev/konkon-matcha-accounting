@@ -9,6 +9,7 @@ import {
   verifySmsForwarderWebhook,
   type SanitizedLocalPaymentEvent,
 } from "../lib/local-payment-bridge";
+import { adbDiscoveryLabel, discoverAdbCommand } from "../lib/adb-discovery";
 
 function loadLocalEnvironment(directory = process.cwd()) {
   for (const filename of [".env.local", ".env"]) {
@@ -38,7 +39,6 @@ const pairCode = process.env.LOCAL_PAYMENT_PAIR_CODE?.trim() || String(randomInt
 const webhookSecret = process.env.LOCAL_PAYMENT_WEBHOOK_SECRET?.trim() || randomBytes(24).toString("base64url");
 if (webhookSecret.length < 16) throw new Error("LOCAL_PAYMENT_WEBHOOK_SECRET must contain at least 16 characters.");
 const notifyMeBearer = process.env.LOCAL_PAYMENT_NOTIFY_ME_TOKEN?.trim() || webhookSecret;
-const adbCommand = process.env.LOCAL_PAYMENT_ADB_PATH?.trim() || "adb";
 const adbSerial = process.env.LOCAL_PAYMENT_ADB_SERIAL?.trim() || "";
 
 type BridgeEvent = SanitizedLocalPaymentEvent & { sequence: number };
@@ -136,10 +136,11 @@ function enqueueSanitisedPayment(value: { sender: string; content: string; times
 
 function setupUsbReverse() {
   if (process.env.LOCAL_PAYMENT_SKIP_ADB === "1") return { ready: false, code: "SKIPPED", detail: "ADB setup skipped by configuration." };
+  const adb = discoverAdbCommand({ scriptPath: process.argv[1] });
   const args = [...(adbSerial ? ["-s", adbSerial] : []), "reverse", `tcp:${port}`, `tcp:${port}`];
-  const result = spawnSync(adbCommand, args, { encoding: "utf8", windowsHide: true, timeout: 2_000 });
+  const result = spawnSync(adb.command, args, { encoding: "utf8", windowsHide: true, timeout: 2_000 });
   if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
-    return { ready: false, code: "ADB_MISSING", detail: "ADB is not installed or is not available on PATH. Install Android SDK Platform-Tools, then restart this listener." };
+    return { ready: false, code: "ADB_MISSING", detail: "ADB was not found in Android Studio, PATH, Downloads/platform-tools, the listener folder or the current workspace. Install or extract Android SDK Platform-Tools; this listener will detect it automatically." };
   }
   if (result.error) {
     return { ready: false, code: "ADB_FAILED", detail: `ADB could not start: ${result.error.message}` };
@@ -157,7 +158,7 @@ function setupUsbReverse() {
     }
     return { ready: false, code: "ADB_FAILED", detail: "ADB reverse failed. Confirm USB debugging, device authorisation and the selected device serial." };
   }
-  return { ready: true, code: "READY", detail: `USB reverse active on tcp:${port}.` };
+  return { ready: true, code: "READY", detail: `USB reverse active on tcp:${port} using ${adbDiscoveryLabel(adb.source)}.` };
 }
 
 let usb = setupUsbReverse();

@@ -51,6 +51,7 @@ import {
 import { buildAmountLockedDuitNowQr, inspectDuitNowQr } from "../lib/duitnow-qr";
 import { createPaymentDisplayToken, paymentDisplayTokenHash } from "../lib/payment-display";
 import { customerQrDisplaySignature, staticQrInputSignature } from "../lib/customer-payment-qr";
+import { adbDiscoveryLabel, discoverAdbCommand } from "../lib/adb-discovery";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -256,6 +257,38 @@ test("local payment bridge accepts adapter-added trailing slashes without broade
   assert.equal(normaliseLocalBridgePath("/sms///"), "/sms");
   assert.equal(normaliseLocalBridgePath("/notify-me/extra"), "/notify-me/extra");
   assert.equal(normaliseLocalBridgePath("/"), "/");
+});
+
+test("payment listener auto-detects ADB without requiring a system PATH change", () => {
+  const downloadsAdb = "C:\\Users\\cashier\\Downloads\\platform-tools\\adb.exe";
+  const discovered = discoverAdbCommand({
+    platform: "win32",
+    cwd: "C:\\KonKon",
+    scriptPath: "C:\\Users\\cashier\\Downloads\\konkon-payment-listener.cjs",
+    env: { USERPROFILE: "C:\\Users\\cashier", LOCALAPPDATA: "C:\\Users\\cashier\\AppData\\Local" },
+    exists: (path) => path.toLocaleLowerCase("en-US") === downloadsAdb.toLocaleLowerCase("en-US"),
+  });
+  assert.equal(discovered.command, downloadsAdb);
+  assert.equal(discovered.source, "DOWNLOADS");
+  assert.equal(discovered.detected, true);
+  assert.equal(adbDiscoveryLabel(discovered.source), "Downloads/platform-tools");
+
+  const winget = discoverAdbCommand({
+    platform: "win32",
+    env: { USERPROFILE: "C:\\Users\\cashier", LOCALAPPDATA: "C:\\Users\\cashier\\AppData\\Local" },
+    readDirectory: () => ["Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe"],
+    exists: (path) => path.endsWith("Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe\\platform-tools\\adb.exe"),
+  });
+  assert.equal(winget.source, "WINGET");
+  assert.equal(adbDiscoveryLabel(winget.source), "WinGet Platform-Tools package");
+
+  const configured = discoverAdbCommand({
+    platform: "win32",
+    env: { LOCAL_PAYMENT_ADB_PATH: "D:\\android\\adb.exe" },
+    exists: () => true,
+  });
+  assert.equal(configured.source, "CONFIGURED");
+  assert.equal(configured.command, "D:\\android\\adb.exe");
 });
 
 test("DuitNow amount locking preserves the recipient, inserts the POS total and recalculates CRC", () => {
