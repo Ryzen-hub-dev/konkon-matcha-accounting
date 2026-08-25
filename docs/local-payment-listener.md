@@ -14,7 +14,13 @@ The local listener accepts payment-notification Webhooks from an Android phone c
 
 ## Start the listener
 
-Install Android platform tools and authorise USB debugging on the dedicated receiving phone, then run:
+Install Android platform tools and authorise USB debugging on the dedicated receiving phone. The quickest setup is **Payments → Local payment listener → Download listener**, followed by:
+
+```powershell
+node konkon-payment-listener.cjs
+```
+
+Developers running from the repository can instead use:
 
 ```powershell
 npm run bridge:payments

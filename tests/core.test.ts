@@ -8,11 +8,13 @@ import { publicError } from "../lib/api";
 import { scopedCollectionName } from "../lib/db";
 import {
   DEFAULT_INVOICE_TEMPLATE,
+  ensureDefaultInvoiceTemplate,
   invoiceTemplateInputSchema,
   normaliseInvoiceTemplate,
 } from "../lib/invoice-templates";
 import {
   DEFAULT_RECEIPT_TEMPLATE,
+  ensureDefaultReceiptTemplate,
   normaliseReceiptTemplate,
   receiptTemplateInputSchema,
 } from "../lib/receipt-templates";
@@ -497,6 +499,28 @@ test("MongoDB collections use an isolated application namespace", () => {
   assert.equal(scopedCollectionName("users"), "konkon_users");
   assert.equal(scopedCollectionName("sales", "matcha_"), "matcha_sales");
   assert.throws(() => scopedCollectionName("users", "invalid prefix"), /invalid/i);
+});
+
+test("default template seeding never writes the same MongoDB path twice", async () => {
+  const operations: Array<{ collection: string; update: Record<string, Record<string, unknown>> }> = [];
+  const db = {
+    collection(name: string) {
+      return {
+        async updateOne(_filter: unknown, update: Record<string, Record<string, unknown>>) {
+          const setKeys = new Set(Object.keys(update.$set || {}));
+          for (const key of Object.keys(update.$setOnInsert || {})) {
+            assert.equal(setKeys.has(key), false, `${name}.${key} cannot appear in both $set and $setOnInsert`);
+          }
+          operations.push({ collection: name, update });
+          return { acknowledged: true };
+        },
+      };
+    },
+  };
+  await ensureDefaultInvoiceTemplate(db as never);
+  await ensureDefaultReceiptTemplate(db as never);
+  assert.equal(operations.length, 4);
+  assert.deepEqual(operations.at(-1)?.update.$set, { showBusinessAddress: false });
 });
 
 test("invoice templates accept portable JSON and safe raster logos", () => {

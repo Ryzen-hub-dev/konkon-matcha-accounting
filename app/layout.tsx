@@ -4,6 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: { default: "Kōn-Kōn Ledger", template: "%s · Kōn-Kōn Ledger" },
   description: "Accounting, inventory, members and point of sale for Kōn-Kōn Matchā.",
+  icons: { icon: "/icon.svg", shortcut: "/icon.svg" },
   robots: { index: false, follow: false },
 };
 

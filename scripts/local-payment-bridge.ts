@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { loadEnvConfig } from "@next/env";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   normaliseLocalBridgePath,
   parseLocalPaymentNotification,
@@ -9,7 +10,22 @@ import {
   type SanitizedLocalPaymentEvent,
 } from "../lib/local-payment-bridge";
 
-loadEnvConfig(process.cwd());
+function loadLocalEnvironment(directory = process.cwd()) {
+  for (const filename of [".env.local", ".env"]) {
+    const path = resolve(directory, filename);
+    if (!existsSync(path)) continue;
+    for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+      const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (!match || process.env[match[1]] !== undefined) continue;
+      let value = match[2];
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+      else value = value.replace(/\s+#.*$/, "");
+      process.env[match[1]] = value;
+    }
+  }
+}
+
+loadLocalEnvironment();
 
 const host = "127.0.0.1";
 const port = Number(process.env.LOCAL_PAYMENT_BRIDGE_PORT || 17321);

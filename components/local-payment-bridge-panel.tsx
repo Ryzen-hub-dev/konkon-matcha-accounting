@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Cable, CheckCircle2, CircleAlert, Database, LockKeyhole, RefreshCw, ShieldCheck, Smartphone, Unplug } from "lucide-react";
+import { Cable, CheckCircle2, CircleAlert, Database, Download, LockKeyhole, RefreshCw, ShieldCheck, Smartphone, Unplug } from "lucide-react";
 import { apiRequest } from "@/components/ui";
 import type { SanitizedLocalPaymentEvent } from "@/lib/local-payment-bridge";
 
@@ -143,11 +143,11 @@ export function LocalPaymentBridgePanel() {
 
     <div className="local-bridge-workbench">
       <div className="local-bridge-pairing">
-        <div className="local-bridge-instruction"><b>1</b><span><strong>Start the listener</strong><small>Run <code>npm run bridge:payments</code> on this computer, then connect and authorise the Android phone over USB.</small></span></div>
+        <div className="local-bridge-instruction"><b>1</b><span><strong>Download and start the listener</strong><small>Download the standalone listener, then run <code>node konkon-payment-listener.cjs</code> on this computer before connecting the authorised Android phone over USB.</small></span></div>
         <div className="local-bridge-instruction"><b>2</b><span><strong>Configure one or both adapters</strong><small>Use the signed SmsForwarder form and/or notify-me Bearer header printed by the listener. Dual delivery is deduplicated; never create a “forward all messages” rule.</small></span></div>
         <div className="local-bridge-instruction"><b>3</b><span><strong>Pair this browser</strong><small>The browser token stays in this tab session and can only connect to localhost.</small></span></div>
         <div className="local-bridge-fields"><label className="field"><span>Local listener</span><input value={bridgeUrl} disabled={connected} onChange={(event) => setBridgeUrl(event.target.value)} inputMode="url" /></label><label className="field"><span>Pairing code</span><input value={pairCode} disabled={connected} onChange={(event) => setPairCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" placeholder="000000" /></label></div>
-        <div className="local-bridge-actions">{connected ? <button className="button button-secondary" onClick={disconnect}><Unplug />Disconnect</button> : <button className="button button-primary" disabled={busy} onClick={() => void connect()}><Cable />{busy ? "Pairing…" : "Pair local listener"}</button>}<button className="button button-secondary" onClick={() => void loadRecent()}><RefreshCw />Refresh evidence</button></div>
+        <div className="local-bridge-actions"><a className="button button-secondary" href="/downloads/konkon-payment-listener.cjs" download><Download />Download listener</a>{connected ? <button className="button button-secondary" onClick={disconnect}><Unplug />Disconnect</button> : <button className="button button-primary" disabled={busy} onClick={() => void connect()}><Cable />{busy ? "Pairing…" : "Pair local listener"}</button>}<button className="button button-secondary" onClick={() => void loadRecent()}><RefreshCw />Refresh evidence</button></div>
         <p className="local-bridge-assurance"><ShieldCheck /><span><strong>The cloud never receives the original message.</strong><small>Local notifications are supporting evidence only. They remain REQUIRES REVIEW and never mark a sale paid by themselves. SmsForwarder is evaluation-only unless its owner grants a commercial licence.</small></span></p>
         {error ? <p className="local-bridge-error"><CircleAlert />{error}</p> : null}
       </div>

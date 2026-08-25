@@ -77,7 +77,7 @@ export async function ensureDefaultReceiptTemplate(db: Db, createdBy: unknown = 
       ],
     },
     {
-      $set: { systemKey: "starter-receipt-template", showBusinessAddress: false },
+      $set: { systemKey: "starter-receipt-template" },
       $setOnInsert: {
         ...DEFAULT_RECEIPT_TEMPLATE,
         nameNormalized: DEFAULT_RECEIPT_TEMPLATE.name.toLocaleLowerCase("en-SG"),
@@ -88,5 +88,10 @@ export async function ensureDefaultReceiptTemplate(db: Db, createdBy: unknown = 
       },
     },
     { upsert: true, ...(session ? { session } : {}) },
+  );
+  await db.collection("receiptTemplates").updateOne(
+    { systemKey: "starter-receipt-template" },
+    { $set: { showBusinessAddress: false } },
+    session ? { session } : {},
   );
 }

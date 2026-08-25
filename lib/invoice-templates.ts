@@ -69,7 +69,7 @@ export async function ensureDefaultInvoiceTemplate(db: Db, createdBy: unknown = 
       ],
     },
     {
-      $set: { systemKey: "starter-invoice-template", showBusinessAddress: false, showCustomerAddress: false },
+      $set: { systemKey: "starter-invoice-template" },
       $setOnInsert: {
         ...DEFAULT_INVOICE_TEMPLATE,
         nameNormalized: DEFAULT_INVOICE_TEMPLATE.name.toLocaleLowerCase("en-SG"),
@@ -79,5 +79,10 @@ export async function ensureDefaultInvoiceTemplate(db: Db, createdBy: unknown = 
       },
     },
     { upsert: true, ...(session ? { session } : {}) },
+  );
+  await db.collection("invoiceTemplates").updateOne(
+    { systemKey: "starter-invoice-template" },
+    { $set: { showBusinessAddress: false, showCustomerAddress: false } },
+    session ? { session } : {},
   );
 }

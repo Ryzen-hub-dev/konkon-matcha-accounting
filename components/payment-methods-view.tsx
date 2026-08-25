@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Archive, Banknote, CreditCard, Globe2, Landmark, Pencil, Plus, QrCode, ReceiptText, RotateCcw, ShieldCheck, Upload } from "lucide-react";
 import { apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
 import { LocalPaymentBridgePanel } from "@/components/local-payment-bridge-panel";
-import { inspectDuitNowQr } from "@/lib/duitnow-qr";
+import { buildAmountLockedDuitNowQr, inspectDuitNowQr } from "@/lib/duitnow-qr";
 import type { PaymentMethodRecord } from "@/lib/payment-methods";
 import { CURRENCY_OPTIONS } from "@/lib/international";
 import { PAYMENT_PROVIDERS, PAYMENT_VERIFICATION_MODES } from "@/lib/payment-verification";
@@ -43,7 +43,6 @@ export function PaymentMethodsView() {
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
-    setBusy(true);
     const form = new FormData(event.currentTarget);
     const body = {
       ...(editing ? { id: editing._id } : {}),
@@ -58,6 +57,23 @@ export function PaymentMethodsView() {
       qrPayload,
       supportedCurrencies: form.getAll("supportedCurrencies"),
     };
+    const isTng = body.code === "TNG" || body.providerCode === "TNG";
+    if (body.verificationMode === "STATIC_QR" && isTng) {
+      if (!exchange?.acceptedCurrencies.includes("MYR")) {
+        show("Enable MYR under Workspace settings before configuring TNG collection.", "error");
+        return;
+      }
+      if (!body.supportedCurrencies.includes("MYR")) {
+        show("Select MYR under Accepted currencies for this TNG payment method.", "error");
+        return;
+      }
+      try { buildAmountLockedDuitNowQr(qrPayload, 1, "MYR"); }
+      catch (reason) {
+        show(reason instanceof Error ? reason.message : "Import a valid DuitNow recipient QR for TNG.", "error");
+        return;
+      }
+    }
+    setBusy(true);
     try {
       await apiRequest("/api/payment-methods", { method: editing ? "PATCH" : "POST", body: JSON.stringify(body) });
       show(editing ? "Payment method updated." : "Payment method added to the register.");
@@ -131,7 +147,7 @@ export function PaymentMethodsView() {
     {exchange ? <section className="panel exchange-rate-panel"><header className="panel-header"><div><span className="eyebrow">CROSS-BORDER SETTLEMENT</span><h2>{exchange.baseCurrency} exchange rates</h2></div><Globe2 /></header><p>Rates are quoted as foreign currency per 1 {exchange.baseCurrency}. Every completed receipt stores the exact rate used.</p><div className="exchange-rate-list">{exchange.rates.map((rate) => <div key={rate.quoteCurrency}><strong>{rate.baseCurrency}/{rate.quoteCurrency}</strong><span>{rate.rate.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span><small>{rate.source}</small></div>)}</div>{exchange.acceptedCurrencies.some((currency) => currency !== exchange.baseCurrency) ? <form className="exchange-rate-form" onSubmit={saveRate}><label className="field"><span>Settlement currency</span><select name="quoteCurrency" defaultValue={exchange.acceptedCurrencies.find((currency) => currency !== exchange.baseCurrency)}>{exchange.acceptedCurrencies.filter((currency) => currency !== exchange.baseCurrency).map((currency) => <option key={currency}>{currency}</option>)}</select></label><label className="field"><span>Rate per 1 {exchange.baseCurrency}</span><input name="rate" type="number" min="0.00000001" max="1000000000" step="0.00000001" required /></label><label className="field"><span>Source</span><input name="source" defaultValue="MANUAL TREASURY RATE" maxLength={60} required /></label><button className="button button-primary">Save locked rate</button></form> : <p className="form-hint">Add another accepted currency in Workspace settings before creating an FX rate.</p>}</section> : null}
     <Modal open={adding || Boolean(editing)} onClose={() => { setAdding(false); setEditing(null); setQrPayload(""); }} title={selected ? `Edit ${selected.name}` : "New payment method"} kicker="TENDER + LEDGER">
       <form className="modal-form" onSubmit={save} key={selected?._id || "new-payment"}>
-        <div className="form-grid two"><label className="field"><span>Display name</span><input name="name" defaultValue={selected?.name} placeholder="GrabPay" minLength={2} maxLength={60} required /></label><label className="field"><span>Code</span><input name="code" defaultValue={selected?.code} placeholder="GRABPAY" pattern="[A-Za-z0-9_-]{2,24}" required /></label></div>
+        <div className="form-grid two"><label className="field"><span>Display name</span><input name="name" defaultValue={selected?.name} placeholder="GrabPay" minLength={2} maxLength={60} required /></label><label className="field"><span>Code</span><input name="code" defaultValue={selected?.code} placeholder="GRABPAY" pattern="[A-Za-z0-9_\-]{2,24}" required /></label></div>
         <div className="form-grid two"><label className="field"><span>Payment behaviour</span><select name="kind" defaultValue={selected?.kind || "NON_CASH"}><option value="CASH">Cash · tender and change</option><option value="NON_CASH">Non-cash · exact amount</option></select></label><label className="field"><span>Asset account</span><select name="accountCode" defaultValue={selected?.accountCode || accounts[0]?.code} required>{accounts.map((account) => <option key={account._id} value={account.code}>{account.code} · {account.name}</option>)}</select></label></div>
         <div className="form-grid two"><label className="field"><span>Verification control</span><select name="verificationMode" defaultValue={selected?.verificationMode || "NONE"}>{PAYMENT_VERIFICATION_MODES.map((mode) => <option key={mode} value={mode}>{mode === "PROVIDER" ? "Provider-confirmed · strict" : mode === "STATIC_QR" ? "Static recipient QR · manual credit check" : mode === "REFERENCE" ? "Staff-entered reference" : "No external verification"}</option>)}</select></label><label className="field"><span>Provider</span><select name="providerCode" defaultValue={selected?.providerCode || "GENERIC"}>{PAYMENT_PROVIDERS.map((provider) => <option key={provider}>{provider}</option>)}</select></label></div>
         <div className="static-qr-config"><div><QrCode /><span><strong>Recipient QR for static collection</strong><small>Import the QR issued by the receiving bank or wallet. For TNG/DuitNow, POS validates the payload, inserts the exact MYR amount and recalculates its CRC.</small></span></div><label className="button button-secondary"><Upload />Read QR image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void decodeRecipientQr(event)} /></label><label className="field"><span>QR payload</span><textarea value={qrPayload} onChange={(event) => setQrPayload(event.target.value)} maxLength={4096} placeholder="Import from an official PayNow, DuitNow or wallet QR image" /></label><p><ShieldCheck /><span><strong>Anti-escape control</strong>TNG can only be saved with an amount-lockable DuitNow recipient QR. Checkout still requires staff to see the successful credit in the receiver app and enter the transaction reference.</span></p></div>

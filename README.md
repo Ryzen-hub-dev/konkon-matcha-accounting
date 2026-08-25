@@ -25,7 +25,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Server-calculated prices, coupon discounts, tax, cash received and change due.
 - Cash and non-cash settlement in configured ISO currencies using administrator-locked exchange rates, with base/tender amounts snapshotted on the receipt.
 - Provider-verified transfer/wallet foundations with signed callbacks, replay protection, exact amount/currency matching and one-time confirmation consumption.
-- Optional USB-local SmsForwarder + notify-me payment evidence listener: signed/token-authenticated ingress, OTP and outgoing-message rejection, raw-text disposal, dual-delivery deduplication and a review-only MongoDB queue. It never marks a sale paid by itself.
+- Optional downloadable USB-local SmsForwarder + notify-me payment evidence listener: signed/token-authenticated ingress, OTP and outgoing-message rejection, raw-text disposal, dual-delivery deduplication and a review-only MongoDB queue. It never marks a sale paid by itself.
 - Separate customer-facing phone display passes with Welcome/Thank You states. TNG/DuitNow recipient QRs are validated, locked to the exact POS MYR amount and issued with a recalculated CRC; a display state or payer animation never replaces receiving-side confirmation.
 - Cashier-scoped browser order recovery and bounded draft history across refreshes and page changes; sensitive payment references and verification codes are not cached.
 - Idempotent checkout requests prevent a network retry from creating a second receipt or double-deducting stock.
