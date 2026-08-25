@@ -42,6 +42,12 @@ import {
 } from "../lib/procurement";
 import { dateKeyInTimeZone } from "../lib/dates";
 import { assembleFinancialStatements, buildAgingReport } from "../lib/financial-reports";
+import {
+  localPaymentEventSchema, normaliseLocalBridgePath, parseLocalPaymentNotification,
+  signSmsForwarderWebhook, verifySmsForwarderWebhook,
+} from "../lib/local-payment-bridge";
+import { buildAmountLockedDuitNowQr, inspectDuitNowQr } from "../lib/duitnow-qr";
+import { createPaymentDisplayToken, paymentDisplayTokenHash } from "../lib/payment-display";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -232,6 +238,91 @@ test("payment webhooks require a fresh untampered HMAC signature", () => {
   assert.equal(verifyPaymentWebhook(rawBody, String(Math.floor((now - 6 * 60_000) / 1000)), signature, secret, now), false);
 });
 
+test("local SMS bridge signatures are fresh and compatible with signed forwarding", () => {
+  const secret = "local-bridge-test-secret-at-least-16";
+  const now = Date.now();
+  const timestamp = String(now);
+  const signature = signSmsForwarderWebhook(timestamp, secret);
+  assert.equal(verifySmsForwarderWebhook(timestamp, signature, secret, now), true);
+  assert.equal(verifySmsForwarderWebhook(timestamp, `${signature}x`, secret, now), false);
+  assert.equal(verifySmsForwarderWebhook(String(now - 6 * 60_000), signSmsForwarderWebhook(String(now - 6 * 60_000), secret), secret, now), false);
+});
+
+test("local payment bridge accepts adapter-added trailing slashes without broadening paths", () => {
+  assert.equal(normaliseLocalBridgePath("/notify-me/"), "/notify-me");
+  assert.equal(normaliseLocalBridgePath("/sms///"), "/sms");
+  assert.equal(normaliseLocalBridgePath("/notify-me/extra"), "/notify-me/extra");
+  assert.equal(normaliseLocalBridgePath("/"), "/");
+});
+
+test("DuitNow amount locking preserves the recipient, inserts the POS total and recalculates CRC", () => {
+  const officialPayNetP2pExample = "00020201021126410014A000000615000101065016640209123456789520400005303458540510.005802MY5909AUSERNAME6005BANGI63043A23";
+  const generated = buildAmountLockedDuitNowQr(officialPayNetP2pExample, 42.5, "MYR");
+  const inspection = inspectDuitNowQr(generated.payload);
+  assert.equal(generated.amount, "42.50");
+  assert.equal(generated.amountLocked, true);
+  assert.equal(generated.pointOfInitiation, "STATIC");
+  assert.equal(inspection.amount, "42.50");
+  assert.equal(inspection.recipientType, "P2P");
+  assert.equal(inspection.crcValid, true);
+  assert.match(generated.payload, /0014A0000006150001/);
+  assert.throws(() => buildAmountLockedDuitNowQr(officialPayNetP2pExample, 42.5, "SGD"), /MYR/);
+  assert.throws(() => buildAmountLockedDuitNowQr(`${officialPayNetP2pExample.slice(0, -1)}0`, 42.5, "MYR"), /checksum/i);
+});
+
+test("payment display passes use unguessable hashed tokens", () => {
+  const token = createPaymentDisplayToken();
+  assert.match(token, /^[A-Za-z0-9_-]{32,128}$/);
+  assert.notEqual(paymentDisplayTokenHash(token), token);
+  assert.equal(paymentDisplayTokenHash(token), paymentDisplayTokenHash(token));
+});
+
+test("local payment notifications are sanitised before leaving the computer", () => {
+  const result = parseLocalPaymentNotification({
+    sender: "TNG",
+    content: "Payment received. RM 42.50 credited to wallet **7788. Transaction ID TNG-48291",
+    timestamp: Date.parse("2026-08-25T10:00:00.000Z"),
+  }, { secret: "local-bridge-test-secret-at-least-16", allowedSenders: ["TNG"] });
+  assert.equal(result.accepted, true);
+  if (!result.accepted) return;
+  assert.equal(result.event.provider, "TNG");
+  assert.equal(result.event.amount, 42.5);
+  assert.equal(result.event.currency, "MYR");
+  assert.equal(result.event.externalReference, "TNG-48291");
+  assert.equal(result.event.recipientAccountMasked, "**7788");
+  assert.equal("content" in result.event, false);
+  assert.equal("sender" in result.event, false);
+  assert.equal(localPaymentEventSchema.safeParse({ ...result.event, content: "must never reach MongoDB" }).success, false);
+});
+
+test("local payment notifications accept epoch seconds and normalise them to milliseconds", () => {
+  const paidAt = Math.floor(Date.now() / 1_000);
+  const parsed = parseLocalPaymentNotification({
+    sender: "PAYNOW",
+    content: "PayNow payment received SGD 12.30 ref: PN-778899",
+    timestamp: paidAt,
+  }, { secret: "local-payment-test-secret" });
+  assert.equal(parsed.accepted, true);
+  if (parsed.accepted) assert.equal(parsed.event.paidAt.getTime(), paidAt * 1_000);
+});
+
+test("local payment privacy gate rejects OTP, outgoing and unrelated messages", () => {
+  const options = { secret: "local-bridge-test-secret-at-least-16" };
+  const base = { sender: "BANK", timestamp: Date.now() };
+  assert.deepEqual(parseLocalPaymentNotification({ ...base, content: "Your OTP is 123456 for RM 20.00 payment" }, options), { accepted: false, reason: "PRIVACY_BLOCKED" });
+  assert.deepEqual(parseLocalPaymentNotification({ ...base, content: "You paid RM 20.00 to SHOP" }, options), { accepted: false, reason: "OUTGOING_PAYMENT" });
+  assert.deepEqual(parseLocalPaymentNotification({ ...base, content: "Your monthly statement is ready" }, options), { accepted: false, reason: "NOT_PAYMENT" });
+  assert.deepEqual(parseLocalPaymentNotification({ ...base, content: "Payment received from customer" }, options), { accepted: false, reason: "AMOUNT_MISSING" });
+});
+
+test("local payment sender allow-lists block unapproved message sources", () => {
+  const result = parseLocalPaymentNotification({ sender: "UNKNOWN", content: "Payment received SGD 18.00 Ref SG-8822", timestamp: Date.now() }, {
+    secret: "local-bridge-test-secret-at-least-16",
+    allowedSenders: ["DBS", "PAYNOW"],
+  });
+  assert.deepEqual(result, { accepted: false, reason: "SENDER_NOT_ALLOWED" });
+});
+
 test("provider verification codes are hashed and exact amounts must match", () => {
   assert.equal(normaliseVerificationCode(" pay-123 "), "PAY-123");
   assert.notEqual(verificationCodeHash("PAY-123"), "PAY-123");
@@ -409,6 +500,8 @@ test("MongoDB collections use an isolated application namespace", () => {
 });
 
 test("invoice templates accept portable JSON and safe raster logos", () => {
+  assert.equal(DEFAULT_INVOICE_TEMPLATE.showBusinessAddress, false);
+  assert.equal(DEFAULT_INVOICE_TEMPLATE.showCustomerAddress, false);
   const imported = invoiceTemplateInputSchema.safeParse({
     ...DEFAULT_INVOICE_TEMPLATE,
     name: "Wholesale ledger",
@@ -436,6 +529,7 @@ test("invoice templates reject SVG uploads and fall back safely for old invoices
 });
 
 test("receipt templates support 58mm and 80mm paper but reject active SVG content", () => {
+  assert.equal(DEFAULT_RECEIPT_TEMPLATE.showBusinessAddress, false);
   const narrow = receiptTemplateInputSchema.safeParse({ ...DEFAULT_RECEIPT_TEMPLATE, name: "Market roll", paperWidth: "58MM" });
   assert.equal(narrow.success, true);
   const unsafeLogo = receiptTemplateInputSchema.safeParse({

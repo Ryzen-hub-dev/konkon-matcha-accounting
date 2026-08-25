@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Archive, Banknote, CreditCard, Globe2, Landmark, Pencil, Plus, QrCode, ReceiptText, RotateCcw, ShieldCheck, Upload } from "lucide-react";
 import { apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
+import { LocalPaymentBridgePanel } from "@/components/local-payment-bridge-panel";
+import { inspectDuitNowQr } from "@/lib/duitnow-qr";
 import type { PaymentMethodRecord } from "@/lib/payment-methods";
 import { CURRENCY_OPTIONS } from "@/lib/international";
 import { PAYMENT_PROVIDERS, PAYMENT_VERIFICATION_MODES } from "@/lib/payment-verification";
@@ -96,7 +98,12 @@ export function PaymentMethodsView() {
       const payload = result.getText().trim();
       if (payload.length < 8 || payload.length > 4096) throw new Error("The image does not contain a supported recipient QR.");
       setQrPayload(payload);
-      show("Recipient QR imported. Confirm it belongs to the receiving bank or wallet before saving.");
+      try {
+        inspectDuitNowQr(payload);
+        show("Valid DuitNow recipient QR imported. POS fixed-amount generation is available; confirm the recipient before saving.");
+      } catch {
+        show("Recipient QR imported. It is not an amount-lockable DuitNow QR, so confirm the provider and recipient before saving.");
+      }
     } catch (reason) { show(reason instanceof Error ? reason.message : "The QR image could not be read.", "error"); }
     finally { URL.revokeObjectURL(url); }
   }
@@ -109,6 +116,7 @@ export function PaymentMethodsView() {
     <PageHeader eyebrow="REGISTER ROUTING" title="Payment methods" description="Add the tender names staff see at checkout and control exactly where each amount posts in the ledger." action={<button className="button button-primary" onClick={() => { setEditing(null); setQrPayload(""); setAdding(true); }}><Plus />New payment method</button>} />
     {notice ? <Notice {...notice} /> : null}
     <section className="payment-route-hero"><div><Banknote /><span>ACTIVE TENDERS</span><strong>{active.length}</strong></div><i /><div><ShieldCheck /><span>REFERENCE CONTROL</span><strong>{referenceCount}</strong></div><i /><p><b>One sale, one trusted route.</b><span>Every POS payment is revalidated by the API and debited to the chosen cash or bank asset account.</span></p></section>
+    <LocalPaymentBridgePanel />
     {loading ? <LoadingPanel label="Reading the till routes…" /> : methods.length ? <section className="payment-route-list">{methods.map((method) => {
       const Icon = method.kind === "CASH" ? Banknote : method.code.includes("CARD") ? CreditCard : Landmark;
       return <article key={method._id} className={method.active === false ? "archived" : ""}>
@@ -126,7 +134,7 @@ export function PaymentMethodsView() {
         <div className="form-grid two"><label className="field"><span>Display name</span><input name="name" defaultValue={selected?.name} placeholder="GrabPay" minLength={2} maxLength={60} required /></label><label className="field"><span>Code</span><input name="code" defaultValue={selected?.code} placeholder="GRABPAY" pattern="[A-Za-z0-9_-]{2,24}" required /></label></div>
         <div className="form-grid two"><label className="field"><span>Payment behaviour</span><select name="kind" defaultValue={selected?.kind || "NON_CASH"}><option value="CASH">Cash · tender and change</option><option value="NON_CASH">Non-cash · exact amount</option></select></label><label className="field"><span>Asset account</span><select name="accountCode" defaultValue={selected?.accountCode || accounts[0]?.code} required>{accounts.map((account) => <option key={account._id} value={account.code}>{account.code} · {account.name}</option>)}</select></label></div>
         <div className="form-grid two"><label className="field"><span>Verification control</span><select name="verificationMode" defaultValue={selected?.verificationMode || "NONE"}>{PAYMENT_VERIFICATION_MODES.map((mode) => <option key={mode} value={mode}>{mode === "PROVIDER" ? "Provider-confirmed · strict" : mode === "STATIC_QR" ? "Static recipient QR · manual credit check" : mode === "REFERENCE" ? "Staff-entered reference" : "No external verification"}</option>)}</select></label><label className="field"><span>Provider</span><select name="providerCode" defaultValue={selected?.providerCode || "GENERIC"}>{PAYMENT_PROVIDERS.map((provider) => <option key={provider}>{provider}</option>)}</select></label></div>
-        <div className="static-qr-config"><div><QrCode /><span><strong>Recipient QR for static collection</strong><small>Import the QR issued by the receiving bank or wallet. The POS re-renders the exact payload; it does not claim automatic settlement.</small></span></div><label className="button button-secondary"><Upload />Read QR image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void decodeRecipientQr(event)} /></label><label className="field"><span>QR payload</span><textarea value={qrPayload} onChange={(event) => setQrPayload(event.target.value)} maxLength={4096} placeholder="Import from an official PayNow, DuitNow or wallet QR image" /></label><p><ShieldCheck /><span><strong>Anti-escape control</strong>Static QR checkout requires staff to see the successful credit in the receiver app and enter the transaction reference. Only provider mode can confirm automatically.</span></p></div>
+        <div className="static-qr-config"><div><QrCode /><span><strong>Recipient QR for static collection</strong><small>Import the QR issued by the receiving bank or wallet. For TNG/DuitNow, POS validates the payload, inserts the exact MYR amount and recalculates its CRC.</small></span></div><label className="button button-secondary"><Upload />Read QR image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void decodeRecipientQr(event)} /></label><label className="field"><span>QR payload</span><textarea value={qrPayload} onChange={(event) => setQrPayload(event.target.value)} maxLength={4096} placeholder="Import from an official PayNow, DuitNow or wallet QR image" /></label><p><ShieldCheck /><span><strong>Anti-escape control</strong>TNG can only be saved with an amount-lockable DuitNow recipient QR. Checkout still requires staff to see the successful credit in the receiver app and enter the transaction reference.</span></p></div>
         <label className="field"><span>Accepted currencies for this method</span><select name="supportedCurrencies" multiple size={5} defaultValue={selected?.supportedCurrencies?.length ? selected.supportedCurrencies : [exchange?.baseCurrency || "SGD"]}>{CURRENCY_OPTIONS.filter((currency) => exchange?.acceptedCurrencies.includes(currency) || selected?.supportedCurrencies?.includes(currency)).map((currency) => <option key={currency} value={currency}>{currency}{exchange?.acceptedCurrencies.includes(currency) ? "" : " · enable in Workspace first"}</option>)}</select><small>Provider verification checks this currency and the exact converted amount. A disabled Workspace currency cannot be saved or restored.</small></label>
         <label className="field"><span>POS order</span><input name="sortOrder" type="number" min="0" max="999" step="1" defaultValue={selected?.sortOrder ?? 100} required /></label>
         <label className="check-row"><input type="checkbox" name="referenceRequired" defaultChecked={selected?.referenceRequired} /><span><strong>Require a transaction reference</strong><small>Checkout remains locked until staff enter an approval, cheque or wallet reference.</small></span></label>

@@ -16,9 +16,11 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Low-latency auto-connected POS/Inventory scanner bridge with native + ZXing camera decoding
 - QR/link-based phone connection and active POS/Inventory routing, including new-product barcode capture
 - Cashier-scoped POS browser drafts/history and live member-list refresh without a full POS reload
+- Separate 24-hour customer payment-screen passes with Welcome/Thank You states, POS-synchronised DuitNow MYR amount locking, CRC regeneration and mandatory receiving-side settlement confirmation
 - Country, locale, IANA time-zone, base/accepted-currency and immutable settings history
 - Locked foreign-exchange rates with base/tender sale snapshots and currency-aware rounding
 - Provider-verified transfer/wallet foundation with signed callbacks, replay protection, exact payment matching and one-time consumption
+- Dual local Android payment-notification adapters for SmsForwarder and notify-me, with USB-only loopback transport, local privacy filtering, deduplication and a MongoDB review queue that cannot auto-settle sales
 - Multi-country headquarters, branch, warehouse and franchise hierarchy with cycle/archive safeguards
 - Administrator-defined payment methods with reference/provider controls, settlement currencies and ledger-account routing
 - Supplier master data with country/currency, commercial terms, archive/restore and protected historical references

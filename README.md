@@ -25,12 +25,14 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Server-calculated prices, coupon discounts, tax, cash received and change due.
 - Cash and non-cash settlement in configured ISO currencies using administrator-locked exchange rates, with base/tender amounts snapshotted on the receipt.
 - Provider-verified transfer/wallet foundations with signed callbacks, replay protection, exact amount/currency matching and one-time confirmation consumption.
+- Optional USB-local SmsForwarder + notify-me payment evidence listener: signed/token-authenticated ingress, OTP and outgoing-message rejection, raw-text disposal, dual-delivery deduplication and a review-only MongoDB queue. It never marks a sale paid by itself.
+- Separate customer-facing phone display passes with Welcome/Thank You states. TNG/DuitNow recipient QRs are validated, locked to the exact POS MYR amount and issued with a recalculated CRC; a display state or payer animation never replaces receiving-side confirmation.
 - Cashier-scoped browser order recovery and bounded draft history across refreshes and page changes; sensitive payment references and verification codes are not cached.
 - Idempotent checkout requests prevent a network retry from creating a second receipt or double-deducting stock.
 - Manager-only manual discounts; Cashiers cannot submit arbitrary discount values.
 - Percentage and fixed coupons with start/end time, minimum spend, total-use limit and per-member limit.
 - Transactional stock deductions, member points, coupon redemption and double-entry posting.
-- Custom 58mm/80mm receipt templates, safe raster logos, print/reprint and refund workflow.
+- Custom 58mm/80mm receipt templates, safe raster logos, privacy-first address-hidden defaults, print/reprint and refund workflow.
 - Historical receipt/template/business snapshots so reprints do not change later.
 
 ### Barcode and mobile scanning
@@ -92,8 +94,8 @@ Core endpoints:
 - `/api/setup`, `/api/auth/login`, `/api/auth/logout`, `/api/profile`
 - `/api/users`, `/api/system-control`, `/api/ownership-transfer`
 - `/api/products`, `/api/stocktakes`, `/api/members`, `/api/coupons`, `/api/payment-methods`, `/api/exchange-rates`
-- `/api/scanner-sessions`, `/api/mobile-scans`
-- `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`
+- `/api/scanner-sessions`, `/api/mobile-scans`, `/api/payment-display-sessions`, `/api/payment-display`
+- `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`, `/api/local-payment-events`
 - `/api/invoices`, `/api/invoice-templates`, `/api/journals`, `/api/reports`
 - `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`
 - `/api/settings`, `/api/settings/history`, `/api/locations`
@@ -120,7 +122,7 @@ npm test
 npm run build
 ```
 
-The current suite covers authentication errors, origin protection, RBAC, MongoDB namespace isolation, invoice/receipt template validation, currency precision, tax math, coupon bounds, scanner token/routing, provider webhook signatures and exact amounts, POS draft recovery, franchise hierarchy safety, protected identity lookup normalization, procurement validation, smart replenishment, supplier risk scoring, weighted inventory costing, AP foreign-exchange settlement and system write-mode classification.
+The current suite covers authentication errors, origin protection, RBAC, MongoDB namespace isolation, invoice/receipt template validation, currency precision, tax math, coupon bounds, scanner token/routing, provider webhook signatures and exact amounts, local-listener signatures/privacy filtering, POS draft recovery, franchise hierarchy safety, protected identity lookup normalization, procurement validation, smart replenishment, supplier risk scoring, weighted inventory costing, AP foreign-exchange settlement and system write-mode classification.
 
 ## Vercel Hobby design
 

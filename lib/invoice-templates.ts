@@ -20,6 +20,8 @@ export const invoiceTemplateInputSchema = z.object({
   footerText: z.string().trim().max(300).default(""),
   paymentInstructions: z.string().trim().max(500).default(""),
   termsDays: z.coerce.number().int().min(0).max(365).default(14),
+  showBusinessAddress: z.boolean().default(false),
+  showCustomerAddress: z.boolean().default(false),
   showRegistrationNo: z.boolean().default(true),
   showTaxBreakdown: z.boolean().default(true),
   showNotes: z.boolean().default(true),
@@ -44,6 +46,8 @@ export const DEFAULT_INVOICE_TEMPLATE: InvoiceTemplateInput = {
   footerText: "Prepared with care by Kōn-Kōn Matchā.",
   paymentInstructions: "Please include the invoice number with your bank transfer or PayNow payment.",
   termsDays: 14,
+  showBusinessAddress: false,
+  showCustomerAddress: false,
   showRegistrationNo: true,
   showTaxBreakdown: true,
   showNotes: true,
@@ -65,7 +69,7 @@ export async function ensureDefaultInvoiceTemplate(db: Db, createdBy: unknown = 
       ],
     },
     {
-      $set: { systemKey: "starter-invoice-template" },
+      $set: { systemKey: "starter-invoice-template", showBusinessAddress: false, showCustomerAddress: false },
       $setOnInsert: {
         ...DEFAULT_INVOICE_TEMPLATE,
         nameNormalized: DEFAULT_INVOICE_TEMPLATE.name.toLocaleLowerCase("en-SG"),

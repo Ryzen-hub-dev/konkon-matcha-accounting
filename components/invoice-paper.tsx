@@ -66,7 +66,7 @@ export function InvoicePaper({ document, template = DEFAULT_INVOICE_TEMPLATE, co
       </header>
 
       <section className="invoice-paper-parties">
-        <div><small>BILLED TO</small><strong>{document.customerName}</strong>{document.customerAddress ? <p>{document.customerAddress}</p> : null}<span>{[document.customerEmail, document.customerPhone].filter(Boolean).join(" · ")}</span></div>
+        <div><small>BILLED TO</small><strong>{document.customerName}</strong>{template.showCustomerAddress && document.customerAddress ? <p>{document.customerAddress}</p> : null}<span>{[document.customerEmail, document.customerPhone].filter(Boolean).join(" · ")}</span></div>
         <dl><div><dt>Issued</dt><dd>{shortDate.format(new Date(document.createdAt))}</dd></div><div><dt>Due</dt><dd>{shortDate.format(new Date(document.dueDate))}</dd></div>{document.customerReference ? <div><dt>Reference</dt><dd>{document.customerReference}</dd></div> : null}</dl>
       </section>
 
@@ -84,7 +84,7 @@ export function InvoicePaper({ document, template = DEFAULT_INVOICE_TEMPLATE, co
       </section>
 
       <footer className="invoice-paper-footer">
-        <div><strong>{template.footerText}</strong><span>{[business.email, business.phone, business.address].filter(Boolean).join(" · ")}</span>{template.showRegistrationNo && business.registrationNo ? <small>Registration {business.registrationNo}</small> : null}</div>
+        <div><strong>{template.footerText}</strong><span>{[business.email, business.phone, template.showBusinessAddress ? business.address : ""].filter(Boolean).join(" · ")}</span>{template.showRegistrationNo && business.registrationNo ? <small>Registration {business.registrationNo}</small> : null}</div>
         <div className="invoice-paper-seal"><Leaf size={13} /><span>KŌN<br />KŌN</span></div>
       </footer>
     </article>

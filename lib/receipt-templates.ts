@@ -21,7 +21,7 @@ export const receiptTemplateInputSchema = z.object({
   footerText: z.string().trim().max(300).default(""),
   returnPolicy: z.string().trim().max(400).default(""),
   website: z.string().trim().max(160).default(""),
-  showBusinessAddress: z.boolean().default(true),
+  showBusinessAddress: z.boolean().default(false),
   showRegistrationNo: z.boolean().default(true),
   showTaxBreakdown: z.boolean().default(true),
   showSku: z.boolean().default(false),
@@ -51,7 +51,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplateInput = {
   footerText: "Prepared fresh at the Kōn-Kōn counter.",
   returnPolicy: "Please keep this receipt for exchanges. Sealed goods may be exchanged within 7 days.",
   website: "konkonmatcha.com",
-  showBusinessAddress: true,
+  showBusinessAddress: false,
   showRegistrationNo: true,
   showTaxBreakdown: true,
   showSku: false,
@@ -77,7 +77,7 @@ export async function ensureDefaultReceiptTemplate(db: Db, createdBy: unknown = 
       ],
     },
     {
-      $set: { systemKey: "starter-receipt-template" },
+      $set: { systemKey: "starter-receipt-template", showBusinessAddress: false },
       $setOnInsert: {
         ...DEFAULT_RECEIPT_TEMPLATE,
         nameNormalized: DEFAULT_RECEIPT_TEMPLATE.name.toLocaleLowerCase("en-SG"),

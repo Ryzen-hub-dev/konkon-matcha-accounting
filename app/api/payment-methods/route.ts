@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
+import { buildAmountLockedDuitNowQr } from "@/lib/duitnow-qr";
 import { serialise } from "@/lib/format";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
 import {
@@ -62,6 +63,14 @@ export async function POST(request: Request) {
   try {
     const input = paymentMethodSchema.safeParse(body.value);
     if (!input.success) return fail("Check the payment method details.", 422, input.error.flatten().fieldErrors);
+    if (input.data.verificationMode === "STATIC_QR" && (input.data.providerCode === "TNG" || input.data.code === "TNG")) {
+      if (!input.data.supportedCurrencies.includes("MYR")) return fail("TNG fixed-amount collection must support MYR.", 422, { supportedCurrencies: ["Enable MYR for this payment method."] });
+      try {
+        buildAmountLockedDuitNowQr(input.data.qrPayload, 1, "MYR");
+      } catch (reason) {
+        return fail("Import a valid amount-lockable DuitNow recipient QR for TNG.", 422, { qrPayload: [reason instanceof Error ? reason.message : "The DuitNow QR could not be validated."] });
+      }
+    }
     const { db, account } = await readAssetAccount(input.data.accountCode);
     if (!account) return fail("Choose an active cash or bank asset account.", 422, { accountCode: ["The ledger account is not available."] });
     const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
@@ -104,6 +113,14 @@ export async function PATCH(request: Request) {
     const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
     if (changes.supportedCurrencies?.some((currency) => !business.acceptedCurrencies.includes(currency))) return fail("A payment currency is not enabled in Workspace settings.", 422);
     const nextCurrencies = paymentCurrencies({ ...current, ...changes }, business.currency, business.acceptedCurrencies);
+    if (nextMode === "STATIC_QR" && (nextProvider === "TNG" || (changes.code || current.code) === "TNG")) {
+      if (!nextCurrencies.includes("MYR")) return fail("TNG fixed-amount collection must support MYR.", 422, { supportedCurrencies: ["Enable MYR for this payment method."] });
+      try {
+        buildAmountLockedDuitNowQr(nextQrPayload, 1, "MYR");
+      } catch (reason) {
+        return fail("Import a valid amount-lockable DuitNow recipient QR for TNG.", 422, { qrPayload: [reason instanceof Error ? reason.message : "The DuitNow QR could not be validated."] });
+      }
+    }
     if (changes.active === true && !nextCurrencies.length) return fail("Enable at least one of this payment method's currencies in Workspace settings before restoring it.", 422);
     if (changes.active === false && current.active !== false) {
       const activeCount = await db.collection("paymentMethods").countDocuments({ active: { $ne: false } });

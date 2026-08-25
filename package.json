@@ -8,7 +8,9 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "node --test --import tsx tests/*.test.ts",
-    "smoke:user": "node --import tsx scripts/user-smoke.ts"
+    "smoke:user": "node --import tsx scripts/user-smoke.ts",
+    "bridge:payments": "node --import tsx scripts/local-payment-bridge.ts",
+    "smoke:bridge": "node --import tsx scripts/local-payment-bridge-smoke.ts"
   },
   "engines": {
     "node": ">=20.9.0"
