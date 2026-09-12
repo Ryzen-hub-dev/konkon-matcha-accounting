@@ -7,7 +7,7 @@ import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHea
 import { useBusiness } from "@/components/business-context";
 import type { MemberRecord } from "@/lib/types";
 import { ScannerBridge } from "./scanner-bridge";
-import { memberScanToken } from "@/lib/scan-codes";
+import { memberBindingScanToken, memberScanToken } from "@/lib/scan-codes";
 
 export function MembersView({ canWrite = false }: { canWrite?: boolean }) {
   const { money } = useBusiness();
@@ -33,7 +33,7 @@ export function MembersView({ canWrite = false }: { canWrite?: boolean }) {
     <PageHeader eyebrow="COMMUNITY" title="Members" description="Find members by protected identity lookup, card scan, phone or member number." action={canWrite ? <AddButton onClick={() => setOpen(true)}>Add member</AddButton> : undefined} />
     {notice ? <Notice {...notice} /> : null}
     <ScannerBridge contextLabel="Members" purpose="MEMBERS" placeholder="Scan member QR, NFC card or membership number" onFeedback={show} onScan={async code => {
-      try { const matches = memberScanToken(code) ? [await apiRequest<MemberRecord>("/api/member-cards/lookup", { method: "POST", body: JSON.stringify({ code }) })] : await apiRequest<MemberRecord[]>(`/api/members?q=${encodeURIComponent(code)}`); setSearch(""); setMembers(matches); if (!matches.length) show("No member matches this card.", "error"); }
+      try { const matches = memberScanToken(code) || memberBindingScanToken(code) ? [await apiRequest<MemberRecord>("/api/member-cards/lookup", { method: "POST", body: JSON.stringify({ code }) })] : await apiRequest<MemberRecord[]>(`/api/members?q=${encodeURIComponent(code)}`); setSearch(""); setMembers(matches); if (!matches.length) show("No member matches this card.", "error"); }
       catch (reason) { show(reason instanceof Error ? reason.message : "Member card unavailable.", "error"); }
     }} />
     <section className="identity-lookup"><ShieldCheck /><div><strong>Private identity lookup</strong><span>The number is HMAC-protected and only exact matches are returned.</span></div><form onSubmit={exactIdentity}><input value={identitySearch} onChange={(event) => setIdentitySearch(event.target.value)} placeholder="Enter complete ID or passport number" autoComplete="off" /><button className="button button-secondary"><Search size={15} />Find exact match</button>{identitySearch ? <button type="button" className="button button-quiet" onClick={() => { setIdentitySearch(""); void load(); }}>Clear</button> : null}</form></section>

@@ -6,7 +6,7 @@ import { normaliseScanCode, scannerTokenHash } from "@/lib/scanner";
 import { scannerPurposeFilter, scannerPurpose, scannerPermission, SCANNER_PURPOSES, type ScannerPurpose } from "@/lib/scanner-routing";
 import { hasPermission } from "@/lib/rbac";
 import type { UserRole } from "@/lib/types";
-import { memberScanToken, receiptScanToken } from "@/lib/scan-codes";
+import { memberBindingScanToken, memberScanToken, receiptScanToken } from "@/lib/scan-codes";
 import { encryptMemberToken, decryptMemberToken } from "@/lib/member-cards";
 import { getSystemControl } from "@/lib/system-control";
 import { OwnerRecoveryError, readOwnerRecoveryJson } from "@/lib/owner-recovery";
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
     if (recent >= 120) return fail("This scanner is sending codes too quickly. Wait a moment.", 429);
     const purpose = scannerPurpose(session.purpose);
     const eventId = new ObjectId();
-    const protectedCode = Boolean(memberScanToken(code) || receiptScanToken(code));
+    const protectedCode = Boolean(memberScanToken(code) || memberBindingScanToken(code) || receiptScanToken(code));
     const event = { _id: eventId, scannerSessionId: session._id, purpose, ...(protectedCode ? { encryptedCode: encryptMemberToken(code, `scan:${eventId.toHexString()}`) } : { code }), consumedAt: null, expiresAt: session.expiresAt, createdAt: now };
     const result = await db.collection("scannerEvents").insertOne(event);
     await db.collection("scannerSessions").updateOne({ _id: session._id }, { $set: { lastUsedAt: now, updatedAt: now } });

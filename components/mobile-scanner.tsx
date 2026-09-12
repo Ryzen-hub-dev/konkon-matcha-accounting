@@ -173,7 +173,7 @@ export function MobileScanner({ token }: { token: string }) {
     <header className="mobile-scan-brand"><span><Sprout />KŌN-KŌN</span><small>24-HOUR SCANNER PASS</small></header>
     <section className={`scanner-pass scanner-${tone}`}>
       <div className="scanner-pass-edge" aria-hidden="true" />
-      <div className="scanner-pass-title"><span>REMOTE COUNTER · {paired ? "AUTO-CONNECTED" : "PAIRING"}</span><h1>Turn this phone<br />into a scanner.</h1><p>No account data is exposed. The pass sends barcode values only and expires or closes immediately when revoked.</p></div>
+      <div className="scanner-pass-title"><span>REMOTE COUNTER · {paired ? "AUTO-CONNECTED" : "PAIRING"}</span><h1>Turn this phone<br />into a scanner.</h1><p>No account data is exposed. The pass sends barcode values and protected NFC fingerprints only; it expires or closes immediately when revoked.</p></div>
       <div className="camera-stage">
         <video ref={videoRef} muted playsInline />
         <div className="scan-frame"><i /><i /><i /><i /><b /></div>
@@ -182,7 +182,7 @@ export function MobileScanner({ token }: { token: string }) {
       </div>
       <button className="button button-primary mobile-camera-button" onClick={() => cameraActive ? stop() : void start()} disabled={!paired}>{cameraActive ? <CameraOff /> : <Camera />}{cameraActive ? "Stop camera" : paired ? "Start camera" : "Pairing…"}</button>
       <div className="decoder-label"><Radio />{decoder}</div>
-      <NfcControl onRead={send} disabled={!paired} />
+      <NfcControl onRead={send} onGenericRead={send} disabled={!paired} />
       <div className={`scanner-status ${tone}`} aria-live="polite">{tone === "good" ? <CheckCircle2 /> : <span className="scanner-status-dot" />}<span>{status}</span></div>
       <form className="manual-scan" onSubmit={submit}><label><Keyboard /><input name="code" autoCapitalize="characters" autoComplete="off" placeholder="Type or scan a code" required /></label><button disabled={!paired}>Send</button></form>
       <footer><span>PASS VALIDITY</span><strong>Up to 24 hours</strong><i /></footer>

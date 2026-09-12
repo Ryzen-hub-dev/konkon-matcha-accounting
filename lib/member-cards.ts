@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
-import { memberScanToken } from "./scan-codes";
+import { memberBindingScanToken, memberScanToken, type NfcBindingSource } from "./scan-codes";
 
 export const cardStyleSchema = z.object({
   label: z.string().trim().min(2).max(60),
@@ -15,6 +15,16 @@ export function memberTokenHash(value: string) {
   const token = memberScanToken(value);
   if (!token) throw new Error("Invalid member card.");
   return createHash("sha256").update(`member-card-v1:${token}`).digest("hex");
+}
+export function memberBindingHash(source: NfcBindingSource, fingerprint: string) {
+  if (!/^[a-f0-9]{64}$/i.test(fingerprint)) throw new Error("Invalid NFC fingerprint.");
+  const secret = process.env.AUTH_SECRET;
+  if (!secret || secret.length < 32) throw new Error("Card binding is not configured.");
+  return createHmac("sha256", secret).update(`member-card-binding-v1:${source}:${fingerprint.toLowerCase()}`).digest("hex");
+}
+export function memberBindingHashFromCode(value: string) {
+  const parsed = memberBindingScanToken(value);
+  return parsed ? { ...parsed, bindingHash: memberBindingHash(parsed.source, parsed.fingerprint) } : null;
 }
 function key() {
   const secret = process.env.AUTH_SECRET;

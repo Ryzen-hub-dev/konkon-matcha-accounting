@@ -14,7 +14,7 @@ import { ReceiptTemplateStudio } from "@/components/receipt-template-studio";
 import { PaymentDisplayBridge } from "@/components/payment-display-bridge";
 import { ScannerBridge } from "@/components/scanner-bridge";
 import { CartQuantityInput } from "./cart-quantity-input";
-import { memberScanToken, receiptScanToken } from "@/lib/scan-codes";
+import { memberBindingScanToken, memberScanToken, receiptScanToken } from "@/lib/scan-codes";
 import { apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, useNotice } from "@/components/ui";
 import { buildAmountLockedDuitNowQr } from "@/lib/duitnow-qr";
 import { customerQrDisplaySignature, staticQrInputSignature } from "@/lib/customer-payment-qr";
@@ -448,7 +448,7 @@ export function PosView({
       catch (reason) { show(reason instanceof Error ? reason.message : "Receipt not found.", "error"); }
       return;
     }
-    if (memberScanToken(code)) {
+    if (memberScanToken(code) || memberBindingScanToken(code)) {
       try { const member = await apiRequest<MemberRecord>("/api/member-cards/lookup", { method: "POST", body: JSON.stringify({ code }) }); setMembers(current => [...current.filter(item => item._id !== member._id), member]); setMemberId(member._id); show(`${member.name} selected from member card.`); }
       catch (reason) { show(reason instanceof Error ? reason.message : "Member card unavailable.", "error"); }
       return;

@@ -78,6 +78,13 @@ async function main() {
     await api('/api/member-cards', 'PATCH', { id: card._id, status: 'ACTIVE' }, 409);
     await api('/api/member-cards', 'DELETE', { id: card._id }); await api('/api/member-cards/lookup', 'POST', { code: token }, 410);
     console.log('PASS encrypted card issuance, retry, metadata-only listing, suspend/reactivate/void/delete and lookup guards.');
+    const boundCode = `KKNT1-S-${'ab'.repeat(32)}`;
+    const boundCard = await api('/api/member-cards', 'POST', { action: 'BIND', memberId: member._id, code: boundCode, clientRequestId: randomUUID(), label: 'Hotel card', tier: 'MATCHA CLUB', accentColor: '#173f2a' }, 201);
+    assert.equal((await api('/api/member-cards/lookup', 'POST', { code: boundCode }))._id, member._id);
+    assert.ok(!JSON.stringify(await api(`/api/member-cards?memberId=${member._id}`)).includes('bindingHash'));
+    await api('/api/member-cards', 'PATCH', { id: boundCard._id, status: 'SUSPENDED' }); await api('/api/member-cards/lookup', 'POST', { code: boundCode }, 410);
+    await api('/api/member-cards', 'PATCH', { id: boundCard._id, status: 'ACTIVE' }); await api('/api/member-cards', 'DELETE', { id: boundCard._id }); await api('/api/member-cards/lookup', 'POST', { code: boundCode }, 410);
+    console.log('PASS existing NFC card binding, metadata privacy and suspend/delete lookup guards.');
     const activeCard = await api('/api/member-cards', 'POST', { ...cardBody, clientRequestId: randomUUID(), label: 'Phone NFC test' }, 201);
     const activeToken = (await api('/api/member-cards', 'POST', { action: 'REVEAL', id: activeCard._id })).token;
     const sale = await api('/api/sales', 'POST', { clientRequestId: randomUUID(), paymentMethod: 'CASH', tenderedAmount: 100, memberId: member._id, items: [{ productId: product._id, quantity: 2 }], saleNote: 'PRIVATE ORDER NOTE', paymentReference: 'PRIVATE PAY REF' }, 201);

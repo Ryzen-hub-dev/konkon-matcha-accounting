@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ObjectId } from "mongodb";
 import { receiptAccessToken, validReceiptAccess, publicReceipt } from "../lib/receipt-access";
-import { memberScanToken, receiptScanToken, cartQuantity } from "../lib/scan-codes";
-import { encryptMemberToken, decryptMemberToken, newMemberToken, memberTokenHash, cardUpdateSchema } from "../lib/member-cards";
+import { memberBindingScanToken, memberScanToken, receiptScanToken, cartQuantity } from "../lib/scan-codes";
+import { encryptMemberToken, decryptMemberToken, memberBindingHash, newMemberToken, memberTokenHash, cardUpdateSchema } from "../lib/member-cards";
 import { receiptCsv, csvCell } from "../lib/receipt-export";
 import { scannerPurposeFilter, scannerPermission } from "../lib/scanner-routing";
 
@@ -39,6 +39,16 @@ test("member credentials are random, encrypted with card-bound authenticated enc
   assert.equal(memberTokenHash(token), memberTokenHash(token.toLowerCase()));
   assert.equal(memberScanToken("arbitrary-nfc-serial-123"), "");
   assert.equal(cardUpdateSchema.safeParse({ id, status: "DELETED" }).success, false);
+});
+test("existing NFC bindings use a purpose-separated keyed fingerprint and canonical scanner code", () => {
+  const fingerprint = "ab".repeat(32);
+  const code = `KKNT1-S-${fingerprint}`;
+  const parsed = memberBindingScanToken(`  ${code.toLowerCase()}  `);
+  assert.deepEqual(parsed, { source: "NFC_SERIAL", fingerprint });
+  assert.equal(memberBindingHash("NFC_SERIAL", fingerprint), memberBindingHash("NFC_SERIAL", fingerprint.toUpperCase()));
+  assert.notEqual(memberBindingHash("NFC_SERIAL", fingerprint), memberBindingHash("NDEF_DIGEST", fingerprint));
+  assert.equal(memberBindingScanToken(`KKNT1-N-${fingerprint}`)?.source, "NDEF_DIGEST");
+  assert.equal(memberBindingScanToken(`KKNT1-S-${"cd".repeat(31)}`), null);
 });
 test("quantity edits accept bounded whole units and reject blanks, decimals, negatives and stock excess", () => {
   assert.equal(cartQuantity("12", 15), 12);

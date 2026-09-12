@@ -1,13 +1,14 @@
 import { ObjectId } from "mongodb";
+import { z } from "zod";
 import { authorize, fail, ok, created, sameOrigin } from "@/lib/api";
 import { getDb } from "@/lib/db";
 import { serialise } from "@/lib/format";
 import { writeAudit } from "@/lib/audit";
-import { cardCreateSchema, cardUpdateSchema, decryptMemberToken, encryptMemberToken, memberTokenHash, newMemberToken } from "@/lib/member-cards";
+import { cardCreateSchema, cardStyleSchema, cardUpdateSchema, decryptMemberToken, encryptMemberToken, memberBindingHashFromCode, memberTokenHash, newMemberToken } from "@/lib/member-cards";
 import { OwnerRecoveryError, readOwnerRecoveryJson } from "@/lib/owner-recovery";
 
 export const runtime = "nodejs";
-const projection = { tokenHash: 0, encryptedToken: 0, clientRequestId: 0 };
+const projection = { tokenHash: 0, encryptedToken: 0, bindingHash: 0, clientRequestId: 0 };
 function errorResponse(error: unknown) {
   return error instanceof OwnerRecoveryError ? fail(error.message, error.status) : fail("The member card service is temporarily unavailable.", 503);
 }
@@ -37,6 +38,30 @@ export async function POST(request: Request) {
       const token = decryptMemberToken(card.encryptedToken, card._id.toHexString());
       await writeAudit(db, auth.session, "member_card.reveal", "memberCard", card._id.toHexString());
       return ok({ token });
+    }
+    if (body?.action === "BIND") {
+      if (typeof body.memberId !== "string" || !ObjectId.isValid(body.memberId) || typeof body.code !== "string" || typeof body.clientRequestId !== "string") return fail("Scan an NFC card and choose a member.", 422);
+      const binding = memberBindingHashFromCode(body.code);
+      if (!binding) return fail("This NFC card could not be identified by the browser. Use QR or a supported NDEF reader.", 422);
+      const input = cardStyleSchema.safeParse({ label: body.label || "Existing NFC card", tier: body.tier || "MATCHA CLUB", accentColor: body.accentColor || "#173f2a" });
+      if (!input.success || !z.string().uuid().safeParse(body.clientRequestId).success) return fail("Check the existing card details.", 422);
+      const memberId = new ObjectId(body.memberId);
+      if (!await db.collection("members").findOne({ _id: memberId, active: { $ne: false } })) return fail("The member is inactive.", 410);
+      const existingRequest = await db.collection("memberCards").findOne({ clientRequestId: body.clientRequestId, memberId }, { projection });
+      if (existingRequest) return ok(serialise(existingRequest));
+      const existingBinding = await db.collection("memberCards").findOne({ bindingHash: binding.bindingHash });
+      if (existingBinding) {
+        if (existingBinding.memberId.equals(memberId) && existingBinding.status === "ACTIVE") return ok(serialise(await db.collection("memberCards").findOne({ _id: existingBinding._id }, { projection })));
+        return fail(existingBinding.status === "VOID" ? "This NFC card was permanently voided. Use another card." : "This NFC card is already bound to another member.", 409);
+      }
+      if (await db.collection("memberCards").countDocuments({ memberId, status: { $in: ["ACTIVE", "SUSPENDED"] } }) >= 20) return fail("Void an unused card before adding another. Maximum 20 current cards per member.", 409);
+      const _id = new ObjectId(); const now = new Date();
+      const card = { _id, memberId, clientRequestId: body.clientRequestId, label: input.data.label, tier: input.data.tier, accentColor: input.data.accentColor,
+        kind: "BOUND", bindingSource: binding.source, bindingHash: binding.bindingHash, last4: binding.fingerprint.slice(-4).toUpperCase(), status: "ACTIVE", createdAt: now, updatedAt: now, createdBy: new ObjectId(auth.session.id) };
+      try { await db.collection("memberCards").insertOne(card); }
+      catch (error) { if ((error as { code?: number }).code !== 11000) throw error; const retry = await db.collection("memberCards").findOne({ bindingHash: binding.bindingHash }, { projection }); return retry?.memberId?.equals(memberId) ? ok(serialise(retry)) : fail("This NFC card is already bound. Reload and try another card.", 409); }
+      await writeAudit(db, auth.session, "member_card.bind", "memberCard", _id.toHexString(), { memberId: memberId.toHexString(), source: binding.source });
+      return created(serialise(await db.collection("memberCards").findOne({ _id }, { projection })));
     }
     const input = cardCreateSchema.safeParse(body);
     if (!input.success) return fail("Check the card details.", 422, input.error.flatten().fieldErrors);
@@ -81,7 +106,7 @@ export async function DELETE(request: Request) {
     const body = await readOwnerRecoveryJson(request) as { id?: unknown };
     if (typeof body?.id !== "string" || !ObjectId.isValid(body.id)) return fail("Choose a card.", 422);
     const db = await getDb();
-    const result = await db.collection("memberCards").updateOne({ _id: new ObjectId(body.id), status: { $ne: "DELETED" } }, { $set: { status: "DELETED", deletedAt: new Date(), updatedAt: new Date() }, $unset: { encryptedToken: "" } });
+    const result = await db.collection("memberCards").updateOne({ _id: new ObjectId(body.id), status: { $ne: "DELETED" } }, { $set: { status: "DELETED", deletedAt: new Date(), updatedAt: new Date() }, $unset: { encryptedToken: "", bindingHash: "" } });
     if (!result.modifiedCount) return fail("This card is already deleted.", 404);
     await writeAudit(db, auth.session, "member_card.delete", "memberCard", body.id);
     return ok({ deleted: true });
