@@ -64,6 +64,8 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Physical stocktake with typed or scan-to-count quantities, variance posting and auditable stock movements.
 - Product archive/restore preserving stock and transaction history.
 - Manual balanced journals and a seeded chart of accounts.
+- Searchable main-country settings for 249 countries/regions, editable date/number format and time zone, and explicit country selection during Owner setup.
+- Local-day/month dashboard statistics, calendar-safe invoice due dates and manual journals, and currency-specific precision for product prices, coupons, POS and refunds.
 - Draft/sent/paid/void invoices with custom uploadable JSON templates and printable documents.
 - Sales, margin, tender, inventory-value and receivable reports.
 
@@ -139,7 +141,7 @@ See [docs/deployment-vercel.md](docs/deployment-vercel.md) and [SECURITY.md](SEC
 
 ## Country tax/reporting boundary
 
-The shipped workspace is configured for a Singapore-style SGD/GST ledger, but tax rate and tax-inclusive/exclusive pricing remain explicit settings. Generated reports are management reports; they are **not** automatically certified tax returns.
+The main country is configurable and new workspaces choose their country and accounting currency during setup. Existing workspaces can change the main country, locale and time zone without relabelling their fixed ledger currency or rewriting historical documents. Tax rate and tax-inclusive/exclusive pricing remain explicit settings. Generated reports are management reports; they are **not** automatically certified tax returns. See [regional settings](docs/regional-settings.md) for the currency-protection rules and offline data sources.
 
 Country-pack installation, statutory forms, e-invoicing networks, payroll, bank feeds, fixed assets, consolidation and jurisdiction-specific electronic filing remain separate implementation phases. Each country pack must be versioned, sourced from the relevant tax authority and reviewed by a qualified local accountant before the UI can label it filing-ready. See [docs/feature-coverage.md](docs/feature-coverage.md).
 

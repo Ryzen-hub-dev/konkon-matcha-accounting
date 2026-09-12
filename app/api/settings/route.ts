@@ -4,6 +4,7 @@ import { writeAudit } from "@/lib/audit";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { getDb, getMongoClient } from "@/lib/db";
 import { serialise } from "@/lib/format";
+import { ledgerCurrencyChangeError } from "@/lib/regional-settings";
 import {
   countryCodeSchema,
   currencyCodeSchema,
@@ -44,6 +45,8 @@ const settingsSchema = z.object({
   }
 });
 
+class CurrencyChangeConflict extends Error {}
+
 export async function GET() {
   const auth = await authorize("settings.read");
   if (auth.error) return auth.error;
@@ -73,6 +76,8 @@ export async function PATCH(request: Request) {
     try {
       await mongoSession.withTransaction(async () => {
         const current = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }, { session: mongoSession }));
+        const currencyError = ledgerCurrencyChangeError(current.currency, input.data.currency);
+        if (currencyError) throw new CurrencyChangeConflict(currencyError);
         const changedFields = Object.keys(input.data).filter((field) => JSON.stringify(current[field as keyof typeof current]) !== JSON.stringify(input.data[field as keyof typeof input.data]));
         const updated = await db.collection("settings").findOneAndUpdate(
           { key: "business" },
@@ -80,6 +85,24 @@ export async function PATCH(request: Request) {
           { upsert: true, returnDocument: "after", session: mongoSession },
         );
         settings = normaliseBusinessSettings(updated);
+        if (current.countryCode !== settings.countryCode) {
+          // Only replace untouched legacy starter wording, never custom text or document snapshots.
+          await db.collection("receiptTemplates").updateOne(
+            { systemKey: "starter-receipt-template", headerText: "KŌN-KŌN MATCHĀ · SINGAPORE" },
+            { $set: { headerText: "KŌN-KŌN MATCHĀ", updatedAt: now } }, { session: mongoSession },
+          );
+          await db.collection("invoiceTemplates").updateOne(
+            { systemKey: "starter-invoice-template", headerText: "KŌN-KŌN MATCHĀ · SINGAPORE" },
+            { $set: { headerText: "KŌN-KŌN MATCHĀ", updatedAt: now } }, { session: mongoSession },
+          );
+          await db.collection("invoiceTemplates").updateOne(
+            { systemKey: "starter-invoice-template", paymentInstructions: "Please include the invoice number with your bank transfer or PayNow payment." },
+            { $set: { paymentInstructions: "Please include the invoice number with your payment using the agreed payment method.", updatedAt: now } }, { session: mongoSession },
+          );
+          await db.collection("chartOfAccounts").updateOne(
+            { code: "2100", name: "GST payable" }, { $set: { name: "Tax payable" } }, { session: mongoSession },
+          );
+        }
         if (changedFields.length) {
           await db.collection("settingsHistory").insertOne({
             key: "business",
@@ -98,6 +121,7 @@ export async function PATCH(request: Request) {
     }
     return ok(serialise(settings));
   } catch (error) {
+    if (error instanceof CurrencyChangeConflict) return fail(error.message, 409, { currency: [error.message] });
     return publicError(error);
   }
 }

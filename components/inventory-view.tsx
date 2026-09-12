@@ -4,11 +4,12 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Archive, Barcode, Boxes, CircleDollarSign, ClipboardCheck, PackagePlus, Pencil, RotateCcw, Search, SlidersHorizontal } from "lucide-react";
 import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
 import { useBusiness } from "@/components/business-context";
+import { currencyFractionDigits } from "@/lib/international";
 import { ScannerBridge } from "@/components/scanner-bridge";
 import type { ProductRecord } from "@/lib/types";
 
 export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
-  const { money } = useBusiness();
+  const { money, profile } = useBusiness();
   const [products, setProducts] = useState<ProductRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -127,7 +128,7 @@ export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
       <div className="barcode-entry"><Barcode /><label className="field"><span>Product barcode · scan or type · optional</span><input name="barcode" value={draftBarcode} onChange={(event) => setDraftBarcode(event.target.value.toUpperCase())} autoComplete="off" autoFocus placeholder="Scan above or type here" /></label><small>The live whisk line opens this form and fills the barcode automatically. Products without a manufacturer barcode can leave it blank.</small></div>
       <div className="form-grid two"><label className="field"><span>Product name</span><input name="name" defaultValue={product?.name} required /></label><label className="field"><span>SKU</span><input name="sku" defaultValue={product?.sku} pattern="[A-Za-z0-9._-]+" required /></label></div>
       <div className="form-grid two"><label className="field"><span>Category</span><input name="category" defaultValue={product?.category} placeholder="Matcha powder" required /></label><label className="field"><span>Unit</span><input name="unit" defaultValue={product?.unit} placeholder="tin" required /></label></div>
-      <div className={`form-grid ${mode === "add" ? "four" : "three"}`}><label className="field"><span>Retail</span><input name="price" type="number" min="0" step="0.01" defaultValue={product?.price} required /></label><label className="field"><span>Cost</span><input name="cost" type="number" min="0" step="0.01" defaultValue={product?.cost} required /></label>{mode === "add" ? <label className="field"><span>Opening stock</span><input name="stock" type="number" min="0" step="1" required /></label> : null}<label className="field"><span>Reorder at</span><input name="reorderLevel" type="number" min="0" step="1" defaultValue={product?.reorderLevel} required /></label></div>
+      <div className={`form-grid ${mode === "add" ? "four" : "three"}`}><label className="field"><span>Retail</span><input name="price" type="number" min="0" step={10 ** -currencyFractionDigits(profile.currency)} defaultValue={product?.price} required /></label><label className="field"><span>Cost</span><input name="cost" type="number" min="0" step={10 ** -currencyFractionDigits(profile.currency)} defaultValue={product?.cost} required /></label>{mode === "add" ? <label className="field"><span>Opening stock</span><input name="stock" type="number" min="0" step="1" required /></label> : null}<label className="field"><span>Reorder at</span><input name="reorderLevel" type="number" min="0" step="1" defaultValue={product?.reorderLevel} required /></label></div>
       <footer><button type="button" className="button button-secondary" onClick={() => { mode === "add" ? setAddOpen(false) : setEditing(null); setDraftBarcode(""); }}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Saving…" : mode === "add" ? "Add product" : "Save product"}</button></footer>
     </form>;
   };

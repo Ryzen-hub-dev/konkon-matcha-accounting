@@ -2,7 +2,9 @@
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { Download, FileJson, ImagePlus, Palette, Plus, Save, Upload, X } from "lucide-react";
-import { InvoicePaper, type InvoicePaperDocument } from "@/components/invoice-paper";
+import { InvoicePaper } from "@/components/invoice-paper";
+import { useBusiness } from "@/components/business-context";
+import { invoicePreview } from "@/lib/document-preview";
 import { apiRequest, Modal, Notice, useNotice } from "@/components/ui";
 import {
   DEFAULT_INVOICE_TEMPLATE,
@@ -14,26 +16,6 @@ import {
 
 type TemplateDraft = InvoiceTemplateInput & { _id?: string };
 
-const previewDocument: InvoicePaperDocument = {
-  invoiceNo: "INV-PREVIEW",
-  status: "DRAFT",
-  createdAt: new Date(),
-  dueDate: new Date(Date.now() + 14 * 86400000),
-  customerName: "Uji Tea Studio",
-  customerEmail: "accounts@example.com",
-  customerAddress: "27 Tea Room Lane · Singapore",
-  customerReference: "WHOLESALE / AUG",
-  items: [
-    { description: "Ceremonial matchā · 30g", quantity: 4, unitPrice: 46.9, lineTotal: 187.6 },
-    { description: "Purple bamboo chasen", quantity: 2, unitPrice: 18.9, lineTotal: 37.8 },
-  ],
-  subtotal: 225.4,
-  taxRate: 9,
-  tax: 20.29,
-  total: 245.69,
-  notes: "Thank you for sharing our tea with your guests.",
-  businessSnapshot: { businessName: "Kōn-Kōn Matchā", registrationNo: "2026XXXXXX", email: "hello@konkonmatcha.com", phone: "+65 6000 0000", address: "Singapore", taxName: "GST" },
-};
 
 function draftFrom(template?: InvoiceTemplateRecord): TemplateDraft {
   return template ? {
@@ -64,6 +46,7 @@ export function InvoiceTemplateStudio({ open, templates, initialTemplateId, onCl
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
+  const { profile } = useBusiness();
   const [draft, setDraft] = useState<TemplateDraft>(() => draftFrom(templates[0]));
   const [busy, setBusy] = useState(false);
   const wasOpen = useRef(false);
@@ -165,7 +148,7 @@ export function InvoiceTemplateStudio({ open, templates, initialTemplateId, onCl
         <footer><button type="button" className="button button-secondary" onClick={onClose}>Close</button><button className="button button-primary" disabled={busy}><Save size={16} />{busy ? "Saving…" : draft._id ? "Save changes" : "Add template"}</button></footer>
       </form>
 
-      <aside className="template-proof"><header><FileJson size={15} /><span>LIVE PAPER PROOF</span></header><div><InvoicePaper document={{ ...previewDocument, dueDate: new Date(Date.now() + draft.termsDays * 86400000) }} template={draft} compact /></div></aside>
+      <aside className="template-proof"><header><FileJson size={15} /><span>LIVE PAPER PROOF</span></header><div><InvoicePaper document={invoicePreview(profile, draft.termsDays)} template={draft} compact /></div></aside>
     </div>
   </Modal>;
 }

@@ -7,7 +7,9 @@ import {
 } from "lucide-react";
 import { apiRequest, LoadingPanel, Notice, PageHeader, useNotice } from "@/components/ui";
 import type { BusinessSettings } from "@/lib/business-settings";
-import { COUNTRY_PROFILES, CURRENCY_OPTIONS, countryProfile, ORGANIZATION_TYPES } from "@/lib/international";
+import { ORGANIZATION_TYPES } from "@/lib/international";
+import { RegionalSettingsFields } from "@/components/regional-settings-fields";
+import type { RegionalSettings } from "@/lib/regional-settings";
 
 type SystemControl = { mode: "OPEN" | "READ_ONLY" | "CLOSED"; reason: string; reopenAt?: string | null; scannerGeneration: number };
 type TransferUser = { _id: string; fullName: string; username: string; role: string };
@@ -17,6 +19,8 @@ type SettingsHistory = { _id: string; changedFields: string[]; changedByName: st
 
 export function SettingsView({ isOwner = false }: { isOwner?: boolean }) {
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
+  const [regional, setRegional] = useState<RegionalSettings | null>(null);
+  const [savedCountry, setSavedCountry] = useState("");
   const [history, setHistory] = useState<SettingsHistory[]>([]);
   const [system, setSystem] = useState<SystemControl | null>(null);
   const [transfer, setTransfer] = useState<TransferData | null>(null);
@@ -43,6 +47,8 @@ export function SettingsView({ isOwner = false }: { isOwner?: boolean }) {
         apiRequest<SettingsHistory[]>("/api/settings/history"),
       ]);
       setSettings(profile);
+      setRegional(profile);
+      setSavedCountry(profile.countryCode);
       setHistory(entries);
     } catch (reason) {
       show(reason instanceof Error ? reason.message : "Could not load workspace settings.", "error");
@@ -50,23 +56,6 @@ export function SettingsView({ isOwner = false }: { isOwner?: boolean }) {
   }, [show]);
 
   useEffect(() => { void loadSettings(); void loadControls(); }, [loadControls, loadSettings]);
-
-  function applyCountry(event: React.ChangeEvent<HTMLSelectElement>) {
-    const profile = countryProfile(event.target.value);
-    const form = event.currentTarget.form;
-    if (!form) return;
-    const setValue = (name: string, value: string) => {
-      const field = form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | null;
-      if (field) field.value = value;
-    };
-    setValue("timeZone", profile.timeZone);
-    setValue("locale", profile.locale);
-    setValue("currency", profile.currency);
-    setValue("taxName", profile.taxName);
-    const accepted = form.elements.namedItem("acceptedCurrencies") as HTMLSelectElement | null;
-    const baseOption = accepted ? [...accepted.options].find((option) => option.value === profile.currency) : null;
-    if (baseOption) baseOption.selected = true;
-  }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -166,16 +155,8 @@ export function SettingsView({ isOwner = false }: { isOwner?: boolean }) {
         <div className="form-grid two"><label className="field"><span>Phone</span><input name="phone" defaultValue={settings.phone} /></label><label className="field"><span>Address</span><input name="address" defaultValue={settings.address} /></label></div>
 
         <div className="settings-divider" />
-        <header className="settings-section-title"><Globe2 /><div><h2>Country, time and currency</h2><p>Used for new records; historical documents keep their original snapshot.</p></div></header>
-        <div className="form-grid three">
-          <label className="field"><span>Country</span><select name="countryCode" defaultValue={settings.countryCode} onChange={applyCountry}>{COUNTRY_PROFILES.map((profile) => <option key={profile.code} value={profile.code}>{profile.name}</option>)}</select></label>
-          <label className="field"><span>Time zone</span><input name="timeZone" defaultValue={settings.timeZone} placeholder="Asia/Singapore" required /></label>
-          <label className="field"><span>Locale</span><input name="locale" defaultValue={settings.locale} placeholder="en-SG" required /></label>
-        </div>
-        <div className="form-grid two">
-          <label className="field"><span>Base accounting currency</span><select name="currency" defaultValue={settings.currency}>{CURRENCY_OPTIONS.map((currency) => <option key={currency}>{currency}</option>)}</select></label>
-          <label className="field"><span>Accepted settlement currencies</span><select name="acceptedCurrencies" multiple defaultValue={settings.acceptedCurrencies} size={5}>{CURRENCY_OPTIONS.map((currency) => <option key={currency}>{currency}</option>)}</select><small>Use Ctrl/Cmd to select more than one. Always include the base currency.</small></label>
-        </div>
+        {regional ? <RegionalSettingsFields value={regional} onChange={setRegional} currencyLocked /> : null}
+        {regional?.countryCode !== savedCountry ? <label className="check-row" key={regional?.countryCode}><input type="checkbox" required /><span>I have reviewed the new country's tax rate, pricing mode and business time zone. Historical documents will not be rewritten.</span></label> : null}
 
         <div className="settings-divider" />
         <header className="settings-section-title"><Network /><div><h2>Enterprise and franchise profile</h2><p>Creates a stable identity for future multi-location and group controls.</p></div></header>
@@ -184,7 +165,6 @@ export function SettingsView({ isOwner = false }: { isOwner?: boolean }) {
 
         <div className="settings-divider" />
         <header className="settings-section-title"><BellRing /><div><h2>Ledger rules</h2><p>Applied to new transactions.</p></div></header>
-        <div className="form-grid three"><label className="field"><span>Tax name</span><input name="taxName" defaultValue={settings.taxName} required /></label><label className="field"><span>Tax rate %</span><input name="taxRate" type="number" min="0" max="100" step="0.01" defaultValue={settings.taxRate} required /></label><label className="field"><span>Retail price tax</span><select name="taxMode" defaultValue={settings.taxMode}><option value="EXCLUSIVE">Add tax at checkout</option><option value="INCLUSIVE">Tax included in shelf price</option></select></label></div>
         <label className="field"><span>Member points per base-currency unit</span><input name="pointsPerDollar" type="number" min="0" max="100" step="0.1" defaultValue={settings.pointsPerDollar} required /></label>
         <label className="check-row"><input name="lowStockNotifications" type="checkbox" defaultChecked={settings.lowStockNotifications} /><span><strong>Low-stock attention markers</strong><small>Highlight products at or below their reorder level.</small></span></label>
         <footer><button className="button button-primary" disabled={busy}><Save size={16} />{busy ? "Saving…" : "Save workspace"}</button></footer>

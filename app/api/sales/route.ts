@@ -3,13 +3,13 @@ import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
 import { getDb, getMongoClient } from "@/lib/db";
-import { asMoney, makeDocumentNo, serialise } from "@/lib/format";
+import { makeDocumentNo, serialise } from "@/lib/format";
 import { DEFAULT_RECEIPT_TEMPLATE, ensureDefaultReceiptTemplate, normaliseReceiptTemplate } from "@/lib/receipt-templates";
 import { calculateTaxTotals } from "@/lib/tax";
 import { CouponError, validateCoupon } from "@/lib/coupons";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { quoteAmount, readExchangeRate } from "@/lib/exchange-rates";
-import { currencyCodeSchema } from "@/lib/international";
+import { currencyCodeSchema, roundCurrency } from "@/lib/international";
 import { effectiveProvider, effectiveVerificationMode, ensureDefaultPaymentMethods, paymentCurrencies } from "@/lib/payment-methods";
 import { paymentAmountsMatch, staticQrPaymentIsConfirmed } from "@/lib/payment-verification";
 
@@ -92,6 +92,8 @@ export async function POST(request: Request) {
     }
 
     const db = await getDb();
+    const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
+    const money = (value: unknown) => roundCurrency(value, business.currency);
     const existingSale = await db.collection("sales").findOne({ clientRequestId, createdBy: new ObjectId(auth.session.id) });
     if (existingSale) return ok(serialise(existingSale));
     await ensureDefaultReceiptTemplate(db, new ObjectId(auth.session.id));
@@ -110,8 +112,8 @@ export async function POST(request: Request) {
     const productMap = new Map(products.map((product) => [product._id.toHexString(), product]));
     const items = [...quantities.entries()].map(([productId, quantity]) => {
       const product = productMap.get(productId)!;
-      const price = asMoney(product.price);
-      const cost = asMoney(product.cost);
+      const price = money(product.price);
+      const cost = money(product.cost);
       return {
         productId: product._id,
         sku: String(product.sku),
@@ -119,16 +121,15 @@ export async function POST(request: Request) {
         quantity,
         price,
         cost,
-        lineTotal: asMoney(price * quantity),
-        lineCost: asMoney(cost * quantity),
+        lineTotal: money(price * quantity),
+        lineCost: money(cost * quantity),
       };
     });
-    const subtotal = asMoney(items.reduce((sum, item) => sum + item.lineTotal, 0));
-    const manualDiscount = asMoney(input.data.manualDiscount ?? input.data.discount ?? 0);
+    const subtotal = money(items.reduce((sum, item) => sum + item.lineTotal, 0));
+    const manualDiscount = money(input.data.manualDiscount ?? input.data.discount ?? 0);
     if (manualDiscount > 0 && !["OWNER", "ADMIN", "MANAGER"].includes(auth.session.role)) {
       return fail("A Manager must approve a manual discount. Use an active coupon instead.", 403);
     }
-    const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
     const requestedTemplate = input.data.templateId && ObjectId.isValid(input.data.templateId)
       ? await db.collection("receiptTemplates").findOne({ _id: new ObjectId(input.data.templateId), active: { $ne: false } })
       : null;
@@ -141,10 +142,10 @@ export async function POST(request: Request) {
       if (!member) return fail("The selected member no longer exists.", 409);
     }
     const couponResult = input.data.couponCode
-      ? await validateCoupon(db, input.data.couponCode, subtotal, member?._id.toHexString() || null)
+      ? await validateCoupon(db, input.data.couponCode, subtotal, member?._id.toHexString() || null, undefined, business.currency)
       : null;
-    const couponDiscount = asMoney(couponResult?.discount || 0);
-    const discount = asMoney(manualDiscount + couponDiscount);
+    const couponDiscount = money(couponResult?.discount || 0);
+    const discount = money(manualDiscount + couponDiscount);
     if (discount > subtotal) return fail("Combined discounts cannot exceed the subtotal.", 422);
     const taxMode = business.taxMode;
     const { taxRate, tax, netSales, total } = calculateTaxTotals(subtotal, discount, business.taxRate, taxMode, business.currency);
@@ -175,7 +176,7 @@ export async function POST(request: Request) {
       || !paymentAmountsMatch(tenderTotal, Number(paymentIntent.tenderAmount), tenderCurrency))) {
       return fail("The verified payment does not match the current order total, method or currency. Do not release the order.", 409);
     }
-    const totalCost = asMoney(items.reduce((sum, item) => sum + item.lineCost, 0));
+    const totalCost = money(items.reduce((sum, item) => sum + item.lineCost, 0));
     const receiptNo = makeDocumentNo("KKM");
     const journalNo = makeDocumentNo("JE");
     const now = new Date();
@@ -332,7 +333,7 @@ export async function POST(request: Request) {
         const paymentAccount = [String(selectedPayment.accountCode), String(selectedPayment.accountName)];
         const revenueLines = [
           { accountCode: "4000", accountName: "Product sales", debit: 0, credit: netSales },
-          ...(tax > 0 ? [{ accountCode: "2100", accountName: "GST payable", debit: 0, credit: tax }] : []),
+          ...(tax > 0 ? [{ accountCode: "2100", accountName: "Tax payable", debit: 0, credit: tax }] : []),
         ];
         await db.collection("journalEntries").insertOne({
           entryNo: journalNo,
@@ -347,8 +348,8 @@ export async function POST(request: Request) {
             { accountCode: "5000", accountName: "Cost of goods sold", debit: totalCost, credit: 0 },
             { accountCode: "1200", accountName: "Inventory", debit: 0, credit: totalCost },
           ],
-          totalDebit: asMoney(total + totalCost),
-          totalCredit: asMoney(total + totalCost),
+          totalDebit: money(total + totalCost),
+          totalCredit: money(total + totalCost),
           createdBy: new ObjectId(auth.session.id),
           createdAt: now,
         }, { session: mongoSession });

@@ -33,3 +33,4 @@ packages/
 PROMPT.md
 
 .vercel/
+.artifacts/

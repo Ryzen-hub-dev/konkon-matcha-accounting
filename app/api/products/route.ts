@@ -3,7 +3,9 @@ import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
-import { asMoney, serialise } from "@/lib/format";
+import { normaliseBusinessSettings } from "@/lib/business-settings";
+import { roundCurrency } from "@/lib/international";
+import { serialise } from "@/lib/format";
 
 export const runtime = "nodejs";
 
@@ -69,14 +71,16 @@ export async function POST(request: Request) {
     const input = productSchema.safeParse(await request.json());
     if (!input.success) return fail("Check the product details.", 422, input.error.flatten().fieldErrors);
     const db = await getDb();
+    const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
+    const money = (value: unknown) => roundCurrency(value, business.currency);
     const now = new Date();
     const { barcode, ...productData } = input.data;
     const document = {
       ...productData,
       sku: input.data.sku.toUpperCase(),
       ...(barcode ? { barcode: normaliseBarcode(barcode) } : {}),
-      price: asMoney(input.data.price),
-      cost: asMoney(input.data.cost),
+      price: money(input.data.price),
+      cost: money(input.data.cost),
       active: true,
       createdBy: new ObjectId(auth.session.id),
       createdAt: now,
@@ -107,13 +111,15 @@ export async function PATCH(request: Request) {
       const update = productUpdateSchema.safeParse(body);
       if (!update.success || !ObjectId.isValid(update.data?.id || "")) return fail("Check the product update.", 422, update.success ? undefined : update.error.flatten().fieldErrors);
       const db = await getDb();
+      const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
+      const money = (value: unknown) => roundCurrency(value, business.currency);
       const { id, restore, barcode, ...changes } = update.data;
       const set = {
         ...changes,
         ...(changes.sku ? { sku: changes.sku.toUpperCase() } : {}),
         ...(barcode ? { barcode: normaliseBarcode(barcode) } : {}),
-        ...(changes.price !== undefined ? { price: asMoney(changes.price) } : {}),
-        ...(changes.cost !== undefined ? { cost: asMoney(changes.cost) } : {}),
+        ...(changes.price !== undefined ? { price: money(changes.price) } : {}),
+        ...(changes.cost !== undefined ? { cost: money(changes.cost) } : {}),
         ...(restore ? { active: true } : {}),
         updatedAt: new Date(),
       };

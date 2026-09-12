@@ -4,10 +4,11 @@ import { created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { hashPassword, isAuthConfigured, normalizeIdentity, setSession } from "@/lib/auth";
 import { getDb, getMongoClient } from "@/lib/db";
 import { seedWorkspace } from "@/lib/seed";
+import { regionalSettingsSchema } from "@/lib/regional-settings";
 
 export const runtime = "nodejs";
 
-const setupSchema = z.object({
+const setupSchema = regionalSettingsSchema.extend({
   businessName: z.string().trim().min(2).max(100),
   fullName: z.string().trim().min(2).max(100),
   username: z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9._-]+$/),
@@ -16,8 +17,8 @@ const setupSchema = z.object({
     .regex(/[a-z]/, "Include a lowercase letter")
     .regex(/[A-Z]/, "Include an uppercase letter")
     .regex(/[0-9]/, "Include a number"),
-  seedProducts: z.boolean().default(true),
-});
+  seedProducts: z.boolean().default(false),
+}).refine(value => value.acceptedCurrencies.includes(value.currency), { path: ["acceptedCurrencies"], message: "Include the base accounting currency." });
 
 export async function GET() {
   if (!isAuthConfigured()) {
@@ -81,7 +82,7 @@ export async function POST(request: Request) {
     try {
       await mongoSession.withTransaction(async () => {
         await db.collection("users").insertOne(user, { session: mongoSession });
-        await seedWorkspace(db, _id, input.data.businessName, input.data.seedProducts, mongoSession);
+        await seedWorkspace(db, _id, input.data.businessName, input.data.seedProducts, mongoSession, input.data);
         await db.collection("auditLogs").insertOne({
           actorId: _id,
           actorName: user.fullName,
@@ -89,7 +90,7 @@ export async function POST(request: Request) {
           action: "workspace.setup",
           entityType: "workspace",
           entityId: "default",
-          details: { businessName: input.data.businessName, seededStarterProducts: input.data.seedProducts },
+          details: { businessName: input.data.businessName, countryCode: input.data.countryCode, currency: input.data.currency, timeZone: input.data.timeZone, seededStarterProducts: input.data.seedProducts },
           createdAt: now,
         }, { session: mongoSession });
       });

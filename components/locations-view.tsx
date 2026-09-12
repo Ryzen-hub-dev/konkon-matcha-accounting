@@ -4,9 +4,11 @@ import { FormEvent, useEffect, useState } from "react";
 import { Archive, Building2, Globe2, MapPinned, Pencil, Plus, RotateCcw, Warehouse } from "lucide-react";
 import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
 import { COUNTRY_PROFILES, CURRENCY_OPTIONS, countryProfile } from "@/lib/international";
+import { useBusiness } from "@/components/business-context";
 import { LOCATION_TYPES, type LocationRecord } from "@/lib/locations";
 
 export function LocationsView() {
+  const { profile: business } = useBusiness();
   const [locations, setLocations] = useState<LocationRecord[]>([]);
   const [editing, setEditing] = useState<LocationRecord | null>(null);
   const [adding, setAdding] = useState(false);
@@ -70,8 +72,8 @@ export function LocationsView() {
     <Modal open={adding || Boolean(editing)} onClose={() => { setAdding(false); setEditing(null); }} title={selected ? `Edit ${selected.name}` : "New enterprise location"} kicker="COUNTRY + OWNERSHIP">
       <form className="modal-form wide-form" onSubmit={save} key={selected?._id || "new-location"}>
         <div className="form-grid three"><label className="field"><span>Location name</span><input name="name" defaultValue={selected?.name} required autoFocus /></label><label className="field"><span>Unique code</span><input name="code" defaultValue={selected?.code} pattern="[A-Za-z0-9_-]+" required /></label><label className="field"><span>Type</span><select name="type" defaultValue={selected?.type || "BRANCH"}>{LOCATION_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label></div>
-        <div className="form-grid three"><label className="field"><span>Country</span><select name="countryCode" defaultValue={selected?.countryCode || "SG"} onChange={applyCountry}>{COUNTRY_PROFILES.map((profile) => <option key={profile.code} value={profile.code}>{profile.name}</option>)}</select></label><label className="field"><span>Time zone</span><input name="timeZone" defaultValue={selected?.timeZone || "Asia/Singapore"} required /></label><label className="field"><span>Locale</span><input name="locale" defaultValue={selected?.locale || "en-SG"} required /></label></div>
-        <div className="form-grid two"><label className="field"><span>Operating currency</span><select name="currency" defaultValue={selected?.currency || "SGD"}>{CURRENCY_OPTIONS.map((currency) => <option key={currency}>{currency}</option>)}</select></label><label className="field"><span>Parent location</span><select name="parentLocationId" defaultValue={selected?.parentLocationId || ""}><option value="">No parent</option>{active.filter((location) => location._id !== selected?._id).map((location) => <option key={location._id} value={location._id}>{location.code} · {location.name}</option>)}</select></label></div>
+        <div className="form-grid three"><label className="field"><span>Country</span><select name="countryCode" defaultValue={selected?.countryCode || business.countryCode} onChange={applyCountry}>{COUNTRY_PROFILES.map((profile) => <option key={profile.code} value={profile.code}>{profile.name}</option>)}</select></label><label className="field"><span>Time zone</span><input name="timeZone" defaultValue={selected?.timeZone || business.timeZone} required /></label><label className="field"><span>Locale</span><input name="locale" defaultValue={selected?.locale || business.locale} required /></label></div>
+        <div className="form-grid two"><label className="field"><span>Operating currency</span><select name="currency" defaultValue={selected?.currency || business.currency}>{CURRENCY_OPTIONS.map((currency) => <option key={currency}>{currency}</option>)}</select></label><label className="field"><span>Parent location</span><select name="parentLocationId" defaultValue={selected?.parentLocationId || ""}><option value="">No parent</option>{active.filter((location) => location._id !== selected?._id).map((location) => <option key={location._id} value={location._id}>{location.code} · {location.name}</option>)}</select></label></div>
         <label className="field"><span>Address</span><textarea name="address" rows={3} defaultValue={selected?.address} /></label>
         <footer><button type="button" className="button button-secondary" onClick={() => { setAdding(false); setEditing(null); }}>Cancel</button><button className="button button-primary" disabled={busy}><MapPinned />{busy ? "Saving…" : "Save location"}</button></footer>
       </form>

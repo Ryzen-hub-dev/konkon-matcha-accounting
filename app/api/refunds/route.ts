@@ -3,7 +3,8 @@ import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
 import { getDb, getMongoClient } from "@/lib/db";
-import { asMoney, makeDocumentNo, serialise } from "@/lib/format";
+import { makeDocumentNo, serialise } from "@/lib/format";
+import { roundCurrency } from "@/lib/international";
 import { calculateTaxTotals, type TaxMode } from "@/lib/tax";
 
 export const runtime = "nodejs";
@@ -63,6 +64,8 @@ export async function POST(request: Request) {
           throw new Error("REFUND_NOT_AVAILABLE");
         }
 
+        const currency = String(sale.businessSnapshot?.currency || "SGD");
+        const money = (value: unknown) => roundCurrency(value, currency);
         const saleItems = Array.isArray(sale.items) ? sale.items : [];
         const itemMap = new Map(saleItems.map((item) => [item.productId.toString(), item]));
         for (const [productId, quantity] of requested) {
@@ -78,10 +81,10 @@ export async function POST(request: Request) {
             sku: String(item.sku || ""),
             name: String(item.name),
             quantity,
-            price: asMoney(item.price),
-            cost: asMoney(item.cost),
-            lineSubtotal: asMoney(Number(item.price) * quantity),
-            lineCost: asMoney(Number(item.cost) * quantity),
+            price: money(item.price),
+            cost: money(item.cost),
+            lineSubtotal: money(Number(item.price) * quantity),
+            lineCost: money(Number(item.cost) * quantity),
           };
         });
 
@@ -90,31 +93,31 @@ export async function POST(request: Request) {
           return refundQuantity ? {
             ...item,
             refundedQuantity: Number(item.refundedQuantity || 0) + refundQuantity,
-            refundedLineTotal: asMoney(Number(item.refundedLineTotal || 0) + Number(item.price) * refundQuantity),
+            refundedLineTotal: money(Number(item.refundedLineTotal || 0) + Number(item.price) * refundQuantity),
           } : item;
         });
         const isFinalRefund = updatedItems.every((item) => Number(item.refundedQuantity || 0) >= Number(item.quantity || 0));
-        const lineSubtotal = asMoney(refundItems.reduce((sum, item) => sum + item.lineSubtotal, 0));
-        const lineCost = asMoney(refundItems.reduce((sum, item) => sum + item.lineCost, 0));
-        const originalSubtotal = Math.max(0.01, Number(sale.subtotal || 0));
-        let discount = asMoney(Number(sale.discount || 0) * (lineSubtotal / originalSubtotal));
+        const lineSubtotal = money(refundItems.reduce((sum, item) => sum + item.lineSubtotal, 0));
+        const lineCost = money(refundItems.reduce((sum, item) => sum + item.lineCost, 0));
+        const originalSubtotal = Math.max(Number.EPSILON, Number(sale.subtotal || 0));
+        let discount = money(Number(sale.discount || 0) * (lineSubtotal / originalSubtotal));
         const taxMode: TaxMode = sale.taxMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE";
-        let totals = calculateTaxTotals(lineSubtotal, discount, Number(sale.taxRate || 0), taxMode);
+        let totals = calculateTaxTotals(lineSubtotal, discount, Number(sale.taxRate || 0), taxMode, currency);
 
         if (isFinalRefund) {
-          discount = asMoney(Number(sale.discount || 0) - Number(sale.refundedDiscount || 0));
+          discount = money(Number(sale.discount || 0) - Number(sale.refundedDiscount || 0));
           totals = {
-            ...calculateTaxTotals(lineSubtotal, discount, Number(sale.taxRate || 0), taxMode),
-            tax: asMoney(Number(sale.tax || 0) - Number(sale.refundedTax || 0)),
-            netSales: asMoney(Number(sale.netSales ?? sale.total ?? 0) - Number(sale.refundedNetSales || 0)),
-            total: asMoney(Number(sale.total || 0) - Number(sale.refundedAmount || 0)),
+            ...calculateTaxTotals(lineSubtotal, discount, Number(sale.taxRate || 0), taxMode, currency),
+            tax: money(Number(sale.tax || 0) - Number(sale.refundedTax || 0)),
+            netSales: money(Number(sale.netSales ?? sale.total ?? 0) - Number(sale.refundedNetSales || 0)),
+            total: money(Number(sale.total || 0) - Number(sale.refundedAmount || 0)),
           };
         }
 
         const remainingPoints = Math.max(0, Number(sale.pointsEarned || 0) - Number(sale.refundedPoints || 0));
         const pointsReversed = isFinalRefund
           ? remainingPoints
-          : Math.min(remainingPoints, Math.max(0, Math.floor(Number(sale.pointsEarned || 0) * (totals.total / Math.max(0.01, Number(sale.total || 0))))));
+          : Math.min(remainingPoints, Math.max(0, Math.floor(Number(sale.pointsEarned || 0) * (totals.total / Math.max(Number.EPSILON, Number(sale.total || 0))))));
         const refundNo = makeDocumentNo("REF");
         const journalNo = makeDocumentNo("JE");
         const now = new Date();
@@ -133,6 +136,7 @@ export async function POST(request: Request) {
           netSales: totals.netSales,
           total: totals.total,
           totalCost: lineCost,
+          currency,
           paymentMethod: sale.paymentMethod,
           paymentMethodName: sale.paymentMethodName || sale.paymentMethod,
           pointsReversed,
@@ -199,13 +203,13 @@ export async function POST(request: Request) {
           status: "POSTED",
           lines: [
             { accountCode: "4000", accountName: "Product sales", debit: totals.netSales, credit: 0 },
-            ...(totals.tax > 0 ? [{ accountCode: "2100", accountName: "GST payable", debit: totals.tax, credit: 0 }] : []),
+            ...(totals.tax > 0 ? [{ accountCode: "2100", accountName: "Tax payable", debit: totals.tax, credit: 0 }] : []),
             { accountCode: paymentAccount[0], accountName: paymentAccount[1], debit: 0, credit: totals.total },
             { accountCode: "1200", accountName: "Inventory", debit: lineCost, credit: 0 },
             { accountCode: "5000", accountName: "Cost of goods sold", debit: 0, credit: lineCost },
           ],
-          totalDebit: asMoney(totals.total + lineCost),
-          totalCredit: asMoney(totals.total + lineCost),
+          totalDebit: money(totals.total + lineCost),
+          totalCredit: money(totals.total + lineCost),
           createdBy: new ObjectId(auth.session.id),
           createdAt: now,
         }, { session: mongoSession });

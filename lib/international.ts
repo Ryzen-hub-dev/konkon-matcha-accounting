@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { REGION_DATA } from "@/lib/country-data";
 
-export const COUNTRY_PROFILES = [
+const COUNTRY_PRESETS = [
   { code: "SG", name: "Singapore", locale: "en-SG", currency: "SGD", timeZone: "Asia/Singapore", taxName: "GST" },
   { code: "MY", name: "Malaysia", locale: "en-MY", currency: "MYR", timeZone: "Asia/Kuala_Lumpur", taxName: "SST" },
   { code: "CN", name: "Mainland China", locale: "zh-CN", currency: "CNY", timeZone: "Asia/Shanghai", taxName: "VAT" },
@@ -15,23 +16,37 @@ export const COUNTRY_PROFILES = [
   { code: "US", name: "United States", locale: "en-US", currency: "USD", timeZone: "America/New_York", taxName: "Sales tax" },
 ] as const;
 
-export const CURRENCY_OPTIONS = [
+export const COUNTRY_PROFILES = REGION_DATA.map((region) => {
+  const preset = COUNTRY_PRESETS.find((entry) => entry.code === region.code);
+  return {
+    ...region,
+    currency: preset?.currency || region.currencies[0] || "",
+    locale: preset?.locale || region.locale,
+    timeZone: preset?.timeZone || region.timeZones[0] || "UTC",
+    taxName: preset?.taxName || "Tax",
+  };
+});
+
+export const CURRENCY_OPTIONS = [...new Set([
   "SGD", "MYR", "CNY", "HKD", "USD", "EUR", "GBP", "JPY", "AUD", "NZD",
   "IDR", "THB", "VND", "PHP", "TWD", "KRW", "INR", "AED", "SAR", "CAD",
   "CHF", "BND", "MOP", "KWD", "BHD", "OMR",
-] as const;
+  ...REGION_DATA.flatMap((region) => region.currencies),
+])].sort();
 
 export const ORGANIZATION_TYPES = ["INDEPENDENT", "FRANCHISOR", "FRANCHISEE", "CORPORATE_GROUP"] as const;
 
 export type CountryCode = (typeof COUNTRY_PROFILES)[number]["code"];
 export type OrganizationType = (typeof ORGANIZATION_TYPES)[number];
 
-export const countryCodeSchema = z.enum(COUNTRY_PROFILES.map((profile) => profile.code) as [CountryCode, ...CountryCode[]]);
+export const countryCodeSchema = z.string().trim().toUpperCase().refine(
+  (code) => COUNTRY_PROFILES.some((profile) => profile.code === code), "Choose a supported country or region.",
+);
 
 export function isValidCurrency(value: string) {
   if (!/^[A-Z]{3}$/.test(value)) return false;
   try {
-    if (typeof Intl.supportedValuesOf === "function" && !Intl.supportedValuesOf("currency").includes(value)) return false;
+    if (!CURRENCY_OPTIONS.includes(value) && typeof Intl.supportedValuesOf === "function" && !Intl.supportedValuesOf("currency").includes(value)) return false;
     new Intl.NumberFormat("en", { style: "currency", currency: value }).format(1);
     return true;
   } catch {
@@ -63,7 +78,10 @@ export const timeZoneSchema = z.string().trim().refine(isValidTimeZone, "Use a v
 export const localeSchema = z.string().trim().refine(isValidLocale, "Use a valid locale such as en-SG or zh-CN.");
 
 export function countryProfile(code: string) {
-  return COUNTRY_PROFILES.find((profile) => profile.code === code) || COUNTRY_PROFILES[0];
+  return COUNTRY_PROFILES.find((profile) => profile.code === code) || {
+    code, name: code || "Choose a country", currency: "", currencies: [] as string[],
+    locale: "en", timeZone: "UTC", timeZones: [] as string[], taxName: "Tax",
+  };
 }
 
 export function currencyFractionDigits(currency: string) {

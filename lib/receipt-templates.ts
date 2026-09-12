@@ -46,7 +46,7 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplateInput = {
   accentColor: "#173f2a",
   logoDataUrl: "",
   receiptTitle: "SALES RECEIPT",
-  headerText: "KŌN-KŌN MATCHĀ · SINGAPORE",
+  headerText: "KŌN-KŌN MATCHĀ",
   thankYouText: "Thank you for sharing a bowl with us.",
   footerText: "Prepared fresh at the Kōn-Kōn counter.",
   returnPolicy: "Please keep this receipt for exchanges. Sealed goods may be exchanged within 7 days.",

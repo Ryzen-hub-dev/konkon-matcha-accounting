@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     if (!input.success) return fail("Check the invoice details.", 422, input.error.flatten().fieldErrors);
     const db = await getDb();
     const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
-    const items = input.data.items.map((item) => ({ ...item, unitPrice: roundCurrency(item.unitPrice, business.currency), lineTotal: roundCurrency(item.quantity * item.unitPrice, business.currency) }));
+    const items = input.data.items.map((item) => ({ ...item, unitPrice: roundCurrency(item.unitPrice, business.currency), lineTotal: roundCurrency(item.quantity * roundCurrency(item.unitPrice, business.currency), business.currency) }));
     const subtotal = roundCurrency(items.reduce((sum, item) => sum + item.lineTotal, 0), business.currency);
     const requestedTemplate = input.data.templateId && ObjectId.isValid(input.data.templateId)
       ? await db.collection("invoiceTemplates").findOne({ _id: new ObjectId(input.data.templateId), active: { $ne: false } })
@@ -161,7 +161,7 @@ export async function PATCH(request: Request) {
             lines: [
               { accountCode: "1010", accountName: "Bank", debit: current.total, credit: 0 },
               { accountCode: "4000", accountName: "Product sales", debit: 0, credit: Number(current.netSales ?? Number(current.subtotal) - tax) },
-              ...(tax > 0 ? [{ accountCode: "2100", accountName: "GST payable", debit: 0, credit: tax }] : []),
+              ...(tax > 0 ? [{ accountCode: "2100", accountName: "Tax payable", debit: 0, credit: tax }] : []),
             ],
             totalDebit: current.total, totalCredit: current.total,
             createdBy: new ObjectId(auth.session.id), createdAt: paidAt,

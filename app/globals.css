@@ -738,3 +738,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .payment-display-qr-shell { width: min(76vw,340px); }
 }
 @media (prefers-reduced-motion: reduce) { .display-whisk-rings, .payment-display-signal.live svg, .spin { animation: none; } }
+.regional-settings { display: grid; gap: 1rem; min-width: 0; }
+.regional-settings .field > span, .regional-settings .field input, .regional-settings .field select { font-size: .875rem; }
+.regional-settings .field input, .regional-settings .field select { min-height: 44px; }
+.regional-settings .field small, .regional-note { font-size: .8125rem; line-height: 1.6; color: var(--muted); }
+.regional-settings .settings-section-title p { font-size: .875rem; }
+.regional-preview { display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; align-items: center; padding: 1rem; border-left: 3px solid var(--koicha); background: rgba(92,128,76,.08); font-size: 1rem; }
+.regional-preview strong { flex-basis: 100%; color: var(--koicha); }
+.regional-preview small { font-size: .8125rem; overflow-wrap: anywhere; }
+.regional-currencies { display: flex; gap: .5rem; flex-wrap: wrap; margin: .5rem 0; }
+.regional-currencies > span { display: inline-flex; align-items: center; gap: .5rem; padding: .3rem .6rem; background: rgba(92,128,76,.1); border-radius: 6px; font-size: .875rem; }
+.regional-currencies button { min-width: 32px; min-height: 32px; border: 0; background: transparent; color: var(--koicha); font-size: 1.25rem; cursor: pointer; }
+.regional-note { margin: 0; padding: .75rem 0; }
+.regional-settings :focus-visible { outline: 2px solid var(--koicha); outline-offset: 3px; }
+.regional-settings select:disabled { opacity: .75; }
+@media (max-width: 720px) { .regional-settings .form-grid { grid-template-columns: minmax(0, 1fr); } .regional-settings .field { min-width: 0; } }

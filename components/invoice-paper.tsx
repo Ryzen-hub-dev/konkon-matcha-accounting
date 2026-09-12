@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { Leaf } from "lucide-react";
 import { DEFAULT_INVOICE_TEMPLATE, type InvoiceTemplateInput } from "@/lib/invoice-templates";
+import { formatCalendarDate } from "@/lib/dates";
 
 export type InvoicePaperItem = {
   description: string;
@@ -67,7 +68,7 @@ export function InvoicePaper({ document, template = DEFAULT_INVOICE_TEMPLATE, co
 
       <section className="invoice-paper-parties">
         <div><small>BILLED TO</small><strong>{document.customerName}</strong>{template.showCustomerAddress && document.customerAddress ? <p>{document.customerAddress}</p> : null}<span>{[document.customerEmail, document.customerPhone].filter(Boolean).join(" · ")}</span></div>
-        <dl><div><dt>Issued</dt><dd>{shortDate.format(new Date(document.createdAt))}</dd></div><div><dt>Due</dt><dd>{shortDate.format(new Date(document.dueDate))}</dd></div>{document.customerReference ? <div><dt>Reference</dt><dd>{document.customerReference}</dd></div> : null}</dl>
+        <dl><div><dt>Issued</dt><dd>{shortDate.format(new Date(document.createdAt))}</dd></div><div><dt>Due</dt><dd>{formatCalendarDate(document.dueDate, locale)}</dd></div>{document.customerReference ? <div><dt>Reference</dt><dd>{document.customerReference}</dd></div> : null}</dl>
       </section>
 
       <div className="invoice-paper-lines">

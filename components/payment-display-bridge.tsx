@@ -3,6 +3,7 @@
 import QRCode from "qrcode";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Copy, ExternalLink, Link2, MonitorSmartphone, Plus, Radio, Unplug } from "lucide-react";
+import { useBusiness } from "@/components/business-context";
 import { apiRequest, Modal } from "@/components/ui";
 import type { PaymentMethodRecord } from "@/lib/payment-methods";
 
@@ -36,6 +37,7 @@ export function PaymentDisplayBridge({
   completedAt: number;
   onFeedback?: (message: string, tone?: "success" | "error") => void;
 }) {
+  const { dateTime } = useBusiness();
   const [open, setOpen] = useState(false);
   const [sessions, setSessions] = useState<DisplaySession[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -179,7 +181,7 @@ export function PaymentDisplayBridge({
         <div className="payment-screen-link-intro"><MonitorSmartphone /><div><strong>A second phone becomes the customer-facing display</strong><p>It receives only Welcome, Thank You, payment name, currency, amount and the recipient QR. Products, members, stock, reports and account access are never exposed.</p></div></div>
         <form onSubmit={createSession}><label className="field"><span>Display label</span><input name="label" defaultValue="Counter customer screen" minLength={2} maxLength={60} required /></label><button className="button button-primary" disabled={busy}><Plus />{busy ? "Issuing…" : "Issue 24-hour display pass"}</button></form>
         {issuedUrl ? <div className="issued-payment-screen">{issuedQr ? <img src={issuedQr} alt="QR code that links a customer payment screen" /> : null}<div><span>SCAN ON THE SECOND PHONE</span><code>{issuedUrl}</code><p><a className="button button-secondary" href={issuedUrl} target="_blank" rel="noreferrer"><ExternalLink />Open display</a><button type="button" className="button button-secondary" onClick={() => void navigator.clipboard.writeText(issuedUrl).then(() => feedback("Payment-screen link copied.")).catch(() => feedback("The browser blocked clipboard access. Open the display link instead.", "error"))}><Copy />Copy link</button></p></div></div> : null}
-        <div className="payment-screen-session-list">{sessions.length ? sessions.map((session) => <article key={session._id} className={selectedId === session._id ? "selected" : ""}><div><strong>{session.label}</strong><span>{session.lastSeenAt ? "Phone connected" : "Waiting for phone"} · expires {new Intl.DateTimeFormat("en-SG", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(session.expiresAt))}</span></div><button type="button" className="button button-secondary" disabled={selectedId === session._id} onClick={() => { selectSession(session._id); setOpen(false); }}>{selectedId === session._id ? "Selected" : "Use here"}</button><button type="button" className="icon-button danger" title="Revoke display pass" onClick={() => void revokeSession(session)}><Unplug /></button></article>) : <p>No active customer payment screens.</p>}</div>
+        <div className="payment-screen-session-list">{sessions.length ? sessions.map((session) => <article key={session._id} className={selectedId === session._id ? "selected" : ""}><div><strong>{session.label}</strong><span>{session.lastSeenAt ? "Phone connected" : "Waiting for phone"} · expires {dateTime.format(new Date(session.expiresAt))}</span></div><button type="button" className="button button-secondary" disabled={selectedId === session._id} onClick={() => { selectSession(session._id); setOpen(false); }}>{selectedId === session._id ? "Selected" : "Use here"}</button><button type="button" className="icon-button danger" title="Revoke display pass" onClick={() => void revokeSession(session)}><Unplug /></button></article>) : <p>No active customer payment screens.</p>}</div>
         <div className="payment-screen-privacy"><Link2 /><span><strong>This link cannot control the POS.</strong><small>It is read-only, expires after 24 hours and can be revoked immediately from this panel.</small></span></div>
       </div>
     </Modal>

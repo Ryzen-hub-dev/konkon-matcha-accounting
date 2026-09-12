@@ -2,7 +2,9 @@
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { Download, ImagePlus, Palette, Plus, ReceiptText, Save, Upload, X } from "lucide-react";
-import { ReceiptPaper, type ReceiptPaperDocument } from "@/components/receipt-paper";
+import { ReceiptPaper } from "@/components/receipt-paper";
+import { useBusiness } from "@/components/business-context";
+import { receiptPreview } from "@/lib/document-preview";
 import { apiRequest, Modal, Notice, useNotice } from "@/components/ui";
 import {
   DEFAULT_RECEIPT_TEMPLATE,
@@ -14,29 +16,6 @@ import {
 
 type TemplateDraft = ReceiptTemplateInput & { _id?: string };
 
-const previewReceipt: ReceiptPaperDocument = {
-  receiptNo: "KKM-PREVIEW",
-  createdAt: new Date(),
-  cashierName: "Mei Lin",
-  memberName: "Tea Club Member",
-  memberNo: "MEM-0188",
-  pointsEarned: 3,
-  pointsBalance: 128,
-  items: [
-    { sku: "MATCHA-A-30", name: "Gurēdo A Ceremonial · 30g", quantity: 1, price: 46.9, lineTotal: 46.9 },
-    { sku: "DOGU-CHASEN", name: "Purple Bamboo Chasen", quantity: 1, price: 18.9, lineTotal: 18.9 },
-  ],
-  subtotal: 65.8,
-  discount: 5,
-  taxRate: 9,
-  taxMode: "INCLUSIVE",
-  tax: 5.02,
-  total: 60.8,
-  paymentMethod: "CASH",
-  tenderedAmount: 70,
-  changeDue: 9.2,
-  businessSnapshot: { businessName: "Kōn-Kōn Matchā", registrationNo: "2026XXXXXX", email: "hello@konkonmatcha.com", phone: "+65 6000 0000", address: "Singapore", currency: "SGD", taxName: "GST" },
-};
 
 function draftFrom(template?: ReceiptTemplateRecord): TemplateDraft {
   return template ? {
@@ -71,6 +50,7 @@ export function ReceiptTemplateStudio({ open, templates, initialTemplateId, onCl
   onClose: () => void;
   onChanged: () => Promise<void>;
 }) {
+  const { profile } = useBusiness();
   const [draft, setDraft] = useState<TemplateDraft>(() => draftFrom(templates[0]));
   const [busy, setBusy] = useState(false);
   const wasOpen = useRef(false);
@@ -182,7 +162,7 @@ export function ReceiptTemplateStudio({ open, templates, initialTemplateId, onCl
         <footer><button type="button" className="button button-secondary" onClick={onClose}>Close</button><button className="button button-primary" disabled={busy}><Save size={16} />{busy ? "Saving…" : draft._id ? "Save changes" : "Add template"}</button></footer>
       </form>
 
-      <aside className="template-proof receipt-proof"><header><ReceiptText size={15} /><span>LIVE THERMAL PROOF</span></header><div><ReceiptPaper document={previewReceipt} template={draft} compact /></div></aside>
+      <aside className="template-proof receipt-proof"><header><ReceiptText size={15} /><span>LIVE THERMAL PROOF</span></header><div><ReceiptPaper document={receiptPreview(profile)} template={draft} compact /></div></aside>
     </div>
   </Modal>;
 }

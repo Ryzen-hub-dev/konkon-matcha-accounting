@@ -2,8 +2,11 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
-import { getDb } from "@/lib/db";
-import { asMoney, makeDocumentNo, serialise } from "@/lib/format";
+import { getDb, getMongoClient } from "@/lib/db";
+import { makeDocumentNo, serialise } from "@/lib/format";
+import { normaliseBusinessSettings } from "@/lib/business-settings";
+import { isValidDateKey } from "@/lib/dates";
+import { prepareJournalAmounts } from "@/lib/journals";
 
 export const runtime = "nodejs";
 
@@ -15,7 +18,7 @@ const lineSchema = z.object({
 }).refine((line) => (line.debit > 0) !== (line.credit > 0), "Each line needs either a debit or a credit.");
 
 const journalSchema = z.object({
-  date: z.coerce.date(),
+  date: z.string().refine(isValidDateKey, "Choose a valid calendar date."),
   memo: z.string().trim().min(3).max(240),
   reference: z.string().trim().max(60).default(""),
   lines: z.array(lineSchema).min(2).max(40),
@@ -43,28 +46,40 @@ export async function POST(request: Request) {
   try {
     const input = journalSchema.safeParse(await request.json());
     if (!input.success) return fail("Check the journal entry.", 422, input.error.flatten().fieldErrors);
-    const lines = input.data.lines.map((line) => ({ ...line, debit: asMoney(line.debit), credit: asMoney(line.credit) }));
-    const totalDebit = asMoney(lines.reduce((sum, line) => sum + line.debit, 0));
-    const totalCredit = asMoney(lines.reduce((sum, line) => sum + line.credit, 0));
-    if (totalDebit <= 0 || Math.abs(totalDebit - totalCredit) > 0.009) return fail("Debits and credits must balance.", 422);
     const db = await getDb();
+    const settings = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
+    let amounts;
+    try { amounts = prepareJournalAmounts(input.data.lines, settings.currency); }
+    catch (error) { return fail(error instanceof Error ? error.message : "Check the journal amounts.", 422); }
+    const { lines, totalDebit, totalCredit } = amounts;
+    const accounts = await db.collection("chartOfAccounts").find({ code: { $in: lines.map(line => line.accountCode) }, active: { $ne: false } }).toArray();
+    if (lines.some(line => !accounts.some(account => account.code === line.accountCode))) return fail("Choose an active ledger account for every line.", 422);
     const now = new Date();
     const document = {
       entryNo: makeDocumentNo("JE"),
-      date: input.data.date,
+      date: new Date(`${input.data.date}T00:00:00Z`),
+      businessDate: input.data.date,
+      currency: settings.currency,
+      timeZone: settings.timeZone,
       memo: input.data.memo,
       reference: input.data.reference,
       source: "MANUAL",
       status: "POSTED",
-      lines,
+      lines: lines.map(line => ({ ...line, accountName: String(accounts.find(account => account.code === line.accountCode)!.name) })),
       totalDebit,
       totalCredit,
       createdBy: new ObjectId(auth.session.id),
       createdAt: now,
     };
-    const result = await db.collection("journalEntries").insertOne(document);
-    await writeAudit(db, auth.session, "journal.post", "journalEntry", result.insertedId.toHexString(), { entryNo: document.entryNo, totalDebit });
-    return created(serialise({ _id: result.insertedId, ...document }));
+    const _id = new ObjectId();
+    const session = (await getMongoClient()).startSession();
+    try {
+      await session.withTransaction(async () => {
+        await db.collection("journalEntries").insertOne({ _id, ...document }, { session });
+        await writeAudit(db, auth.session, "journal.post", "journalEntry", _id.toHexString(), { entryNo: document.entryNo, totalDebit }, session);
+      });
+    } finally { await session.endSession(); }
+    return created(serialise({ _id, ...document }));
   } catch (error) {
     return publicError(error);
   }

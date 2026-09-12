@@ -2,7 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { Activity, Archive, Copy, KeyRound, RotateCcw, ShieldCheck, UserCog, UserPlus } from "lucide-react";
-import { AddButton, apiRequest, dateTime, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
+import { useBusiness } from "@/components/business-context";
+import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
 import type { UserRole } from "@/lib/types";
 
 type TeamUser = { _id: string; fullName: string; username: string; email: string; role: UserRole; active: boolean; mustChangePassword?: boolean; archivedAt?: string; createdAt: string; lastLoginAt?: string };
@@ -15,6 +16,7 @@ function generatedPassword() {
 }
 
 export function TeamView({ actorRole }: { actorRole: UserRole }) {
+  const { dateTime } = useBusiness();
   const [data, setData] = useState<TeamData>({ users: [], audit: [] }); const [loading, setLoading] = useState(true); const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); const [password, setPassword] = useState(""); const [issued, setIssued] = useState<{ username: string; password: string } | null>(null); const { notice, show } = useNotice();
   const canWrite = ["OWNER", "ADMIN"].includes(actorRole);
   async function load() { setLoading(true); try { setData(await apiRequest<TeamData>("/api/users")); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not load access controls.", "error"); } finally { setLoading(false); } }

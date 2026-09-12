@@ -1,6 +1,6 @@
 import { fail, authorize, ok, publicError } from "@/lib/api";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
-import { dateKeyInTimeZone } from "@/lib/dates";
+import { dateKeyInTimeZone, isValidDateKey, journalReportDateExpression } from "@/lib/dates";
 import { getDb } from "@/lib/db";
 import {
   assembleFinancialStatements,
@@ -10,15 +10,9 @@ import {
   type FinancialAccount,
 } from "@/lib/financial-reports";
 import { serialise } from "@/lib/format";
+import { currencyFractionDigits } from "@/lib/international";
 
 export const runtime = "nodejs";
-
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
-
-function validDateKey(value: string) {
-  if (!DATE_ONLY.test(value)) return false;
-  return new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
-}
 
 function utcBoundary(value: string, dayOffset: number) {
   const date = new Date(`${value}T00:00:00.000Z`);
@@ -36,7 +30,7 @@ export async function GET(request: Request) {
     const today = dateKeyInTimeZone(new Date(), settings.timeZone);
     const from = url.searchParams.get("from") || `${today.slice(0, 8)}01`;
     const to = url.searchParams.get("to") || today;
-    if (!validDateKey(from) || !validDateKey(to) || from > to) return fail("Choose a valid reporting period.", 422);
+    if (!isValidDateKey(from) || !isValidDateKey(to) || from > to) return fail("Choose a valid reporting period.", 422);
     const periodDays = Math.floor((utcBoundary(to, 0).getTime() - utcBoundary(from, 0).getTime()) / 86_400_000) + 1;
     if (periodDays > 3_653) return fail("Choose a reporting period of 10 years or less.", 422);
 
@@ -63,7 +57,7 @@ export async function GET(request: Request) {
     ] = await Promise.all([
       db.collection("journalEntries").aggregate([
         { $match: { status: "POSTED", date: { $lt: journalUpper } } },
-        { $addFields: { _reportDate: reportDateExpression("$date") } },
+        { $addFields: { _reportDate: journalReportDateExpression(settings.timeZone) } },
         { $unwind: "$lines" },
         { $group: {
           _id: "$lines.accountCode",
@@ -76,7 +70,7 @@ export async function GET(request: Request) {
       ]).toArray(),
       cashAccountCodes.length ? db.collection("journalEntries").aggregate([
         { $match: { status: "POSTED", date: { $lt: journalUpper } } },
-        { $addFields: { _reportDate: reportDateExpression("$date") } },
+        { $addFields: { _reportDate: journalReportDateExpression(settings.timeZone) } },
         { $unwind: "$lines" },
         { $match: { "lines.accountCode": { $in: cashAccountCodes } } },
         { $group: {
@@ -87,12 +81,12 @@ export async function GET(request: Request) {
       ]).toArray() : Promise.resolve([]),
       db.collection("journalEntries").aggregate([
         { $match: { status: "POSTED", date: { $gte: activityLower, $lt: activityUpper } } },
-        { $addFields: { _reportDate: reportDateExpression("$date") } },
+        { $addFields: { _reportDate: journalReportDateExpression(settings.timeZone) } },
         { $match: { _reportDate: { $gte: from, $lte: to } } },
         { $group: {
           _id: null,
           entryCount: { $sum: 1 },
-          unbalancedEntries: { $sum: { $cond: [{ $gt: [{ $abs: { $subtract: [{ $ifNull: ["$totalDebit", 0] }, { $ifNull: ["$totalCredit", 0] }] } }, 0.004] }, 1, 0] } },
+          unbalancedEntries: { $sum: { $cond: [{ $gt: [{ $abs: { $subtract: [{ $ifNull: ["$totalDebit", 0] }, { $ifNull: ["$totalCredit", 0] }] } }, 0.5 * 10 ** -currencyFractionDigits(settings.currency)] }, 1, 0] } },
         } },
       ]).next(),
       db.collection("sales").aggregate([

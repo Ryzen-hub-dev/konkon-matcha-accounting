@@ -11,8 +11,8 @@ export function AuthShell({ children }: { children: ReactNode }) {
         <div className="whisk"><span /><span /><span /><span /><span /><span /></div>
       </div>
       <blockquote><Sparkles size={17} /><p>Clear books.<br />Quiet mind.</p><footer>毎日の帳簿 · DAILY LEDGER</footer></blockquote>
-      <div className="visual-ribbon">FRESHLY WHISKED NUMBERS · SINGAPORE ·</div>
+      <div className="visual-ribbon">FRESHLY WHISKED NUMBERS · KŌN-KŌN MATCHĀ ·</div>
     </section>
-    <section className="auth-panel">{children}<footer>Protected workspace · SGD ledger · Singapore time</footer></section>
+    <section className="auth-panel">{children}<footer>Protected workspace · Your country, currency and time zone</footer></section>
   </main>;
 }

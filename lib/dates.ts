@@ -1,5 +1,37 @@
 const LOCAL_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
 
+export function isValidDateKey(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+export function shiftDateKey(value: string, days: number) {
+  if (!isValidDateKey(value)) throw new Error("Choose a valid calendar date.");
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+// A due date is a calendar label, not an instant to move between time zones.
+export function formatCalendarDate(value: string | Date, locale: string) {
+  const key = value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
+  if (!isValidDateKey(key)) return "—";
+  return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${key}T00:00:00Z`));
+}
+
+export function businessPeriodKeys(now: Date, timeZone: string) {
+  const today = dateKeyInTimeZone(now, timeZone);
+  return { today, month: `${today.slice(0, 8)}01`, days: Array.from({ length: 7 }, (_, index) => shiftDateKey(today, index - 6)) };
+}
+
+// Old manual journals also stored date-only input at UTC midnight.
+export function journalReportDateExpression(timeZone: string) {
+  return { $ifNull: ["$businessDate", { $dateToString: {
+    format: "%Y-%m-%d", date: "$date", timezone: { $cond: [{ $eq: ["$source", "MANUAL"] }, "UTC", timeZone] },
+  } }] };
+}
+
 export function dateKeyInTimeZone(value: string | number | Date, timeZone: string) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) throw new Error("Choose a valid date.");

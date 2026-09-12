@@ -5,6 +5,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { ArrowRight, Eye, EyeOff, LoaderCircle, LockKeyhole, Sprout } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { apiRequest, Notice } from "@/components/ui";
+import { RegionalSettingsFields } from "@/components/regional-settings-fields";
+import { EMPTY_REGIONAL_SETTINGS } from "@/lib/regional-settings";
 
 function PasswordField({ name, label, autoComplete = "current-password" }: { name: string; label: string; autoComplete?: string }) {
   const [visible, setVisible] = useState(false);
@@ -35,6 +37,7 @@ export function LoginForm() {
 
 export function SetupForm() {
   const router = useRouter();
+  const [regional, setRegional] = useState(EMPTY_REGIONAL_SETTINGS);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(true);
   const [configured, setConfigured] = useState(false);
@@ -53,6 +56,7 @@ export function SetupForm() {
     const data = new FormData(event.currentTarget);
     try {
       const result = await apiRequest<{ redirectTo: string }>("/api/setup", { method: "POST", body: JSON.stringify({
+        ...regional,
         businessName: data.get("businessName"), fullName: data.get("fullName"), username: data.get("username"),
         email: data.get("email"), password: data.get("password"), seedProducts: data.get("seedProducts") === "on",
       }) });
@@ -65,7 +69,9 @@ export function SetupForm() {
     <div className="form-grid two"><label className="field"><span>Business name</span><input name="businessName" defaultValue="Kōn-Kōn Matchā" required /></label><label className="field"><span>Owner&apos;s full name</span><input name="fullName" autoComplete="name" required /></label></div>
     <div className="form-grid two"><label className="field"><span>Username</span><input name="username" autoComplete="username" pattern="[A-Za-z0-9._-]+" required /></label><label className="field"><span>Email</span><input name="email" type="email" autoComplete="email" required /></label></div>
     <PasswordField name="password" label="Owner password · 12+ characters, mixed case and a number" autoComplete="new-password" />
-    <label className="check-row"><input name="seedProducts" type="checkbox" defaultChecked /><span><strong>Start with the Kōn-Kōn product catalogue</strong><small>Add a few editable matcha, hojicha and dōgu products.</small></span></label>
+    <RegionalSettingsFields value={regional} onChange={setRegional} />
+    <label className="check-row"><input name="seedProducts" type="checkbox" /><span><strong>Add sample Kōn-Kōn products</strong><small>Optional demo prices are examples in your chosen currency, not converted market prices. Review costs and opening stock before trading.</small></span></label>
+    <label className="check-row"><input type="checkbox" required /><span>I have reviewed the accounting currency, local time zone and tax settings.</span></label>
     <button className="button button-primary button-large" disabled={busy || checking || configured}>{busy || checking ? <LoaderCircle className="spin" size={18} /> : <Sprout size={18} />}{checking ? "Checking workspace…" : busy ? "Preparing workspace…" : "Create Owner workspace"}<ArrowRight size={17} /></button>
     <p className="setup-link">Already set up? <Link href="/login">Return to sign in</Link></p>
   </form>;

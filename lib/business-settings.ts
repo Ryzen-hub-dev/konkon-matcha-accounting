@@ -54,7 +54,7 @@ export function normaliseBusinessSettings(value?: Record<string, unknown> | null
   const currency = isValidCurrency(String(value?.currency || "")) ? String(value?.currency) : profile.currency;
   const accepted = Array.isArray(value?.acceptedCurrencies)
     ? [...new Set(value.acceptedCurrencies.map(String).filter(isValidCurrency))]
-    : DEFAULT_BUSINESS_SETTINGS.acceptedCurrencies;
+    : [currency];
   return {
     ...DEFAULT_BUSINESS_SETTINGS,
     ...value,

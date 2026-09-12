@@ -9,3 +9,7 @@ PROMPT.md
 /Receipts/
 /Reports/
 docs/ui-preview.svg
+.artifacts/
+.env
+.env.local
+.env.*.local
