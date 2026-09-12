@@ -4,6 +4,8 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   experimental: {
+    // Bound build-time page workers on developer machines and small deployments.
+    cpus: 2,
     optimizePackageImports: ["lucide-react"],
   },
   headers: async () => [
@@ -25,6 +27,14 @@ const nextConfig: NextConfig = {
       headers: [
         { key: "Cache-Control", value: "public, max-age=3600, must-revalidate" },
         { key: "Content-Disposition", value: "attachment" },
+      ],
+    },
+    {
+      source: "/recover-owner",
+      headers: [
+        { key: "Cache-Control", value: "private, no-store, max-age=0" },
+        { key: "Referrer-Policy", value: "no-referrer" },
+        { key: "X-Robots-Tag", value: "noindex, nofollow" },
       ],
     },
     {

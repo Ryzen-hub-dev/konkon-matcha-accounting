@@ -9,6 +9,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 ### Owner, team and security
 
 - First-run Owner setup; Owner is the highest role.
+- [Private Owner replacement](docs/owner-recovery.md): operator-issued, 24-hour, single-use registration link; preserves the team and all business records, without reopening public setup.
 - Owner, Admin, Manager, Accountant and Cashier server-enforced permissions.
 - Staff account generation with temporary passwords and mandatory password change.
 - Self-service password change and administrator password reset.

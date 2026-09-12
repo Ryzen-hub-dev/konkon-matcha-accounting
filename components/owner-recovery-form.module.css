@@ -1,0 +1,18 @@
+.recovery { width: 100%; max-width: 480px; margin: 0 auto; }
+.recovery header p { font-size: 14px; line-height: 1.7; }
+.form { margin-top: 22px; }
+.form fieldset { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.form input { font-size: 16px; min-height: 46px; }
+.form input[aria-invalid="true"] { border-color: var(--ume); }
+.form button:focus-visible, .actions a:focus-visible, .actions button:focus-visible { outline: 3px solid var(--midori); outline-offset: 4px; }
+.preserved { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border-left: 3px solid var(--midori); color: var(--koicha); background: var(--foam); }
+.preserved svg { flex-shrink: 0; }
+.preserved strong { font-size: 15px; overflow-wrap: anywhere; }
+.preserved p { margin: 6px 0; font-size: 13px; line-height: 1.6; }
+.preserved small, .hint { font-size: 12px; line-height: 1.6; color: var(--muted); font-weight: 400; }
+.error { margin: 16px 0; padding: 14px; border: 1px solid var(--ume); border-radius: 8px; color: #7d2735; background: #fae9e9; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.error p { margin: 10px 0 0; }
+.fieldError { font-size: 12px; color: #7d2735; font-weight: 500; }
+.status { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+@media (prefers-reduced-motion: reduce) { .recovery :global(.spin) { animation: none; } .form button { transition: none; } }
