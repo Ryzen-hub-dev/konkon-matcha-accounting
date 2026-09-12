@@ -11,6 +11,7 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Physical stocktake with scan-to-count, typed final counts, transactional variance posting and audit history
 - POS, tenders, trusted coupons/manual discounts, tax calculation and transactional posting
 - Custom invoice and receipt templates, print/reprint, refund and historical snapshots
+- Invoice register search/status filters, copy-as-new-draft, idempotent draft creation, unpaid-draft editing with optimistic version checks, explicit payment/void confirmation and immutable issued/paid documents
 - Manual journals, chart of accounts and core management reports
 - 24-hour token-restricted phone scanner passes compatible with Vercel serverless
 - Low-latency auto-connected POS/Inventory scanner bridge with native + ZXing camera decoding

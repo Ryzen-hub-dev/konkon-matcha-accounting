@@ -107,6 +107,10 @@ async function initializeIndexes(db: Db) {
     db.collection("journalEntries").createIndex({ entryNo: 1 }, { unique: true }),
     db.collection("journalEntries").createIndex({ status: 1, date: 1 }),
     db.collection("invoices").createIndex({ invoiceNo: 1 }, { unique: true }),
+    db.collection("invoices").createIndex(
+      { clientRequestId: 1 },
+      { unique: true, partialFilterExpression: { clientRequestId: { $type: "string" } } },
+    ),
     db.collection("invoices").createIndex({ dueDate: 1, status: 1 }),
     db.collection("invoiceTemplates").createIndex({ nameNormalized: 1 }, { unique: true }),
     db.collection("invoiceTemplates").createIndex({ systemKey: 1 }, { unique: true, sparse: true }),

@@ -90,7 +90,8 @@ export async function ensureDefaultReceiptTemplate(db: Db, createdBy: unknown = 
     { upsert: true, ...(session ? { session } : {}) },
   );
   await db.collection("receiptTemplates").updateOne(
-    { systemKey: "starter-receipt-template" },
+    // Only backfill older templates; saved visibility choices must survive reads.
+    { systemKey: "starter-receipt-template", showBusinessAddress: { $exists: false } },
     { $set: { showBusinessAddress: false } },
     session ? { session } : {},
   );

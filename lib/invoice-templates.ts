@@ -80,9 +80,12 @@ export async function ensureDefaultInvoiceTemplate(db: Db, createdBy: unknown = 
     },
     { upsert: true, ...(session ? { session } : {}) },
   );
-  await db.collection("invoiceTemplates").updateOne(
-    { systemKey: "starter-invoice-template" },
-    { $set: { showBusinessAddress: false, showCustomerAddress: false } },
-    session ? { session } : {},
-  );
+  // Backfill older templates without undoing an owner's explicit visibility choices.
+  for (const field of ["showBusinessAddress", "showCustomerAddress"] as const) {
+    await db.collection("invoiceTemplates").updateOne(
+      { systemKey: "starter-invoice-template", [field]: { $exists: false } },
+      { $set: { [field]: false } },
+      session ? { session } : {},
+    );
+  }
 }

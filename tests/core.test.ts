@@ -565,16 +565,16 @@ test("MongoDB collections use an isolated application namespace", () => {
 });
 
 test("default template seeding never writes the same MongoDB path twice", async () => {
-  const operations: Array<{ collection: string; update: Record<string, Record<string, unknown>> }> = [];
+  const operations: Array<{ collection: string; filter: unknown; update: Record<string, Record<string, unknown>> }> = [];
   const db = {
     collection(name: string) {
       return {
-        async updateOne(_filter: unknown, update: Record<string, Record<string, unknown>>) {
+        async updateOne(filter: unknown, update: Record<string, Record<string, unknown>>) {
           const setKeys = new Set(Object.keys(update.$set || {}));
           for (const key of Object.keys(update.$setOnInsert || {})) {
             assert.equal(setKeys.has(key), false, `${name}.${key} cannot appear in both $set and $setOnInsert`);
           }
-          operations.push({ collection: name, update });
+          operations.push({ collection: name, filter, update });
           return { acknowledged: true };
         },
       };
@@ -582,8 +582,24 @@ test("default template seeding never writes the same MongoDB path twice", async 
   };
   await ensureDefaultInvoiceTemplate(db as never);
   await ensureDefaultReceiptTemplate(db as never);
-  assert.equal(operations.length, 4);
-  assert.deepEqual(operations.at(-1)?.update.$set, { showBusinessAddress: false });
+  assert.equal(operations.length, 5);
+  assert.deepEqual(operations.filter(operation => !operation.update.$setOnInsert), [
+    {
+      collection: "invoiceTemplates",
+      filter: { systemKey: "starter-invoice-template", showBusinessAddress: { $exists: false } },
+      update: { $set: { showBusinessAddress: false } },
+    },
+    {
+      collection: "invoiceTemplates",
+      filter: { systemKey: "starter-invoice-template", showCustomerAddress: { $exists: false } },
+      update: { $set: { showCustomerAddress: false } },
+    },
+    {
+      collection: "receiptTemplates",
+      filter: { systemKey: "starter-receipt-template", showBusinessAddress: { $exists: false } },
+      update: { $set: { showBusinessAddress: false } },
+    },
+  ]);
 });
 
 test("invoice templates accept portable JSON and safe raster logos", () => {

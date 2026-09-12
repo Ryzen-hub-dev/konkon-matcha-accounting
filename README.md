@@ -67,6 +67,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Searchable main-country settings for 249 countries/regions, editable date/number format and time zone, and explicit country selection during Owner setup.
 - Local-day/month dashboard statistics, calendar-safe invoice due dates and manual journals, and currency-specific precision for product prices, coupons, POS and refunds.
 - Draft/sent/paid/void invoices with custom uploadable JSON templates and printable documents.
+- Invoice register search and status filters, explicit sent/paid/void confirmations, safe copy-as-new-draft, and optimistic-concurrency editing for unpaid drafts. Retried creates carry an idempotency key; issued and paid documents remain immutable.
 - Sales, margin, tender, inventory-value and receivable reports.
 
 ### Purchasing and accounts payable
@@ -125,6 +126,8 @@ npm run build
 ```
 
 The current suite covers authentication errors, origin protection, RBAC, MongoDB namespace isolation, invoice/receipt template validation, currency precision, tax math, coupon bounds, scanner token/routing, provider webhook signatures and exact amounts, local-listener signatures/privacy filtering, POS draft recovery, franchise hierarchy safety, protected identity lookup normalization, procurement validation, smart replenishment, supplier risk scoring, weighted inventory costing, AP foreign-exchange settlement and system write-mode classification.
+
+Invoice acceptance also covers impossible calendar dates, currency-safe line calculations, idempotent draft creation, unpaid-draft editing, template snapshot retention, optimistic version conflicts, immutable sent/paid transitions, payment journal posting and mobile invoice-register controls.
 
 ## Vercel Hobby design
 
