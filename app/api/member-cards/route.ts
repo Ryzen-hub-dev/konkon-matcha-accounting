@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     if (!hasPermission(auth.session.role, "members.write")) return fail("You do not have permission to review orphaned NFC registrations.", 403);
     try {
       const db = await getDb();
-      const cards = await db.collection("memberCards").find({ kind: "BOUND", status: { $in: ["ACTIVE", "SUSPENDED"] } }, { projection }).sort({ updatedAt: -1 }).limit(100).toArray();
+      const cards = await db.collection("memberCards").find({ kind: "BOUND", status: { $in: ["ACTIVE", "SUSPENDED", "VOID"] } }, { projection }).sort({ updatedAt: -1 }).limit(100).toArray();
       const memberIds = cards.filter((card) => card.memberId instanceof ObjectId).map((card) => card.memberId as ObjectId);
       const members = memberIds.length
         ? await db.collection("members").find({ _id: { $in: memberIds } }, { projection: { name: 1, memberNo: 1, active: 1, archivedAt: 1 } }).toArray()
@@ -73,13 +73,13 @@ export async function POST(request: Request) {
       const selector = binding ? { bindingHash: binding.bindingHash } : { _id: new ObjectId(id) };
       const card = await db.collection("memberCards").findOne({ ...selector, kind: "BOUND" });
       if (!card) return fail("This NFC registration could not be found.", 410);
-      if (!["ACTIVE", "SUSPENDED"].includes(String(card.status))) return fail("This NFC registration is already cleared or voided.", 410);
+      if (!["ACTIVE", "SUSPENDED", "VOID"].includes(String(card.status))) return fail("This NFC registration is already cleared.", 410);
       const member = card.memberId instanceof ObjectId
         ? await db.collection("members").findOne({ _id: card.memberId }, { projection: { name: 1, memberNo: 1, active: 1 } })
         : null;
       if (member && member.active !== false) return fail("Only an NFC card whose member is archived can be cleared.", 409);
       const result = await db.collection("memberCards").updateOne(
-        { _id: card._id, kind: "BOUND", status: { $in: ["ACTIVE", "SUSPENDED"] } },
+        { _id: card._id, kind: "BOUND", status: { $in: ["ACTIVE", "SUSPENDED", "VOID"] } },
         { $set: { status: "DELETED", deletedAt: new Date(), updatedAt: new Date() }, $unset: { bindingHash: "" } },
       );
       if (!result.modifiedCount) return fail("This NFC registration was already cleared.", 409);

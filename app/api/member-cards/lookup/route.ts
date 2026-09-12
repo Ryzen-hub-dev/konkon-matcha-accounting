@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     if (!token && !binding) return fail("Scan a Kōn-Kōn or bound NFC member card.", 422);
     const db = await getDb();
     const allowOrphanLookup = Boolean(body.includeOrphan) && Boolean(binding) && hasPermission(auth.session.role, "members.write");
-    const card = await db.collection("memberCards").findOne({ ...(token ? { tokenHash: memberTokenHash(token) } : { bindingHash: memberBindingHash(binding!.source, binding!.fingerprint) }), status: allowOrphanLookup ? { $in: ["ACTIVE", "SUSPENDED"] } : "ACTIVE" });
+    const card = await db.collection("memberCards").findOne({ ...(token ? { tokenHash: memberTokenHash(token) } : { bindingHash: memberBindingHash(binding!.source, binding!.fingerprint) }), status: allowOrphanLookup ? { $in: ["ACTIVE", "SUSPENDED", "VOID"] } : "ACTIVE" });
     const member = card ? await db.collection("members").findOne({ _id: card.memberId }, { projection: { identityLookupHash: 0, createdBy: 0, archivedBy: 0 } }) : null;
     if (!member || member.active === false) {
       const canInspectOrphan = allowOrphanLookup && Boolean(card?.kind === "BOUND");

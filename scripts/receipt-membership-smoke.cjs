@@ -100,6 +100,7 @@ async function main() {
     const orphanMemberById = await api('/api/members', 'POST', { name: 'Archived NFC Member Two', phone: '+60198765433', email: 'archived-nfc-two@test.example' }, 201);
     const orphanCardById = await api('/api/member-cards', 'POST', { action: 'BIND', memberId: orphanMemberById._id, code: `KKNT1-S-${randomBytes(32).toString('hex')}`, clientRequestId: randomUUID(), label: 'Archived second card', tier: 'MATCHA CLUB', accentColor: '#173f2a' }, 201);
     await api('/api/members', 'DELETE', { id: orphanMemberById._id });
+    await api('/api/member-cards', 'PATCH', { id: orphanCardById._id, status: 'VOID' });
     assert.equal((await api('/api/member-cards?orphaned=1')).length, 2);
     await api('/api/member-cards', 'POST', { action: 'CLEAR_ORPHAN', id: orphanCardById._id });
     assert.equal((await api('/api/member-cards?orphaned=1')).length, 1);
