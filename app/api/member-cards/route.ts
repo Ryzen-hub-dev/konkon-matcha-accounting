@@ -6,6 +6,7 @@ import { serialise } from "@/lib/format";
 import { writeAudit } from "@/lib/audit";
 import { cardCreateSchema, cardStyleSchema, cardUpdateSchema, decryptMemberToken, encryptMemberToken, memberBindingHashFromCode, memberTokenHash, newMemberToken } from "@/lib/member-cards";
 import { OwnerRecoveryError, readOwnerRecoveryJson } from "@/lib/owner-recovery";
+import { hasPermission } from "@/lib/rbac";
 
 export const runtime = "nodejs";
 const projection = { tokenHash: 0, encryptedToken: 0, bindingHash: 0, clientRequestId: 0 };
@@ -16,7 +17,32 @@ function errorResponse(error: unknown) {
 export async function GET(request: Request) {
   const auth = await authorize("members.read");
   if (auth.error) return auth.error;
-  const memberId = new URL(request.url).searchParams.get("memberId") || "";
+  const url = new URL(request.url);
+  if (url.searchParams.get("orphaned") === "1") {
+    if (!hasPermission(auth.session.role, "members.write")) return fail("You do not have permission to review orphaned NFC registrations.", 403);
+    try {
+      const db = await getDb();
+      const cards = await db.collection("memberCards").find({ kind: "BOUND", status: { $in: ["ACTIVE", "SUSPENDED"] } }, { projection }).sort({ updatedAt: -1 }).limit(100).toArray();
+      const memberIds = cards.filter((card) => card.memberId instanceof ObjectId).map((card) => card.memberId as ObjectId);
+      const members = memberIds.length
+        ? await db.collection("members").find({ _id: { $in: memberIds } }, { projection: { name: 1, memberNo: 1, active: 1, archivedAt: 1 } }).toArray()
+        : [];
+      const byId = new Map(members.map((member) => [member._id.toHexString(), member]));
+      const orphanedCards = cards.filter((card) => {
+        const member = byId.get(String(card.memberId));
+        return !member || member.active === false;
+      }).map((card) => {
+        const member = byId.get(String(card.memberId));
+        return {
+          ...card,
+          member: member ? { name: member.name, memberNo: member.memberNo, archivedAt: member.archivedAt || null } : null,
+          reason: "MEMBER_ARCHIVED_OR_MISSING" as const,
+        };
+      });
+      return ok(serialise(orphanedCards));
+    } catch (error) { return errorResponse(error); }
+  }
+  const memberId = url.searchParams.get("memberId") || "";
   if (!ObjectId.isValid(memberId)) return fail("Choose a member.", 422);
   try {
     const db = await getDb();
@@ -38,6 +64,27 @@ export async function POST(request: Request) {
       const token = decryptMemberToken(card.encryptedToken, card._id.toHexString());
       await writeAudit(db, auth.session, "member_card.reveal", "memberCard", card._id.toHexString());
       return ok({ token });
+    }
+    if (body?.action === "CLEAR_ORPHAN") {
+      const rawCode = typeof body.code === "string" && body.code.length <= 512 ? body.code : "";
+      const binding = rawCode ? memberBindingHashFromCode(rawCode) : null;
+      const id = typeof body.id === "string" && ObjectId.isValid(body.id) ? body.id : "";
+      if (!binding && !id) return fail("Scan the bound NFC card or choose an orphaned registration.", 422);
+      const selector = binding ? { bindingHash: binding.bindingHash } : { _id: new ObjectId(id) };
+      const card = await db.collection("memberCards").findOne({ ...selector, kind: "BOUND" });
+      if (!card) return fail("This NFC registration could not be found.", 410);
+      if (!["ACTIVE", "SUSPENDED"].includes(String(card.status))) return fail("This NFC registration is already cleared or voided.", 410);
+      const member = card.memberId instanceof ObjectId
+        ? await db.collection("members").findOne({ _id: card.memberId }, { projection: { name: 1, memberNo: 1, active: 1 } })
+        : null;
+      if (member && member.active !== false) return fail("Only an NFC card whose member is archived can be cleared.", 409);
+      const result = await db.collection("memberCards").updateOne(
+        { _id: card._id, kind: "BOUND", status: { $in: ["ACTIVE", "SUSPENDED"] } },
+        { $set: { status: "DELETED", deletedAt: new Date(), updatedAt: new Date() }, $unset: { bindingHash: "" } },
+      );
+      if (!result.modifiedCount) return fail("This NFC registration was already cleared.", 409);
+      await writeAudit(db, auth.session, "member_card.clear_orphan", "memberCard", card._id.toHexString(), { memberId: card.memberId?.toHexString?.() || "missing", reason: "member_archived_or_missing", source: card.bindingSource || "unknown" });
+      return ok({ cleared: true, id: card._id.toHexString(), memberId: card.memberId?.toHexString?.() || null });
     }
     if (body?.action === "BIND") {
       if (typeof body.memberId !== "string" || !ObjectId.isValid(body.memberId) || typeof body.code !== "string" || typeof body.clientRequestId !== "string") return fail("Scan an NFC card and choose a member.", 422);

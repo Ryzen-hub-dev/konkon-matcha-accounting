@@ -54,6 +54,11 @@ type PaymentIntent = {
   externalReference?: string;
   expiresAt: string;
 };
+type OrphanNfcCard = {
+  code: string;
+  card: { id: string; tier?: string; label?: string; kind: "BOUND"; source?: string | null; last4?: string | null; status?: string };
+  member: { name?: string; memberNo?: string; archivedAt?: string | null } | null;
+};
 
 export function PosView({
   userId,
@@ -102,6 +107,7 @@ export function PosView({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState<SaleReceipt | null>(null);
+  const [orphanCard, setOrphanCard] = useState<OrphanNfcCard | null>(null);
   const [studioOpen, setStudioOpen] = useState(false);
   const { notice, show } = useNotice();
   const draftKey = useMemo(() => posDraftStorageKey(userId), [userId]);
@@ -448,8 +454,18 @@ export function PosView({
       catch (reason) { show(reason instanceof Error ? reason.message : "Receipt not found.", "error"); }
       return;
     }
-    if (memberScanToken(code) || memberBindingScanToken(code)) {
-      try { const member = await apiRequest<MemberRecord>("/api/member-cards/lookup", { method: "POST", body: JSON.stringify({ code }) }); setMembers(current => [...current.filter(item => item._id !== member._id), member]); setMemberId(member._id); show(`${member.name} selected from member card.`); }
+    const binding = memberBindingScanToken(code);
+    if (memberScanToken(code) || binding) {
+      try {
+        const result = await apiRequest<MemberRecord | OrphanNfcCard>("/api/member-cards/lookup", { method: "POST", body: JSON.stringify({ code, ...(binding ? { includeOrphan: true } : {}) }) });
+        if ("orphan" in result && result.orphan === true && "card" in result) {
+          setOrphanCard({ ...(result as OrphanNfcCard), code });
+          show("This NFC card belongs to an archived member. Review it before clearing the registration.");
+          return;
+        }
+        const member = result as MemberRecord;
+        setMembers(current => [...current.filter(item => item._id !== member._id), member]); setMemberId(member._id); show(`${member.name} selected from member card.`);
+      }
       catch (reason) { show(reason instanceof Error ? reason.message : "Member card unavailable.", "error"); }
       return;
     }
@@ -461,6 +477,17 @@ export function PosView({
     if (await applyCoupon(code)) return;
     show(`No product, member card or coupon matches ${code}.`, "error");
   }, [add, applyCoupon, members, paymentIntent, products, show]);
+
+  async function clearOrphanBinding() {
+    if (!orphanCard || busy) return;
+    setBusy(true);
+    try {
+      await apiRequest("/api/member-cards", { method: "POST", body: JSON.stringify({ action: "CLEAR_ORPHAN", code: orphanCard.code }) });
+      setOrphanCard(null);
+      show("Orphaned NFC registration cleared. Scan another card or continue the sale.");
+    } catch (reason) { show(reason instanceof Error ? reason.message : "Could not clear the NFC registration.", "error"); }
+    finally { setBusy(false); }
+  }
 
   async function beginProviderVerification() {
     if (!selectedPayment || verificationMode !== "PROVIDER" || !total || !tenderTotal) return;
@@ -551,6 +578,7 @@ export function PosView({
         <button className="checkout-button" disabled={checkoutLocked} onClick={checkout}><span>{busy ? "Posting sale…" : verificationMode === "PROVIDER" && paymentIntent?.status !== "VERIFIED" ? "Awaiting verified payment" : verificationMode === "STATIC_QR" && !manualPaymentConfirmed ? "Confirm receiving-side credit" : "Complete sale"}</span><strong>{tenderCurrency === register.currency ? money.format(total) : tenderMoney.format(tenderTotal)}</strong><ChevronRight size={20} /></button>
       </aside>
     </div>}
+    <Modal open={Boolean(orphanCard)} onClose={() => { if (!busy) setOrphanCard(null); }} title="Orphaned NFC registration" kicker="MEMBER CARD CLEANUP">{orphanCard ? <div className="orphan-nfc-modal"><div className="orphan-nfc-modal-icon"><CreditCard size={23} /></div><div><span className="eyebrow">SAFE TO CLEAR</span><h3>{orphanCard.card.label || "Existing NFC card"}</h3><p>{orphanCard.member?.name || "Member record missing"}{orphanCard.member?.memberNo ? ` · ${orphanCard.member.memberNo}` : ""}</p><small>{orphanCard.card.source === "NFC_SERIAL" ? "Hardware serial fingerprint" : "NDEF fingerprint"}{orphanCard.card.last4 ? ` · ending ${orphanCard.card.last4}` : ""}</small></div><div className="orphan-nfc-warning"><ShieldCheck size={16} /><span>The member is archived or removed. Clearing this registration does not change sales, refunds or points. The physical card can then be bound to another member.</span></div><footer><button type="button" className="button button-secondary" onClick={() => setOrphanCard(null)} disabled={busy}>Keep registration</button><button type="button" className="button button-primary" onClick={() => void clearOrphanBinding()} disabled={busy}><Trash2 size={15} />{busy ? "Clearing…" : "Clear NFC registration"}</button></footer></div> : null}</Modal>
     <Modal open={customerQrOpen && customerQrRequested} onClose={closeCustomerQr} title="Customer payment QR" kicker={staticQrAmountLocked ? "EXACT POS AMOUNT" : "RECIPIENT QR"}><div className="pos-customer-payment" ref={customerQrRef}><header><div><QrCode /><span><small>SCAN TO PAY</small><strong>{selectedPayment?.name || "Payment"}</strong></span></div><p className={staticQrAmountLocked ? "locked" : ""}><ShieldCheck />{staticQrAmountLocked ? "AMOUNT LOCKED" : "CHECK AMOUNT"}</p></header><section><div className="pos-customer-payment-qr">{staticQrDataUrl ? <img src={staticQrDataUrl} alt={`${selectedPayment?.name || "Payment"} QR for ${tenderMoney.format(tenderTotal)}`} /> : <QrCode />}</div><div className="pos-customer-payment-copy"><span>AMOUNT TO PAY</span><strong>{tenderMoney.format(tenderTotal)}</strong><p>Scan using a supported bank or eWallet. Confirm the recipient and amount in the payment app before authorising.</p></div></section><footer><p><ShieldCheck /><span><strong>Wait for cashier confirmation</strong><small>The payment animation alone is not proof of credit.</small></span></p><div><button type="button" className="button button-secondary" onClick={() => void toggleCustomerQrFullscreen()}>{customerQrFullscreen ? <Minimize2 /> : <Expand />}{customerQrFullscreen ? "Exit full screen" : "Full screen"}</button><button type="button" className="button button-primary" onClick={hideCustomerQr}>Hide customer QR</button></div></footer></div></Modal>
     <Modal open={historyOpen} onClose={() => setHistoryOpen(false)} title="Browser draft history" kicker="THIS REGISTER ONLY"><div className="draft-history-list">{draftHistory.length ? draftHistory.map((draft) => <article key={`${draft.draftId}-${draft.updatedAt}`}><div><strong>{draft.lines.reduce((sum, line) => sum + line.quantity, 0)} items · {draft.paymentMethod || "No payment"}</strong><span>{new Intl.DateTimeFormat(register.locale, { dateStyle: "medium", timeStyle: "short", timeZone: register.timeZone }).format(new Date(draft.updatedAt))}</span></div><button className="button button-secondary" onClick={() => { restoreDraft(draft); setHistoryOpen(false); }}>Restore</button></article>) : <EmptyState title="No earlier drafts" detail="Periodic browser snapshots will appear here while an order changes." />}</div></Modal>
     <Modal open={Boolean(receipt)} onClose={() => setReceipt(null)} title="Sale complete" kicker="RECEIPT READY">{receipt ? <div className="sale-complete"><div className="sale-complete-proof"><ReceiptPaper document={receipt} template={receipt.templateSnapshot} compact /></div><div className="receipt-actions"><Link className="button button-secondary" href={`/receipts/${receipt._id}`}><ExternalLink size={16} />Open & print</Link><button className="button button-primary" onClick={() => setReceipt(null)}>Start next order</button></div></div> : null}</Modal>

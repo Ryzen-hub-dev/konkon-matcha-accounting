@@ -2,12 +2,23 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Archive, Award, BadgeCheck, CreditCard, Fingerprint, Mail, Pencil, Phone, Search, ShieldCheck, UserPlus, Users } from "lucide-react";
+import { Archive, Award, BadgeCheck, CreditCard, Fingerprint, Mail, Pencil, Phone, Search, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, useNotice } from "@/components/ui";
 import { useBusiness } from "@/components/business-context";
 import type { MemberRecord } from "@/lib/types";
 import { ScannerBridge } from "./scanner-bridge";
 import { memberBindingScanToken, memberScanToken } from "@/lib/scan-codes";
+
+type OrphanBinding = {
+  _id: string;
+  memberId: string;
+  label: string;
+  tier: string;
+  bindingSource?: "NFC_SERIAL" | "NDEF_DIGEST";
+  last4?: string;
+  status: string;
+  member: { name?: string; memberNo?: string; archivedAt?: string | null } | null;
+};
 
 export function MembersView({ canWrite = false }: { canWrite?: boolean }) {
   const { money } = useBusiness();
@@ -18,15 +29,34 @@ export function MembersView({ canWrite = false }: { canWrite?: boolean }) {
   const [search, setSearch] = useState("");
   const [identitySearch, setIdentitySearch] = useState("");
   const [busy, setBusy] = useState(false);
+  const [orphanCards, setOrphanCards] = useState<OrphanBinding[]>([]);
+  const [orphanLoading, setOrphanLoading] = useState(false);
   const { notice, show } = useNotice();
   function signalMemberChange() { window.localStorage.setItem("konkon:members:changed", new Date().toISOString()); }
   async function load(url = "/api/members") { setLoading(true); try { setMembers(await apiRequest<MemberRecord[]>(url)); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not load members.", "error"); } finally { setLoading(false); } }
+  async function loadOrphans() {
+    if (!canWrite) return;
+    setOrphanLoading(true);
+    try { setOrphanCards(await apiRequest<OrphanBinding[]>("/api/member-cards?orphaned=1")); }
+    catch (reason) { show(reason instanceof Error ? reason.message : "Could not load orphaned NFC registrations.", "error"); }
+    finally { setOrphanLoading(false); }
+  }
   useEffect(() => { void load(); }, []);
+  useEffect(() => { if (canWrite) void loadOrphans(); }, [canWrite]);
   const filtered = useMemo(() => members.filter((member) => `${member.name} ${member.phone} ${member.email} ${member.memberNo} ${member.memberCardCode || ""}`.toLowerCase().includes(search.toLowerCase())), [members, search]);
   async function exactIdentity(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!identitySearch.trim()) return void load(); await load(`/api/members?identity=${encodeURIComponent(identitySearch)}`); if (!members.length) show("Identity lookup completed."); }
   async function save(event: FormEvent<HTMLFormElement>, member?: MemberRecord | null) { event.preventDefault(); setBusy(true); const data = Object.fromEntries(new FormData(event.currentTarget)); try { await apiRequest("/api/members", { method: member ? "PATCH" : "POST", body: JSON.stringify({ ...(member ? { id: member._id } : {}), ...data }) }); signalMemberChange(); show(member ? "Member details updated." : "Member added and a secure card code was issued."); setOpen(false); setEditing(null); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not save the member.", "error"); } finally { setBusy(false); } }
   async function issueCard(member: MemberRecord) { try { await apiRequest("/api/members", { method: "PATCH", body: JSON.stringify({ id: member._id, regenerateCard: true }) }); signalMemberChange(); show("A new member card code was issued; the old code no longer works."); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not issue the card.", "error"); } }
   async function archive(member: MemberRecord) { if (!window.confirm(`Archive ${member.name}? Sales and reward history will stay intact.`)) return; try { await apiRequest("/api/members", { method: "DELETE", body: JSON.stringify({ id: member._id }) }); signalMemberChange(); show("Member archived; financial history was preserved."); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not archive the member.", "error"); } }
+  async function clearOrphan(card: OrphanBinding) {
+    const memberName = card.member?.name || "the archived member";
+    if (!window.confirm(`Clear the NFC registration for ${memberName}? This only removes the orphaned card binding; sales and points stay intact.`)) return;
+    try {
+      await apiRequest("/api/member-cards", { method: "POST", body: JSON.stringify({ action: "CLEAR_ORPHAN", id: card._id }) });
+      show("Orphaned NFC registration cleared. The physical card can now be bound to another member.");
+      await loadOrphans();
+    } catch (reason) { show(reason instanceof Error ? reason.message : "Could not clear the NFC registration.", "error"); }
+  }
   const totalSpend = members.reduce((sum, member) => sum + member.lifetimeSpend, 0);
   const form = (member?: MemberRecord | null) => <form className="modal-form" onSubmit={(event) => save(event, member)} key={member?._id || "new"}><label className="field"><span>Full name</span><input name="name" defaultValue={member?.name} required autoFocus /></label><div className="form-grid two"><label className="field"><span>Phone</span><input name="phone" defaultValue={member?.phone} required /></label><label className="field"><span>Email · optional</span><input name="email" type="email" defaultValue={member?.email} /></label></div><div className="identity-fields"><Fingerprint /><div className="form-grid two"><label className="field"><span>Identity type</span><select name="identityType" defaultValue={member?.identityType || "NATIONAL_ID"}><option value="NATIONAL_ID">National ID</option><option value="PASSPORT">Passport</option><option value="BUSINESS_ID">Business ID</option><option value="OTHER">Other</option></select></label><label className="field"><span>{member?.identityLast4 ? `Replace identity · stored ending ${member.identityLast4}` : "Identity number · optional"}</span><input name="identityNumber" autoComplete="off" placeholder={member?.identityLast4 ? "Leave blank to keep current value" : "Exact lookup only; never displayed"} /></label></div><small>Protected as a keyed one-way lookup hash. The full number is not stored or returned by the API.</small></div><footer><button type="button" className="button button-secondary" onClick={() => member ? setEditing(null) : setOpen(false)}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Saving…" : member ? "Save member" : "Add & issue card"}</button></footer></form>;
   return <div className="page page-enter">
@@ -38,6 +68,7 @@ export function MembersView({ canWrite = false }: { canWrite?: boolean }) {
     }} />
     <section className="identity-lookup"><ShieldCheck /><div><strong>Private identity lookup</strong><span>The number is HMAC-protected and only exact matches are returned.</span></div><form onSubmit={exactIdentity}><input value={identitySearch} onChange={(event) => setIdentitySearch(event.target.value)} placeholder="Enter complete ID or passport number" autoComplete="off" /><button className="button button-secondary"><Search size={15} />Find exact match</button>{identitySearch ? <button type="button" className="button button-quiet" onClick={() => { setIdentitySearch(""); void load(); }}>Clear</button> : null}</form></section>
     <section className="mini-stat-row"><article><Users /><span>Members shown</span><strong>{members.length}</strong></article><article><Award /><span>Points in circulation</span><strong>{members.reduce((sum, member) => sum + member.points, 0).toLocaleString()}</strong></article><article><UserPlus /><span>Member lifetime sales</span><strong>{money.format(totalSpend)}</strong></article></section>
+    {canWrite ? <section className="panel orphan-nfc-panel"><header className="panel-header"><div><span className="eyebrow">NFC HOUSEKEEPING</span><h2>Orphaned NFC registrations</h2><p>Cards that were recorded for a member who has since been archived or removed.</p></div><Trash2 /></header>{orphanLoading ? <LoadingPanel label="Checking NFC registrations…" /> : orphanCards.length ? <div className="orphan-nfc-list">{orphanCards.map((card) => <article key={card._id}><div className="orphan-nfc-mark"><CreditCard size={18} /></div><div className="orphan-nfc-copy"><strong>{card.label || "Existing NFC card"}</strong><span>{card.member?.name || "Member record missing"}{card.member?.memberNo ? ` · ${card.member.memberNo}` : ""}</span><small>{card.bindingSource === "NFC_SERIAL" ? "Hardware serial fingerprint" : "NDEF fingerprint"}{card.last4 ? ` · ending ${card.last4}` : ""} · {card.status}</small></div><button className="button button-quiet danger" onClick={() => void clearOrphan(card)}><Trash2 size={14} />Clear registration</button></article>)}</div> : <EmptyState title="No orphaned NFC cards" detail="When a member is archived, their existing-card binding will appear here for safe cleanup." />}</section> : null}
     <section className="panel resource-panel"><div className="resource-toolbar"><label className="search-box"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, card code, phone or member number" /></label><span>{filtered.length} member{filtered.length === 1 ? "" : "s"}</span></div>
       {loading ? <LoadingPanel /> : filtered.length ? <div className="member-grid">{filtered.map((member) => <article className="member-card member-card-actions" key={member._id}><header><div className="member-avatar">{member.name.split(/\s+/).map((word) => word[0]).join("").slice(0, 2)}</div><div><strong>{member.name}</strong><span>{member.memberNo}</span></div><b>{member.points} pts</b></header><div className="member-contact"><span><Phone size={14} />{member.phone}</span><span><Mail size={14} />{member.email || "No email"}</span><span><CreditCard size={14} />{member.memberCardCode || "Card not issued"}</span>{member.identityLast4 ? <span><BadgeCheck size={14} />{member.identityType || "ID"} ending {member.identityLast4}</span> : null}</div><footer><div><span>Lifetime spend</span><strong>{money.format(member.lifetimeSpend)}</strong></div>{canWrite ? <div className="row-actions"><button className="icon-button" title="Edit member" onClick={() => setEditing(member)}><Pencil size={14} /></button>{member.memberCardCode ? <Link className="icon-button" title="Open printable member card" href={`/members/${member._id}/card`}><CreditCard size={14} /></Link> : <button className="button button-quiet" onClick={() => issueCard(member)}>Issue card</button>}<button className="icon-button danger" title="Archive member" onClick={() => archive(member)}><Archive size={14} /></button></div> : null}</footer></article>)}</div> : <EmptyState title="No matching members" detail="Add a member or clear the protected identity lookup." action={canWrite ? <AddButton onClick={() => setOpen(true)}>Add member</AddButton> : undefined} />}
     </section>

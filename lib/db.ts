@@ -39,6 +39,19 @@ function scopeCollections(db: Db, prefix: string) {
   }) as Db;
 }
 
+async function ensureMemberCardIndexes(db: Db) {
+  const collection = db.collection("memberCards");
+  let indexes: Array<{ name?: string; partialFilterExpression?: unknown }> = [];
+  try { indexes = await collection.listIndexes().toArray() as Array<{ name?: string; partialFilterExpression?: unknown }>; }
+  catch (error) { if ((error as { code?: number }).code !== 26) throw error; }
+  const legacyTokenIndex = indexes.find((index) => index.name === "tokenHash_1" && !index.partialFilterExpression);
+  if (legacyTokenIndex?.name) await collection.dropIndex(legacyTokenIndex.name);
+  await Promise.all([
+    collection.createIndex({ tokenHash: 1 }, { unique: true, partialFilterExpression: { tokenHash: { $type: "string" } } }),
+    collection.createIndex({ bindingHash: 1 }, { unique: true, partialFilterExpression: { bindingHash: { $type: "string" } } }),
+  ]);
+}
+
 export function getMongoClient(): Promise<MongoClient> {
   const { uri } = getConfig();
   mongoCache.__konkonMongo ??= {};
@@ -60,8 +73,7 @@ export function getMongoClient(): Promise<MongoClient> {
 
 async function initializeIndexes(db: Db) {
   await Promise.all([
-    db.collection("memberCards").createIndex({ tokenHash: 1 }, { unique: true }),
-    db.collection("memberCards").createIndex({ bindingHash: 1 }, { unique: true, partialFilterExpression: { bindingHash: { $type: "string" } } }),
+    ensureMemberCardIndexes(db),
     db.collection("memberCards").createIndex({ clientRequestId: 1 }, { unique: true }),
     db.collection("memberCards").createIndex({ memberId: 1, status: 1 }),
     db.collection("users").createIndex({ usernameNormalized: 1 }, { unique: true }),
