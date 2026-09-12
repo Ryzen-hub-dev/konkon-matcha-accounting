@@ -4,9 +4,9 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Barcode, Copy, Link2, Plus, Radio, ScanLine, Smartphone, Unplug } from "lucide-react";
 import { useBusiness } from "@/components/business-context";
 import { apiRequest, Modal } from "@/components/ui";
-import { selectScannerSession } from "@/lib/scanner-routing";
+import { selectScannerSession, type ScannerPurpose } from "@/lib/scanner-routing";
 
-type ScannerSession = { _id: string; label: string; purpose: "POS" | "INVENTORY"; expiresAt: string; connectedAt?: string; lastUsedAt?: string };
+type ScannerSession = { _id: string; label: string; purpose: ScannerPurpose; expiresAt: string; connectedAt?: string; lastUsedAt?: string };
 type ScanEvent = { _id: string; code: string; createdAt: string };
 type BridgeState = "OFFLINE" | "CONNECTING" | "LIVE";
 
@@ -19,7 +19,7 @@ export function ScannerBridge({
   onFeedback,
 }: {
   contextLabel: string;
-  purpose: "POS" | "INVENTORY";
+  purpose: ScannerPurpose;
   enabled?: boolean;
   placeholder: string;
   onScan: (code: string) => void | Promise<void>;
@@ -183,10 +183,10 @@ export function ScannerBridge({
     </form>
     <Modal open={open} onClose={() => setOpen(false)} title="Link an online scanner" kicker="LINK OR SCAN QR">
       <div className="scanner-link-panel">
-        <div className="scanner-link-intro"><Link2 /><div><strong>Automatic active-screen routing</strong><p>Open the pass on a phone and the current POS or Inventory screen claims the newest active device automatically. Each scan is locked to that destination and the phone cannot read products, customers, prices or reports.</p></div></div>
+        <div className="scanner-link-intro"><Link2 /><div><strong>Automatic active-screen routing</strong><p>Open the pass on a phone. The active POS, Inventory, Receipts or Members screen connects to the newest device automatically. Each scan is locked to that destination; the phone cannot read products, customers, prices or reports.</p></div></div>
         <form onSubmit={createSession}><label className="field"><span>Device label</span><input name="label" defaultValue={`${contextLabel} phone`} minLength={2} maxLength={60} required /></label><button className="button button-primary" disabled={busy}><Plus />{busy ? "Issuing…" : "Issue 24-hour pass"}</button></form>
         {issuedUrl ? <div className="issued-scanner-connect">{issuedQr ? <img src={issuedQr} alt="QR code that connects a phone scanner to this POS session" /> : null}<div className="issued-scanner-link"><span>SCAN QR OR COPY ONCE · OPEN ON THE PHONE</span><code>{issuedUrl}</code><div><a className="button button-secondary" href={issuedUrl} target="_blank" rel="noreferrer"><Link2 />Open pass</a><button type="button" className="button button-secondary" onClick={() => navigator.clipboard.writeText(issuedUrl)}><Copy />Copy secure link</button></div></div></div> : null}
-        <div className="scanner-session-list">{sessions.length ? sessions.map((session) => <article key={session._id} className={selectedId === session._id ? "listening" : ""}><div><strong>{session.label}</strong><span>{session.connectedAt ? "Phone connected" : "Waiting for phone"} · routes to {session.purpose === "INVENTORY" ? "Inventory" : "POS"} · expires {dateTime.format(new Date(session.expiresAt))}</span></div><button type="button" className="button button-secondary" onClick={() => void useHere(session)} disabled={selectedId === session._id && session.purpose === purpose}>{selectedId === session._id && session.purpose === purpose ? "Listening" : "Use here"}</button><button type="button" className="icon-button danger" title="Revoke scanner pass" onClick={() => void revokeSession(session)}><Unplug /></button></article>) : <p className="scanner-empty">No active phone passes. Issue one to connect automatically.</p>}</div>
+        <div className="scanner-session-list">{sessions.length ? sessions.map((session) => <article key={session._id} className={selectedId === session._id ? "listening" : ""}><div><strong>{session.label}</strong><span>{session.connectedAt ? "Phone connected" : "Waiting for phone"} · routes to {session.purpose} · expires {dateTime.format(new Date(session.expiresAt))}</span></div><button type="button" className="button button-secondary" onClick={() => void useHere(session)} disabled={selectedId === session._id && session.purpose === purpose}>{selectedId === session._id && session.purpose === purpose ? "Listening" : "Use here"}</button><button type="button" className="icon-button danger" title="Revoke scanner pass" onClick={() => void revokeSession(session)}><Unplug /></button></article>) : <p className="scanner-empty">No active phone passes. Issue one to connect automatically.</p>}</div>
       </div>
     </Modal>
   </>;

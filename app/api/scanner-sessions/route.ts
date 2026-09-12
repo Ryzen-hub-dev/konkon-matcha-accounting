@@ -5,18 +5,19 @@ import { writeAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { serialise } from "@/lib/format";
 import { createScannerToken, scannerTokenHash, SCANNER_SESSION_MS } from "@/lib/scanner";
-import { scannerActivityAt } from "@/lib/scanner-routing";
+import { scannerActivityAt, scannerPurpose, scannerPermission, SCANNER_PURPOSES } from "@/lib/scanner-routing";
+import { hasPermission } from "@/lib/rbac";
 import { getSystemControl } from "@/lib/system-control";
 
 export const runtime = "nodejs";
 
-const purposeSchema = z.enum(["POS", "INVENTORY"]);
+const purposeSchema = z.enum(SCANNER_PURPOSES);
 const createSchema = z.object({ label: z.string().trim().min(2).max(60).default("Mobile scanner"), purpose: purposeSchema.default("POS") });
 const routeSchema = z.object({ id: z.string().length(24), purpose: purposeSchema });
 const revokeSchema = z.object({ id: z.string().length(24) });
 
 export async function GET(request: Request) {
-  const auth = await authorize("pos.sell");
+  const auth = await authorize("members.read");
   if (auth.error) return auth.error;
   try {
     const db = await getDb();
@@ -24,6 +25,7 @@ export async function GET(request: Request) {
     const now = new Date();
     const requestedPurpose = purposeSchema.safeParse(new URL(request.url).searchParams.get("purpose") || "POS");
     if (!requestedPurpose.success) return fail("Choose a valid scanner purpose.", 422);
+    if (!hasPermission(auth.session.role, scannerPermission(requestedPurpose.data))) return fail("You cannot use this scanner destination.", 403);
     const sessions = await db.collection("scannerSessions").find({
       createdBy: new ObjectId(auth.session.id),
       revokedAt: { $exists: false },
@@ -31,7 +33,7 @@ export async function GET(request: Request) {
       generation: control.scannerGeneration,
     }, { projection: { tokenHash: 0 } }).sort({ createdAt: -1 }).limit(10).toArray();
     const normalised = sessions
-      .map((session) => ({ ...session, purpose: session.purpose === "INVENTORY" ? "INVENTORY" : "POS" }))
+      .map((session) => ({ ...session, purpose: scannerPurpose(session.purpose) }))
       .sort((left, right) => scannerActivityAt(right) - scannerActivityAt(left));
     return ok(serialise({ sessions: normalised, mode: control.mode }));
   } catch (error) {
@@ -40,12 +42,13 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await authorize("pos.sell");
+  const auth = await authorize("members.read");
   if (auth.error) return auth.error;
   if (!sameOrigin(request)) return fail("This request was blocked.", 403);
   try {
     const input = createSchema.safeParse(await request.json());
     if (!input.success) return fail("Name this scanner link.", 422, input.error.flatten().fieldErrors);
+    if (!hasPermission(auth.session.role, scannerPermission(input.data.purpose))) return fail("You cannot use this scanner destination.", 403);
     const db = await getDb();
     const control = await getSystemControl(db);
     if (control.mode !== "OPEN") return fail("Scanner links can only be issued while the workspace is open.", 423);
@@ -59,6 +62,7 @@ export async function POST(request: Request) {
       tokenHash: scannerTokenHash(token),
       generation: control.scannerGeneration,
       createdBy: new ObjectId(auth.session.id),
+      ownerSessionVersion: auth.session.sessionVersion,
       createdByName: auth.session.fullName,
       expiresAt: new Date(now.getTime() + SCANNER_SESSION_MS),
       createdAt: now,
@@ -74,12 +78,13 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await authorize("pos.sell");
+  const auth = await authorize("members.read");
   if (auth.error) return auth.error;
   if (!sameOrigin(request)) return fail("This request was blocked.", 403);
   try {
     const input = routeSchema.safeParse(await request.json());
     if (!input.success || !ObjectId.isValid(input.data?.id || "")) return fail("Choose an active scanner destination.", 422);
+    if (!hasPermission(auth.session.role, scannerPermission(input.data.purpose))) return fail("You cannot use this scanner destination.", 403);
     const db = await getDb();
     const control = await getSystemControl(db);
     if (control.mode !== "OPEN") return fail("Scanner routing can only change while the workspace is open.", 423);
@@ -104,7 +109,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const auth = await authorize("pos.sell");
+  const auth = await authorize("members.read");
   if (auth.error) return auth.error;
   if (!sameOrigin(request)) return fail("This request was blocked.", 403);
   try {

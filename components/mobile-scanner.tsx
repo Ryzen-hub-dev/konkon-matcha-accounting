@@ -4,6 +4,8 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Camera, CameraOff, CheckCircle2, Flashlight, Keyboard, Radio, ScanBarcode, Sprout } from "lucide-react";
 import type { IScannerControls } from "@zxing/browser";
 import { apiRequest } from "@/components/ui";
+import { NfcControl } from "./nfc-control";
+import type { ScannerPurpose } from "@/lib/scanner-routing";
 
 type Detector = { detect(source: CanvasImageSource): Promise<Array<{ rawValue: string }>> };
 type DetectorConstructor = {
@@ -36,9 +38,9 @@ export function MobileScanner({ token }: { token: string }) {
     if (lastRef.current.code === code && now - lastRef.current.at < 1_500) return;
     busyRef.current = true;
     try {
-      const result = await apiRequest<{ purpose: "POS" | "INVENTORY" }>("/api/mobile-scans", { method: "POST", body: JSON.stringify({ token, code }) });
+      const result = await apiRequest<{ purpose: ScannerPurpose }>("/api/mobile-scans", { method: "POST", body: JSON.stringify({ token, code }) });
       lastRef.current = { code, at: now };
-      setStatus(`${code} sent to ${result.purpose === "INVENTORY" ? "Inventory" : "Point of sale"}.`);
+      setStatus(`Scan sent to ${result.purpose === "POS" ? "Point of sale" : result.purpose.toLowerCase()}.`);
       setTone("good");
       navigator.vibrate?.([45, 30, 45]);
     } catch (reason) {
@@ -126,10 +128,10 @@ export function MobileScanner({ token }: { token: string }) {
     let cancelled = false;
     const connect = async () => {
       try {
-        const result = await apiRequest<{ connected: boolean; label: string; purpose: "POS" | "INVENTORY" }>("/api/mobile-scans", { method: "POST", body: JSON.stringify({ token, action: "CONNECT" }) });
+        const result = await apiRequest<{ connected: boolean; label: string; purpose: ScannerPurpose }>("/api/mobile-scans", { method: "POST", body: JSON.stringify({ token, action: "CONNECT" }) });
         if (cancelled) return;
         setPaired(true);
-        setStatus(`Connected automatically to ${result.label} · ${result.purpose === "INVENTORY" ? "Inventory" : "Point of sale"}.`);
+        setStatus(`Connected automatically to ${result.label} · ${result.purpose === "POS" ? "Point of sale" : result.purpose.toLowerCase()}.`);
         setTone("good");
         try {
           const permission = await navigator.permissions?.query({ name: "camera" as PermissionName });
@@ -180,6 +182,7 @@ export function MobileScanner({ token }: { token: string }) {
       </div>
       <button className="button button-primary mobile-camera-button" onClick={() => cameraActive ? stop() : void start()} disabled={!paired}>{cameraActive ? <CameraOff /> : <Camera />}{cameraActive ? "Stop camera" : paired ? "Start camera" : "Pairing…"}</button>
       <div className="decoder-label"><Radio />{decoder}</div>
+      <NfcControl onRead={send} disabled={!paired} />
       <div className={`scanner-status ${tone}`} aria-live="polite">{tone === "good" ? <CheckCircle2 /> : <span className="scanner-status-dot" />}<span>{status}</span></div>
       <form className="manual-scan" onSubmit={submit}><label><Keyboard /><input name="code" autoCapitalize="characters" autoComplete="off" placeholder="Type or scan a code" required /></label><button disabled={!paired}>Send</button></form>
       <footer><span>PASS VALIDITY</span><strong>Up to 24 hours</strong><i /></footer>

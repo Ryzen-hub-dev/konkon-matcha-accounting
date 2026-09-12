@@ -17,7 +17,7 @@ const nextConfig: NextConfig = {
         { key: "X-DNS-Prefetch-Control", value: "off" },
         { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-        { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=()" },
+        { key: "Permissions-Policy", value: "camera=(self), nfc=(self), microphone=(), geolocation=()" },
         { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
         { key: "Content-Security-Policy", value: "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' http://127.0.0.1:* http://localhost:*; worker-src 'self' blob:" },
       ],
@@ -27,6 +27,14 @@ const nextConfig: NextConfig = {
       headers: [
         { key: "Cache-Control", value: "public, max-age=3600, must-revalidate" },
         { key: "Content-Disposition", value: "attachment" },
+      ],
+    },
+    {
+      source: "/:path(r|card-write)",
+      headers: [
+        { key: "Referrer-Policy", value: "no-referrer" },
+        { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        { key: "Cache-Control", value: "private, no-store, max-age=0" },
       ],
     },
     {

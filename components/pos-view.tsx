@@ -13,6 +13,8 @@ import { ReceiptPaper, type ReceiptPaperDocument } from "@/components/receipt-pa
 import { ReceiptTemplateStudio } from "@/components/receipt-template-studio";
 import { PaymentDisplayBridge } from "@/components/payment-display-bridge";
 import { ScannerBridge } from "@/components/scanner-bridge";
+import { CartQuantityInput } from "./cart-quantity-input";
+import { memberScanToken, receiptScanToken } from "@/lib/scan-codes";
 import { apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, useNotice } from "@/components/ui";
 import { buildAmountLockedDuitNowQr } from "@/lib/duitnow-qr";
 import { customerQrDisplaySignature, staticQrInputSignature } from "@/lib/customer-payment-qr";
@@ -306,7 +308,7 @@ export function PosView({
     if (product.stock <= 0) return false;
     const current = cartRef.current;
     const existing = current.find((line) => line._id === product._id);
-    if (existing && existing.quantity >= product.stock) return false;
+    if (existing && existing.quantity >= Math.min(999, product.stock)) return false;
     const next = existing
       ? current.map((line) => line._id === product._id ? { ...line, quantity: line.quantity + 1 } : line)
       : [...current, { ...product, quantity: 1 }];
@@ -318,7 +320,7 @@ export function PosView({
 
   function quantity(id: string, delta: number) {
     setCart((current) => {
-      const next = current.map((line) => line._id === id ? { ...line, quantity: Math.min(line.stock, Math.max(0, line.quantity + delta)) } : line).filter((line) => line.quantity > 0);
+      const next = current.map((line) => line._id === id ? { ...line, quantity: Math.min(999, line.stock, Math.max(0, line.quantity + delta)) } : line).filter((line) => line.quantity > 0);
       cartRef.current = next;
       return next;
     });
@@ -441,6 +443,16 @@ export function PosView({
   const handleScan = useCallback(async (rawCode: string) => {
     const code = rawCode.trim().toUpperCase();
     if (!code) return;
+    if (receiptScanToken(code)) {
+      try { const match = await apiRequest<{ id: string }>("/api/receipt-lookup", { method: "POST", body: JSON.stringify({ code }) }); window.location.assign(`/receipts/${match.id}`); }
+      catch (reason) { show(reason instanceof Error ? reason.message : "Receipt not found.", "error"); }
+      return;
+    }
+    if (memberScanToken(code)) {
+      try { const member = await apiRequest<MemberRecord>("/api/member-cards/lookup", { method: "POST", body: JSON.stringify({ code }) }); setMembers(current => [...current.filter(item => item._id !== member._id), member]); setMemberId(member._id); show(`${member.name} selected from member card.`); }
+      catch (reason) { show(reason instanceof Error ? reason.message : "Member card unavailable.", "error"); }
+      return;
+    }
     if (paymentIntent?.status === "PENDING") { await verifyScannedPayment(code); return; }
     const product = products.find((item) => item.barcode?.toUpperCase() === code || item.sku.toUpperCase() === code);
     if (product) { if (add(product)) show(`${product.name} added from scan.`); else show(`${product.name} is already at the available stock limit.`, "error"); return; }
@@ -529,7 +541,7 @@ export function PosView({
       <section className="catalog-panel"><div className="catalog-toolbar"><label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search product, barcode or SKU" /></label><span>{filtered.length} items</span></div><div className="category-tabs" role="tablist">{categories.map((name) => <button key={name} className={category === name ? "active" : ""} onClick={() => setCategory(name)}>{name}</button>)}</div>{filtered.length ? <div className="product-grid">{filtered.map((product) => <button className="product-card" key={product._id} onClick={() => add(product)} disabled={product.stock <= 0}><div className="product-top"><span>{product.category}</span><i className={product.stock <= product.reorderLevel ? "low" : ""}>{product.stock ? `${product.stock} left` : "Sold out"}</i></div><div className="product-glyph" aria-hidden="true"><span>{product.name.toLowerCase().includes("hojicha") ? "焙" : product.category === "Dōgu" ? "道" : "抹"}</span></div><strong>{product.name}</strong><small>{product.sku}{product.barcode ? ` · ${product.barcode}` : ""}</small><footer><b>{money.format(product.price)}</b><span><Plus size={16} /></span></footer></button>)}</div> : <EmptyState title="No product found" detail="Try a different search or category." />}</section>
       <aside className="cart-panel"><header><div><span className="eyebrow light">CURRENT ORDER</span><h2>Order <b>{cart.reduce((sum, line) => sum + line.quantity, 0)}</b></h2></div><ShoppingBasket /></header>
         <label className="member-select"><UserRound size={17} /><select value={memberId} onChange={(event) => setMemberId(event.target.value)}><option value="">Walk-in guest</option>{members.map((member) => <option key={member._id} value={member._id}>{member.name} · {member.points} pts</option>)}</select><ChevronRight size={16} /></label>
-        <div className="cart-lines">{cart.length ? cart.map((line) => <div className="cart-line" key={line._id}><div><strong>{line.name}</strong><span>{money.format(line.price)} each</span></div><div className="qty-control"><button onClick={() => quantity(line._id, -1)}>{line.quantity === 1 ? <Trash2 size={14} /> : <Minus size={14} />}</button><b>{line.quantity}</b><button onClick={() => quantity(line._id, 1)} disabled={line.quantity >= line.stock}><Plus size={14} /></button></div><strong>{money.format(line.price * line.quantity)}</strong></div>) : <EmptyState title="The order is empty" detail="Choose or scan a product to begin." />}</div>
+        <div className="cart-lines">{cart.length ? cart.map((line) => <div className="cart-line" key={line._id}><div><strong>{line.name}</strong><span>{money.format(line.price)} each</span></div><div className="qty-control"><button aria-label={`Decrease ${line.name} quantity`} onClick={() => quantity(line._id, -1)}>{line.quantity === 1 ? <Trash2 size={14} /> : <Minus size={14} />}</button><CartQuantityInput quantity={line.quantity} stock={line.stock} name={line.name} onCommit={value => quantity(line._id, value - line.quantity)} /><button aria-label={`Increase ${line.name} quantity`} onClick={() => quantity(line._id, 1)} disabled={line.quantity >= Math.min(999, line.stock)}><Plus size={14} /></button></div><strong>{money.format(line.price * line.quantity)}</strong></div>) : <EmptyState title="The order is empty" detail="Choose or scan a product to begin." />}</div>
         <div className="coupon-register"><label><TicketPercent /><input value={couponCode} onChange={(event) => setCouponCode(event.target.value.toUpperCase())} placeholder="Coupon code" /><button onClick={() => void applyCoupon(couponCode)}>Apply</button></label>{appliedCouponCode ? <p><strong>{appliedCouponCode}</strong><span>{couponName} · −{money.format(couponDiscount)}</span><button onClick={() => { setCouponCode(""); setAppliedCouponCode(""); setCouponDiscount(0); setCouponName(""); }}>Remove</button></p> : null}</div>
         <div className="cart-totals">{canManualDiscount ? <label><span>Manager discount · {register.currency}</span><div><span>{register.currency}</span><input type="number" min="0" max={Math.max(0, subtotal - couponDiscount)} step={10 ** -currencyFractionDigits(register.currency)} value={manualDiscount || ""} onChange={(event) => setManualDiscount(Math.min(Math.max(0, subtotal - couponDiscount), Math.max(0, Number(event.target.value))))} placeholder="0.00" /></div></label> : null}<p><span>Subtotal</span><b>{money.format(subtotal)}</b></p>{discount > 0 ? <p><span>Discount</span><b>−{money.format(discount)}</b></p> : null}<p><span>{register.taxName} · {register.taxRate}%{register.taxMode === "INCLUSIVE" ? " included" : ""}</span><b>{money.format(tax)}</b></p><p className="grand-total"><span>Amount due</span><strong>{money.format(total)}</strong></p>{tenderCurrency !== register.currency ? <p className="foreign-total"><span>Settlement · 1 {register.currency} = {exchangeRate} {tenderCurrency}</span><strong>{exchangeRate ? tenderMoney.format(tenderTotal) : "Rate missing"}</strong></p> : null}</div>
         <div className="payment-methods"><span>PAYMENT</span><div>{paymentMethods.map((method) => { const Icon = method.kind === "CASH" ? Banknote : method.code.includes("CARD") ? CreditCard : Smartphone; return <button type="button" key={method._id} className={payment === method.code ? "active" : ""} onClick={() => selectPayment(method)} title={`Posts to ${method.accountCode} · ${method.accountName}`}><Icon size={17} />{method.name}</button>; })}</div></div>

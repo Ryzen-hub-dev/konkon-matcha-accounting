@@ -17,6 +17,24 @@
   --utility: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
+/* Digital receipts and membership card tools use the established tea-room palette. */
+.public-receipt-page { max-width: 820px; margin: 0 auto; padding: 32px 20px; }
+.public-receipt-page h1, .member-cards-manager h2 { font-family: var(--display); color: var(--koicha); }
+.public-receipt-page p, .member-cards-manager p { line-height: 1.7; }
+.public-receipt-page .document-toolbar, .receipt-document-page .document-toolbar { display: flex; flex-wrap: wrap; gap: 10px; }
+.receipt-access-qr { display: grid; justify-items: center; gap: 5px; margin: 12px auto; break-inside: avoid; }
+.receipt-access-qr img { width: 37mm; height: 37mm; max-width: 100%; image-rendering: pixelated; }
+.qty-control .cart-quantity-input { width: 45px; min-width: 30px; min-height: 36px; padding: 4px; text-align: center; color: var(--paper); background: transparent; border: 1px solid var(--usucha); border-radius: 4px; font-size: 16px; }
+.qty-control .cart-quantity-input:focus { outline: 2px solid var(--usucha); outline-offset: 2px; }
+.qty-control .cart-quantity-input[aria-invalid="true"] { border-color: var(--ume); }
+.nfc-control { padding: 14px 0; }.nfc-control p { font-size: 13px; line-height: 1.6; }
+.member-cards-manager { max-width: 980px; margin: 32px auto; padding: 24px; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+.card-style-form { display: flex; flex-wrap: wrap; gap: 14px; align-items: end; margin: 20px 0; }.card-style-form .field { flex: 1 1 170px; }.card-style-form .field:has(input[type="color"]) { flex: 0 1 100px; }
+.member-issued-cards article { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; padding: 18px 0; border-top: 1px solid var(--line); }.member-issued-cards small { display: block; margin-top: 6px; color: var(--muted); }.card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.member-credential-stage { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); align-items: start; gap: 24px; margin-top: 24px; }.member-exclusive-card { border: 5px solid var(--koicha); border-radius: 14px; padding: 22px; background: white; text-align: center; break-inside: avoid; }.member-exclusive-card header { font-weight: 800; letter-spacing: .08em; margin-bottom: 12px; }.member-exclusive-card h2 { font-size: 28px; color: inherit; overflow-wrap: anywhere; }.member-exclusive-card p { font-size: 12px; }.member-credential-stage summary { cursor: pointer; font-weight: 700; padding: 12px 0; }.card-error { color: #8e3f49; }
+@media (max-width: 680px) { .member-cards-manager { padding: 16px; }.member-credential-stage { grid-template-columns: 1fr; }.member-card-page { padding-left: 14px; padding-right: 14px; }.card-style-form .field { flex-basis: 100%; } }
+@media print { .no-print { display: none !important; }.member-card-page:has(.member-exclusive-card) > .printable-member-card { display: none; }.member-cards-manager { border: 0; margin: 0; padding: 0; }.member-credential-stage { display: block; }.member-exclusive-card { max-width: 85mm; margin: auto; }.public-receipt-page { padding: 0; }.receipt-access-qr { break-inside: avoid; } }
+
 /* Invoice workspace: readable rows and a touch-friendly draft editor. */
 .invoice-workspace .invoice-template-ribbon strong { font-size: 14px; }
 .invoice-workspace .invoice-template-ribbon small { font-size: 12px; line-height: 1.5; }

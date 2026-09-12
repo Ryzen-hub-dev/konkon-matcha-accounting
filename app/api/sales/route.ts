@@ -1,4 +1,5 @@
 import { ObjectId } from "mongodb";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
@@ -12,6 +13,7 @@ import { quoteAmount, readExchangeRate } from "@/lib/exchange-rates";
 import { currencyCodeSchema, roundCurrency } from "@/lib/international";
 import { effectiveProvider, effectiveVerificationMode, ensureDefaultPaymentMethods, paymentCurrencies } from "@/lib/payment-methods";
 import { paymentAmountsMatch, staticQrPaymentIsConfirmed } from "@/lib/payment-verification";
+import { receiptAccessUrl } from "@/lib/receipt-access";
 
 export const runtime = "nodejs";
 
@@ -38,6 +40,10 @@ const saleSchema = z.object({
 class StockError extends Error {}
 class PaymentError extends Error {}
 
+function saleResponse(sale: import("mongodb").Document, request: Request) {
+  return serialise({ ...sale, publicReceiptUrl: sale.receiptAccessRevoked ? undefined : receiptAccessUrl(sale, process.env.NEXT_PUBLIC_APP_URL || request.url) });
+}
+
 async function readBody(request: Request) {
   try {
     return { value: await request.json() } as const;
@@ -61,7 +67,7 @@ export async function GET(request: Request) {
       if (!ObjectId.isValid(id)) return fail("The receipt reference is invalid.", 422);
       const sale = await db.collection("sales").findOne({ _id: new ObjectId(id) });
       if (!sale) return fail("This receipt could not be found.", 404);
-      return ok(serialise(sale));
+      return ok(saleResponse(sale, request));
     }
     const query = url.searchParams.get("q")?.trim().slice(0, 60) || "";
     const filter = query ? {
@@ -90,12 +96,13 @@ export async function POST(request: Request) {
       if (!ObjectId.isValid(item.productId)) return fail("A product in the cart is invalid.", 422);
       quantities.set(item.productId, (quantities.get(item.productId) || 0) + item.quantity);
     }
+    if ([...quantities.values()].some(quantity => quantity > 999)) return fail("A product quantity cannot exceed 999 per sale.", 422);
 
     const db = await getDb();
     const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
     const money = (value: unknown) => roundCurrency(value, business.currency);
     const existingSale = await db.collection("sales").findOne({ clientRequestId, createdBy: new ObjectId(auth.session.id) });
-    if (existingSale) return ok(serialise(existingSale));
+    if (existingSale) return ok(saleResponse(existingSale, request));
     await ensureDefaultReceiptTemplate(db, new ObjectId(auth.session.id));
     await ensureDefaultPaymentMethods(db, new ObjectId(auth.session.id));
     const selectedPayment = await db.collection("paymentMethods").findOne({ code: input.data.paymentMethod, active: { $ne: false } });
@@ -185,6 +192,7 @@ export async function POST(request: Request) {
     const saleId = new ObjectId();
     const sale = {
       _id: saleId,
+      receiptAccessVersion: randomBytes(16).toString("hex"),
       clientRequestId,
       receiptNo,
       memberId: member?._id || null,
@@ -358,14 +366,14 @@ export async function POST(request: Request) {
     } finally {
       await mongoSession.endSession();
     }
-    return created(serialise(sale));
+    return created(saleResponse(sale, request));
   } catch (error) {
     if (error instanceof StockError || error instanceof CouponError || error instanceof PaymentError) return fail(error.message, 409);
     if ((error as { code?: number; keyPattern?: Record<string, number> }).code === 11000 && (error as { keyPattern?: Record<string, number> }).keyPattern?.paymentReferenceNormalized) return fail("This static QR transaction reference was already used. Verify the receiving account and enter the reference for this payment.", 409);
     if ((error as { code?: number }).code === 11000 && clientRequestId) {
       const db = await getDb();
       const existing = await db.collection("sales").findOne({ clientRequestId, createdBy: new ObjectId(auth.session.id) });
-      if (existing) return ok(serialise(existing));
+      if (existing) return ok(saleResponse(existing, request));
       return fail("The receipt number collided. Please submit the sale again.", 409);
     }
     return publicError(error);

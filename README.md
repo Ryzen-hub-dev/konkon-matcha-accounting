@@ -35,11 +35,14 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Transactional stock deductions, member points, coupon redemption and double-entry posting.
 - Custom 58mm/80mm receipt templates, safe raster logos, privacy-first address-hidden defaults, print/reprint and refund workflow.
 - Historical receipt/template/business snapshots so reprints do not change later.
+- Receipt-number/QR lookup, signed customer receipt links, PDF printing, CSV and accounting JSON export; customer views show current refund totals without exposing member identity, staff names, costs or private payment references.
+- Click a cart quantity to enter an integer directly; both cart and checkout enforce available stock and the 999-unit line limit.
 
 ### Barcode and mobile scanning
 
 - Optional unique barcode on each product; products without manufacturer codes remain supported.
 - USB/Bluetooth keyboard-wedge scanner input in Inventory and POS.
+- Receipt and member screens also accept scans. A receipt QR scanned at POS opens that receipt for review; a member QR/NFC credential selects its active member.
 - A shared live scanner bridge recognises a product barcode/SKU, member card/member number or coupon code in POS.
 - Inventory scans open an existing product editor or open a new product form with the new barcode already populated.
 - Up to five active mobile-scanner passes per operator.
@@ -57,6 +60,9 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Identity values are normalized and protected with an `IDENTITY_LOOKUP_SECRET`-keyed HMAC; only the hash and last four characters are stored. `AUTH_SECRET` is a local-development fallback only.
 - Protected identity lookup is rate-limited and audit logged.
 - Member “delete” is an archive operation so invoices, receipts, points and audits stay referentially intact.
+- Independently issued QR/NFC member cards with editable label, membership title and colour; suspend, reactivate, permanently void and audit-preserving delete controls.
+- Random card credentials, SHA-256 lookup hashes and AES-256-GCM encrypted storage. No name, phone or identity number is written to an NFC tag. Sensitive receipt/member scanner events are encrypted until TTL expiry.
+- Phone-based NDEF reading/writing on supported Android Chrome devices, with QR fallback elsewhere. Static tags are copyable identification credentials, not payment authorization or clone-resistant smart cards. See [receipt and NFC guide](docs/receipts-and-nfc.md).
 
 ### Inventory and accounting
 
@@ -100,11 +106,12 @@ Core endpoints:
 - `/api/products`, `/api/stocktakes`, `/api/members`, `/api/coupons`, `/api/payment-methods`, `/api/exchange-rates`
 - `/api/scanner-sessions`, `/api/mobile-scans`, `/api/payment-display-sessions`, `/api/payment-display`
 - `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`, `/api/local-payment-events`
+- `/api/receipt-lookup`, `/api/public-receipts`, `/api/member-cards`, `/api/member-cards/lookup`
 - `/api/invoices`, `/api/invoice-templates`, `/api/journals`, `/api/reports`
 - `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`
 - `/api/settings`, `/api/settings/history`, `/api/locations`
 
-Write requests require a same-origin browser request and authenticated role permission, except the token-restricted mobile scan sender. Public errors do not include stack traces, secrets or database internals.
+Workspace writes require a same-origin browser request and authenticated role permission. Initial setup, private owner recovery and token-restricted phone scan submission have their own authorization rules. Customer receipt retrieval is a read-only POST requiring the signed receipt token; it never authorizes refunds. Public errors do not include stack traces, secrets or database internals.
 
 ## Local development
 
@@ -134,7 +141,7 @@ Invoice acceptance also covers impossible calendar dates, currency-safe line cal
 
 - Node.js routes are short-lived and stateless; MongoDB owns durable scanner and transaction state.
 - MongoDB client reuse is global per warm function instance with `maxPoolSize: 5`, `minPoolSize: 0` and idle cleanup.
-- POS and Inventory automatically route the newest live phone pass to the active workflow. Each event snapshots its POS/Inventory destination so simultaneous pages cannot consume the wrong scan. A bounded three-second wait returns scans in 250 ms slices, aborts when the page unmounts and pauses while the tab is hidden.
+- POS, Inventory, Receipts and Members automatically route the newest live phone pass to the active workflow. Each event snapshots its destination so simultaneous pages cannot consume the wrong scan. A bounded three-second wait returns scans in 250 ms slices, aborts when the page unmounts and pauses while the tab is hidden.
 - TTL indexes automatically remove expired scanner sessions/events, authentication throttles and sensitive lookup events.
 - No long-running server, filesystem persistence, WebSocket server or background worker is required.
 - `vercel.json` pins functions to Singapore and enables Fluid Compute.

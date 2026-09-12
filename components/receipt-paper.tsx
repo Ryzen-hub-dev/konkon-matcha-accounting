@@ -2,11 +2,13 @@
 
 import type { CSSProperties } from "react";
 import { Leaf } from "lucide-react";
+import { QrImage } from "./qr-image";
 import { DEFAULT_RECEIPT_TEMPLATE, type ReceiptTemplateInput } from "@/lib/receipt-templates";
 
 export type ReceiptPaperDocument = {
   _id?: string;
   receiptNo: string;
+  publicReceiptUrl?: string;
   status?: string;
   createdAt: string | Date;
   cashierName?: string;
@@ -117,6 +119,7 @@ export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, co
     {document.saleNote ? <p className="receipt-sale-note"><strong>Order note</strong>{document.saleNote}</p> : null}
 
     <footer className="receipt-paper-footer">
+      {document.publicReceiptUrl ? <div className="receipt-access-qr" data-receipt-qr><QrImage value={document.publicReceiptUrl} label="Scan to view and export this receipt" width={148} /><strong>Scan for your digital receipt</strong><small>View · save · show for returns</small></div> : null}
       {template.thankYouText ? <strong>{template.thankYouText}</strong> : null}
       {template.returnPolicy ? <p>{template.returnPolicy}</p> : null}
       {template.website ? <span>{template.website}</span> : null}

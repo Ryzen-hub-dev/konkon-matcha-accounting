@@ -5,6 +5,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { Banknote, Eye, ReceiptText, Search, ShoppingBasket } from "lucide-react";
 import { apiRequest, EmptyState, LoadingPanel, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
 import { useBusiness } from "@/components/business-context";
+import { ScannerBridge } from "./scanner-bridge";
+import { useRouter } from "next/navigation";
 
 type Sale = {
   _id: string;
@@ -21,6 +23,7 @@ type Sale = {
 };
 
 export function ReceiptsView({ canSell = false }: { canSell?: boolean }) {
+  const router = useRouter();
   const { money, shortDate, dateTime } = useBusiness();
   const [sales, setSales] = useState<Sale[]>([]);
   const [query, setQuery] = useState("");
@@ -51,6 +54,10 @@ export function ReceiptsView({ canSell = false }: { canSell?: boolean }) {
   return <div className="page page-enter">
     <PageHeader eyebrow="SALES ARCHIVE" title="Receipts" description="Find, verify and reprint the exact paper issued at the counter." action={canSell ? <Link className="button button-primary" href="/pos"><ShoppingBasket size={17} />New sale</Link> : undefined} />
     {notice ? <Notice {...notice} /> : null}
+    <ScannerBridge contextLabel="Receipts" purpose="RECEIPTS" placeholder="Scan receipt QR or enter receipt number" onFeedback={show} onScan={async code => {
+      try { const match = await apiRequest<{ id: string }>("/api/receipt-lookup", { method: "POST", body: JSON.stringify({ code }) }); router.push(`/receipts/${match.id}`); }
+      catch (reason) { show(reason instanceof Error ? reason.message : "Receipt not found.", "error"); }
+    }} />
     <section className="mini-stat-row"><article><ReceiptText /><span>Receipts shown</span><strong>{sales.length}</strong></article><article><Banknote /><span>Net value shown</span><strong>{money.format(sales.reduce((sum, sale) => sum + sale.total - Number(sale.refundedAmount || 0), 0))}</strong></article><article><ShoppingBasket /><span>Today</span><strong>{todaySales.length}</strong></article></section>
     <section className="panel resource-panel">
       <div className="resource-toolbar"><form className="search-box receipt-search" onSubmit={search}><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Receipt no., member, cashier or payment reference" /><button>Search</button></form><span>Latest 200 receipts</span></div>

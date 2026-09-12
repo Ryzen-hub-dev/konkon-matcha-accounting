@@ -12,6 +12,6 @@ export function scannerTokenHash(token: string) {
 
 export function normaliseScanCode(value: string) {
   const code = value.normalize("NFKC").trim().toUpperCase();
-  if (!code || code.length > 128 || !/^[\x20-\x7E]+$/.test(code)) return "";
+  if (!code || code.length > 512 || !/^[\x20-\x7E]+$/.test(code)) return "";
   return code;
 }

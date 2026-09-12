@@ -7,6 +7,8 @@ import { ReceiptPaper, type ReceiptPaperDocument } from "@/components/receipt-pa
 import { apiRequest, EmptyState, LoadingPanel, Modal, Notice, useNotice } from "@/components/ui";
 import { useBusiness } from "@/components/business-context";
 import { DEFAULT_RECEIPT_TEMPLATE, type ReceiptTemplateInput } from "@/lib/receipt-templates";
+import { receiptCsv, downloadReceiptFile } from "@/lib/receipt-export";
+import { printReceipt } from "@/lib/print-receipt";
 
 type RefundableItem = ReceiptPaperDocument["items"][number] & { productId: string; refundedQuantity?: number };
 type SaleReceipt = Omit<ReceiptPaperDocument, "items"> & {
@@ -89,7 +91,8 @@ export function ReceiptDocumentView({ id, canRefund = false, canSell = false }: 
 
   return <div className="page receipt-document-page page-enter">
     {notice ? <Notice {...notice} /> : null}
-    <header className="receipt-document-toolbar"><div><Link className="button button-secondary" href="/receipts"><ArrowLeft size={16} />Receipts</Link><span><small>HISTORICAL PAPER</small><strong>{receipt.receiptNo}</strong></span></div><div>{canRefund && remainingItems.length ? <button className="button button-secondary refund-button" onClick={beginRefund}><RotateCcw size={16} />Refund items</button> : null}{canSell ? <Link className="button button-secondary" href="/pos"><ShoppingBasket size={16} />New sale</Link> : null}<button className="button button-primary" onClick={() => window.print()}><Printer size={16} />Print or save PDF</button></div></header>
+    <header className="receipt-document-toolbar"><div><Link className="button button-secondary" href="/receipts"><ArrowLeft size={16} />Receipts</Link><span><small>HISTORICAL PAPER</small><strong>{receipt.receiptNo}</strong></span></div><div>{canRefund && remainingItems.length ? <button className="button button-secondary refund-button" onClick={beginRefund}><RotateCcw size={16} />Refund items</button> : null}{canSell ? <Link className="button button-secondary" href="/pos"><ShoppingBasket size={16} />New sale</Link> : null}<button className="button button-primary" onClick={() => void printReceipt().catch(error => show(error.message, "error"))}><Printer size={16} />Print or save PDF</button></div></header>
+    <div className="document-toolbar no-print"><button className="button button-secondary" onClick={() => downloadReceiptFile(receiptCsv(receipt), "text/csv;charset=utf-8", `${receipt.receiptNo}.csv`)}>Export receipt CSV</button>{receipt.publicReceiptUrl ? <><a className="button button-secondary" href={receipt.publicReceiptUrl} target="_blank" rel="noreferrer">Customer online receipt</a><button className="button button-secondary" onClick={() => navigator.clipboard.writeText(receipt.publicReceiptUrl!).then(() => show("Receipt link copied.")).catch(() => show("Clipboard unavailable. Open the customer receipt instead.", "error"))}>Copy customer link</button></> : null}</div>
     <div className="receipt-document-stage"><ReceiptPaper document={receipt} template={template} /></div>
 
     {refunds.length ? <section className="panel receipt-refund-ledger"><header><div><span className="eyebrow">REVERSALS</span><h2>Refund history</h2></div><strong>{money.format(refunds.reduce((sum, refund) => sum + refund.total, 0))}</strong></header>{refunds.map((refund) => <div className="receipt-refund-row" key={refund._id}><span><strong>{refund.refundNo}</strong><small>{shortDate.format(new Date(refund.createdAt))} · {refund.createdByName}</small></span><span><strong>{refund.items.map((item) => `${item.quantity} × ${item.name}`).join(", ")}</strong><small>{refund.reason}</small></span><b>−{money.format(refund.total)}</b></div>)}</section> : null}

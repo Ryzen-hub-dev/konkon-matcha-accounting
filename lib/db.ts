@@ -60,6 +60,9 @@ export function getMongoClient(): Promise<MongoClient> {
 
 async function initializeIndexes(db: Db) {
   await Promise.all([
+    db.collection("memberCards").createIndex({ tokenHash: 1 }, { unique: true }),
+    db.collection("memberCards").createIndex({ clientRequestId: 1 }, { unique: true }),
+    db.collection("memberCards").createIndex({ memberId: 1, status: 1 }),
     db.collection("users").createIndex({ usernameNormalized: 1 }, { unique: true }),
     db.collection("users").createIndex(
       { emailNormalized: 1 },

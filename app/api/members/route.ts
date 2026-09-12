@@ -111,7 +111,7 @@ export async function POST(request: Request) {
     };
     const result = await db.collection("members").insertOne(document);
     await writeAudit(db, auth.session, "member.create", "member", result.insertedId.toHexString(), { memberNo: document.memberNo, identityStored: Boolean(document.identityLast4) });
-    return created(serialise({ _id: result.insertedId, ...document }));
+    return created(serialise(await db.collection("members").findOne({ _id: result.insertedId }, { projection: safeProjection })));
   } catch (error) {
     if ((error as { code?: number }).code === 11000) return fail("That phone number, identity number or member card is already registered.", 409);
     return publicError(error);
