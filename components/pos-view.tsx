@@ -5,7 +5,7 @@ import QRCode from "qrcode";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, Banknote, CheckCircle2, ChevronRight, Cloud, CreditCard, Expand, ExternalLink, History,
-  Minus, Minimize2, Palette, Plus, QrCode, ReceiptText, Search, ShieldCheck, ShoppingBasket,
+  Minus, Minimize2, Nfc, Palette, Plus, QrCode, ReceiptText, Search, ShieldCheck, ShoppingBasket,
   Smartphone, TicketPercent, Trash2, UserRound,
 } from "lucide-react";
 import { useBusiness } from "@/components/business-context";
@@ -14,6 +14,7 @@ import { ReceiptTemplateStudio } from "@/components/receipt-template-studio";
 import { PaymentDisplayBridge } from "@/components/payment-display-bridge";
 import { ScannerBridge } from "@/components/scanner-bridge";
 import { CartQuantityInput } from "./cart-quantity-input";
+import { NfcControl } from "./nfc-control";
 import { memberBindingScanToken, memberScanToken, receiptScanToken } from "@/lib/scan-codes";
 import { apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, useNotice } from "@/components/ui";
 import { buildAmountLockedDuitNowQr } from "@/lib/duitnow-qr";
@@ -563,6 +564,7 @@ export function PosView({
     {notice ? <Notice {...notice} /> : null}
     <div className="pos-draft-status"><Cloud size={15} /><span>{draftSavedAt ? `Saved in this browser at ${draftSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Browser draft protection is active"}</span><i />Member list refreshes automatically every 3 seconds and whenever this window regains focus.</div>
     <ScannerBridge contextLabel="Point of sale" purpose="POS" enabled={!loading} placeholder={paymentIntent?.status === "PENDING" ? "Scan completed-payment verification code" : "Scan product · member card · coupon"} onScan={handleScan} onFeedback={show} />
+    <section className="pos-nfc-reader no-print" aria-label="POS NFC reader"><header><div><span className="eyebrow">POS NFC READER · ALWAYS ON</span><h2>Tap a member card</h2><p>Use the linked phone or this device. Tap to select a member; the reader stays ready for the next card.</p></div><Nfc aria-hidden="true" /></header><NfcControl autoStart alwaysOn onRead={handleScan} onGenericRead={handleScan} disabled={loading} /></section>
     <PaymentDisplayBridge userId={userId} paymentMethod={selectedPayment} amount={tenderTotal} currency={tenderCurrency} displayRequested={customerQrRequested} completedAt={paymentDisplayCompletedAt} onFeedback={show} />
     {loading ? <LoadingPanel label="Opening the register…" /> : <div className="pos-layout">
       <section className="catalog-panel"><div className="catalog-toolbar"><label className="search-box"><Search size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search product, barcode or SKU" /></label><span>{filtered.length} items</span></div><div className="category-tabs" role="tablist">{categories.map((name) => <button key={name} className={category === name ? "active" : ""} onClick={() => setCategory(name)}>{name}</button>)}</div>{filtered.length ? <div className="product-grid">{filtered.map((product) => <button className="product-card" key={product._id} onClick={() => add(product)} disabled={product.stock <= 0}><div className="product-top"><span>{product.category}</span><i className={product.stock <= product.reorderLevel ? "low" : ""}>{product.stock ? `${product.stock} left` : "Sold out"}</i></div><div className="product-glyph" aria-hidden="true"><span>{product.name.toLowerCase().includes("hojicha") ? "焙" : product.category === "Dōgu" ? "道" : "抹"}</span></div><strong>{product.name}</strong><small>{product.sku}{product.barcode ? ` · ${product.barcode}` : ""}</small><footer><b>{money.format(product.price)}</b><span><Plus size={16} /></span></footer></button>)}</div> : <EmptyState title="No product found" detail="Try a different search or category." />}</section>

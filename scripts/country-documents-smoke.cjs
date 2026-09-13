@@ -91,6 +91,7 @@ async function browserChecks({ page, mobile, api, member, base, output, fixtures
   await page.locator('[name="taxCategory"]').selectOption('O'); await page.locator('[name="taxReason"]').fill('No tax charged'); await page.locator('[name="confirmed"]').check();
   await page.getByRole('button', { name: 'Generate and save file', exact: true }).click();
   await page.getByText('Electronic document saved.', { exact: false }).waitFor();
+  assert.equal(await page.locator('.e-invoice-history article').count(), 2, 'Success is shown only after the new download appears');
   const [xmlDownload] = await Promise.all([page.waitForEvent('download'), page.locator('.e-invoice-history').getByRole('button', { name: 'Download', exact: true }).first().click()]);
   let xml = ''; for await (const part of await xmlDownload.createReadStream()) xml += part.toString(); assert.match(xml, /Browser Test Company/);
   const xmlErrors = await page.evaluate(content => new DOMParser().parseFromString(content, 'application/xml').getElementsByTagName('parsererror').length, xml); assert.equal(xmlErrors, 0);

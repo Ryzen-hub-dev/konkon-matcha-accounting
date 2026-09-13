@@ -66,6 +66,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Random card credentials, SHA-256 lookup hashes and AES-256-GCM encrypted storage. No name, phone or identity number is written to an NFC tag. Sensitive receipt/member scanner events are encrypted until TTL expiry.
 - Phone-based NDEF reading/writing on supported Android Chrome devices, with QR fallback elsewhere. Static tags are copyable identification credentials, not payment authorization or clone-resistant smart cards. See [receipt and NFC guide](docs/receipts-and-nfc.md).
 - The linked-phone pass keeps barcode camera/USB/Bluetooth scanning in its own lane and exposes NFC as a separate reader. NFC attempts to start automatically when the pass opens (one browser permission gesture may still be required), then stays live while the page is foregrounded.
+- POS and Members also mount the same NFC reader directly: tap an issued or bound card to select/lookup the member without opening the barcode scanner. A linked phone follows the active counter page without reopening its pass. Normal reading stays active after each tap, suppresses duplicate/in-flight events and permits retries after failed delivery. Web NFC suspends in the background and resumes the same subscription in the foreground; supported phones request a screen wake lock. First use may require one permission tap, and the phone must remain unlocked. Pass expiry, revocation and the one-card binding confirmation step still apply.
 
 ### Inventory and accounting
 

@@ -53,7 +53,7 @@ export function MobileScanner({ token }: { token: string }) {
       setTone("bad");
       throw reason;
     } finally {
-      window.setTimeout(() => { busyRef.current = false; }, 320);
+      busyRef.current = false;
     }
   }, [token]);
 
@@ -190,7 +190,7 @@ export function MobileScanner({ token }: { token: string }) {
       <button className="button button-primary mobile-camera-button" onClick={() => cameraActive ? stop() : void start()} disabled={!paired}>{cameraActive ? <CameraOff /> : <Camera />}{cameraActive ? "Stop camera" : paired ? "Start camera" : "Pairing…"}</button>
       <div className="decoder-label"><Radio />{decoder}</div>
       <form className="manual-scan" onSubmit={submit}><label><Keyboard /><input name="code" autoCapitalize="characters" autoComplete="off" placeholder="Type or scan a barcode" required /></label><button disabled={!paired}>Send barcode</button></form></section> : null}
-      <section className={`scanner-lane nfc-lane ${nfcBinding ? "nfc-lane-primary" : ""}`}><header><span className="eyebrow">NFC CARD READER</span><h2>{nfcBinding ? "Member binding reader" : "Tap-to-read NFC"}</h2><p>{nfcBinding ? "This phone only sends a protected card fingerprint. Confirm the member on the counter screen; it cannot sell or view member details." : "This reader is separate from the barcode scanner and remains active while the page is open."}</p></header><NfcControl autoStart onRead={nfcBinding ? undefined : send} onGenericRead={send} stopAfterGeneric={nfcBinding} disabled={!paired} /></section>
+      <section className={`scanner-lane nfc-lane ${nfcBinding ? "nfc-lane-primary" : ""}`}><header><span className="eyebrow">NFC CARD READER</span><h2>{nfcBinding ? "Member binding reader" : "Tap-to-read NFC"}</h2><p>{nfcBinding ? "This phone only sends a protected card fingerprint. Confirm the member on the counter screen; it cannot sell or view member details." : "This reader is separate from the barcode scanner and stays on while the pass is open."}</p></header><NfcControl autoStart alwaysOn={!nfcBinding} onRead={nfcBinding ? undefined : send} onGenericRead={send} stopAfterGeneric={nfcBinding} disabled={!paired} /></section>
       <div className={`scanner-status ${tone}`} aria-live="polite">{tone === "good" ? <CheckCircle2 /> : <span className="scanner-status-dot" />}<span>{status}</span></div>
       <footer><span>PASS VALIDITY</span><strong>Up to 24 hours</strong><i /></footer>
     </section>

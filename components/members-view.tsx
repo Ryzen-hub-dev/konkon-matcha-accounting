@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Archive, Award, BadgeCheck, CreditCard, Fingerprint, Mail, Pencil, Phone, Search, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
+import { Archive, Award, BadgeCheck, CreditCard, Fingerprint, Mail, Nfc, Pencil, Phone, Search, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, useNotice } from "@/components/ui";
 import { useBusiness } from "@/components/business-context";
 import type { MemberRecord } from "@/lib/types";
 import { ScannerBridge } from "./scanner-bridge";
+import { NfcControl } from "./nfc-control";
 import { memberBindingScanToken, memberScanToken } from "@/lib/scan-codes";
 
 type OrphanBinding = {
@@ -58,14 +59,24 @@ export function MembersView({ canWrite = false }: { canWrite?: boolean }) {
     } catch (reason) { show(reason instanceof Error ? reason.message : "Could not clear the NFC registration.", "error"); }
   }
   const totalSpend = members.reduce((sum, member) => sum + member.lifetimeSpend, 0);
+  async function lookupScan(rawCode: string) {
+    const code = rawCode.trim();
+    if (!code) return;
+    try {
+      const matches = memberScanToken(code) || memberBindingScanToken(code)
+        ? [await apiRequest<MemberRecord>("/api/member-cards/lookup", { method: "POST", body: JSON.stringify({ code }) })]
+        : await apiRequest<MemberRecord[]>(`/api/members?q=${encodeURIComponent(code)}`);
+      setSearch("");
+      setMembers(matches);
+      if (!matches.length) show("No member matches this card.", "error");
+    } catch (reason) { show(reason instanceof Error ? reason.message : "Member card unavailable.", "error"); }
+  }
   const form = (member?: MemberRecord | null) => <form className="modal-form" onSubmit={(event) => save(event, member)} key={member?._id || "new"}><label className="field"><span>Full name</span><input name="name" defaultValue={member?.name} required autoFocus /></label><div className="form-grid two"><label className="field"><span>Phone</span><input name="phone" defaultValue={member?.phone} required /></label><label className="field"><span>Email · optional</span><input name="email" type="email" defaultValue={member?.email} /></label></div><div className="identity-fields"><Fingerprint /><div className="form-grid two"><label className="field"><span>Identity type</span><select name="identityType" defaultValue={member?.identityType || "NATIONAL_ID"}><option value="NATIONAL_ID">National ID</option><option value="PASSPORT">Passport</option><option value="BUSINESS_ID">Business ID</option><option value="OTHER">Other</option></select></label><label className="field"><span>{member?.identityLast4 ? `Replace identity · stored ending ${member.identityLast4}` : "Identity number · optional"}</span><input name="identityNumber" autoComplete="off" placeholder={member?.identityLast4 ? "Leave blank to keep current value" : "Exact lookup only; never displayed"} /></label></div><small>Protected as a keyed one-way lookup hash. The full number is not stored or returned by the API.</small></div><footer><button type="button" className="button button-secondary" onClick={() => member ? setEditing(null) : setOpen(false)}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Saving…" : member ? "Save member" : "Add & issue card"}</button></footer></form>;
   return <div className="page page-enter">
     <PageHeader eyebrow="COMMUNITY" title="Members" description="Find members by protected identity lookup, card scan, phone or member number." action={canWrite ? <AddButton onClick={() => setOpen(true)}>Add member</AddButton> : undefined} />
     {notice ? <Notice {...notice} /> : null}
-    <ScannerBridge contextLabel="Members" purpose="MEMBERS" placeholder="Scan member QR, NFC card or membership number" onFeedback={show} onScan={async code => {
-      try { const matches = memberScanToken(code) || memberBindingScanToken(code) ? [await apiRequest<MemberRecord>("/api/member-cards/lookup", { method: "POST", body: JSON.stringify({ code }) })] : await apiRequest<MemberRecord[]>(`/api/members?q=${encodeURIComponent(code)}`); setSearch(""); setMembers(matches); if (!matches.length) show("No member matches this card.", "error"); }
-      catch (reason) { show(reason instanceof Error ? reason.message : "Member card unavailable.", "error"); }
-    }} />
+    <ScannerBridge contextLabel="Members" purpose="MEMBERS" placeholder="Scan member QR, NFC card or membership number" onFeedback={show} onScan={lookupScan} />
+    <section className="workflow-nfc-reader no-print" aria-label="Members NFC reader"><header><div><span className="eyebrow">MEMBERS NFC READER · ALWAYS ON</span><h2>Tap to find a member</h2><p>The same linked phone works here and in POS. Tap an issued or bound card to find its member.</p></div><Nfc aria-hidden="true" /></header><NfcControl autoStart alwaysOn onRead={lookupScan} onGenericRead={lookupScan} disabled={loading} /></section>
     <section className="identity-lookup"><ShieldCheck /><div><strong>Private identity lookup</strong><span>The number is HMAC-protected and only exact matches are returned.</span></div><form onSubmit={exactIdentity}><input value={identitySearch} onChange={(event) => setIdentitySearch(event.target.value)} placeholder="Enter complete ID or passport number" autoComplete="off" /><button className="button button-secondary"><Search size={15} />Find exact match</button>{identitySearch ? <button type="button" className="button button-quiet" onClick={() => { setIdentitySearch(""); void load(); }}>Clear</button> : null}</form></section>
     <section className="mini-stat-row"><article><Users /><span>Members shown</span><strong>{members.length}</strong></article><article><Award /><span>Points in circulation</span><strong>{members.reduce((sum, member) => sum + member.points, 0).toLocaleString()}</strong></article><article><UserPlus /><span>Member lifetime sales</span><strong>{money.format(totalSpend)}</strong></article></section>
     {canWrite ? <section className="panel orphan-nfc-panel"><header className="panel-header"><div><span className="eyebrow">NFC HOUSEKEEPING</span><h2>Orphaned NFC registrations</h2><p>Cards that were recorded for a member who has since been archived or removed.</p></div><Trash2 /></header>{orphanLoading ? <LoadingPanel label="Checking NFC registrations…" /> : orphanCards.length ? <div className="orphan-nfc-list">{orphanCards.map((card) => <article key={card._id}><div className="orphan-nfc-mark"><CreditCard size={18} /></div><div className="orphan-nfc-copy"><strong>{card.label || "Existing NFC card"}</strong><span>{card.member?.name || "Member record missing"}{card.member?.memberNo ? ` · ${card.member.memberNo}` : ""}</span><small>{card.bindingSource === "NFC_SERIAL" ? "Hardware serial fingerprint" : "NDEF fingerprint"}{card.last4 ? ` · ending ${card.last4}` : ""} · {card.status}</small></div><button className="button button-quiet danger" onClick={() => void clearOrphan(card)}><Trash2 size={14} />Clear registration</button></article>)}</div> : <EmptyState title="No orphaned NFC cards" detail="When a member is archived, their existing-card binding will appear here for safe cleanup." />}</section> : null}

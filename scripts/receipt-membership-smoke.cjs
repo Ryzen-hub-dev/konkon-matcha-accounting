@@ -5,7 +5,7 @@ const path = require('node:path');
 const net = require('node:net');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
-const { randomBytes, randomUUID } = require('node:crypto');
+const { createHash, randomBytes, randomUUID } = require('node:crypto');
 const { MongoClient, ObjectId } = require('mongodb');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -107,6 +107,12 @@ async function main() {
     console.log('PASS orphan NFC listing and restricted archived-member lookup.');
     const activeCard = await api('/api/member-cards', 'POST', { ...cardBody, clientRequestId: randomUUID(), label: 'Phone NFC test' }, 201);
     const activeToken = (await api('/api/member-cards', 'POST', { action: 'REVEAL', id: activeCard._id })).token;
+    const nextMember = await api('/api/members', 'POST', { name: 'Next Tap Member', phone: '+60112233445' }, 201);
+    const nextCard = await api('/api/member-cards', 'POST', { ...cardBody, memberId: nextMember._id, clientRequestId: randomUUID(), label: 'Next tap card' }, 201);
+    const nextToken = (await api('/api/member-cards', 'POST', { action: 'REVEAL', id: nextCard._id })).token;
+    const existingSerial = 'AB-CD-01';
+    const existingCode = `KKNT1-S-${createHash('sha256').update('serial:' + existingSerial).digest('hex')}`;
+    await api('/api/member-cards', 'POST', { action: 'BIND', memberId: member._id, code: existingCode, clientRequestId: randomUUID(), label: 'Live reader existing card', tier: 'MATCHA CLUB', accentColor: '#173f2a' }, 201);
     const sale = await api('/api/sales', 'POST', { clientRequestId: randomUUID(), paymentMethod: 'CASH', tenderedAmount: 100, memberId: member._id, items: [{ productId: product._id, quantity: 2 }], saleNote: 'PRIVATE ORDER NOTE', paymentReference: 'PRIVATE PAY REF' }, 201);
     const documentsQa = require('./country-documents-smoke.cjs');
     const docFixtures = await documentsQa.apiChecks({ api, collection, base, cookie: () => cookie, member, sale });
@@ -149,9 +155,36 @@ async function main() {
     const { chromium } = require(path.join(process.argv[2], 'playwright'));
     browser = await chromium.launch({ headless: true, channel: 'msedge' });
     const staff = await browser.newContext({ viewport: { width: 1360, height: 1000 } });
+    const mockNfc = () => {
+      window.__readers = [];
+      window.NDEFReader = class {
+        async scan({ signal }) { this.signal = signal; window.__testReader = this; window.__readers.push(this); }
+        async write(message) { window.__writtenNdef = message; }
+      };
+    };
+    const tap = (target, code) => target.evaluate(async value => {
+      const bytes = new TextEncoder().encode(value);
+      await window.__testReader.onreading({ message: { records: [{ recordType: 'text', encoding: 'utf-8', data: new DataView(bytes.buffer) }] } });
+    }, code);
+    await staff.addInitScript(mockNfc);
     const [name, ...value] = cookie.split('='); await staff.addCookies([{ name, value: value.join('='), url: base, httpOnly: true, sameSite: 'Lax' }]);
     const page = await staff.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
-    await page.goto(base + '/pos'); await page.getByRole('button', { name: /Test Matcha Tea/ }).click();
+    await page.goto(base + '/pos'); await page.locator('.pos-nfc-reader [data-nfc-always-on="true"]').waitFor(); await page.getByRole('button', { name: /Test Matcha Tea/ }).click();
+    await page.waitForFunction(() => Boolean(window.__testReader));
+    const directLookup = page.waitForResponse(response => response.url().endsWith('/api/member-cards/lookup') && response.status() === 200);
+    await tap(page, activeToken);
+    assert.equal((await (await directLookup).json()).data._id, member._id);
+    assert.equal(await page.evaluate(() => window.__testReader.signal.aborted), false);
+    assert.equal(await page.getByRole('button', { name: 'NFC reader listening', exact: true }).isDisabled(), true);
+    const directNext = page.waitForResponse(response => response.url().endsWith('/api/member-cards/lookup') && response.status() === 200);
+    await tap(page, nextToken);
+    assert.equal((await (await directNext).json()).data._id, nextMember._id);
+    await page.waitForFunction(id => document.querySelector('.member-select select')?.value === id, nextMember._id);
+    const directExisting = page.waitForResponse(response => response.url().endsWith('/api/member-cards/lookup') && response.status() === 200);
+    await page.evaluate(async serialNumber => window.__testReader.onreading({ serialNumber, message: { records: [] } }), existingSerial);
+    assert.equal((await (await directExisting).json()).data._id, member._id);
+    await page.waitForFunction(id => document.querySelector('.member-select select')?.value === id, member._id);
+    console.log('PASS resident POS NFC automatically starts, reads consecutive members and existing cards without stopping.');
     const quantity = page.getByRole('textbox', { name: 'Test Matcha Tea quantity', exact: true });
     await quantity.fill('5'); await quantity.press('Tab'); assert.equal(await quantity.inputValue(), '5');
     await quantity.fill('999'); await quantity.press('Tab'); assert.equal(await quantity.inputValue(), '5');
@@ -163,6 +196,10 @@ async function main() {
     await api('/api/member-cards/lookup', 'POST', { code: orphanCode }, 410);
     console.log('PASS POS scanner orphan detection and code-based NFC cleanup.');
     await page.screenshot({ path: path.join(output, 'pos-quantity.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2), true);
+    await page.screenshot({ path: path.join(output, 'pos-nfc-mobile.png'), fullPage: true });
+    await page.setViewportSize({ width: 1360, height: 1000 });
     await page.goto(base + '/receipts');
     await page.getByRole('textbox', { name: 'Receipts barcode input' }).fill(sale.publicReceiptUrl);
     await page.getByRole('button', { name: 'Read code', exact: true }).click();
@@ -179,16 +216,57 @@ async function main() {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2), true);
     await page.screenshot({ path: path.join(output, 'member-card-mobile.png'), fullPage: true });
     await page.setViewportSize({ width: 1360, height: 1000 });
-    await page.goto(base + '/members');
+    await page.goto(base + '/members'); await page.locator('.workflow-nfc-reader [data-nfc-always-on="true"]').waitFor();
+    await page.waitForFunction(() => Boolean(window.__testReader));
+    await tap(page, nextToken);
+    await page.waitForFunction(() => document.querySelector('.member-grid')?.textContent.includes('Next Tap Member'));
     const phone = await browser.newContext({ viewport: { width: 390, height: 844 } });
     // Simulated browser device boundary; actual NFC hardware is not claimed tested.
-    await phone.addInitScript(() => { window.NDEFReader = class { async scan() { window.__testReader = this; } async write(message) { window.__writtenNdef = message; } }; });
+    await phone.addInitScript(mockNfc);
     const mobile = await phone.newPage(); await mobile.goto(base + '/scan/' + phoneToken);
     await mobile.waitForFunction(() => Boolean(window.__testReader));
     const memberLookup = page.waitForResponse(response => response.url().endsWith('/api/member-cards/lookup') && response.status() === 200);
     await mobile.evaluate(code => { const bytes = new TextEncoder().encode(code); window.__testReader.onreading({ message: { records: [{ recordType: 'text', encoding: 'utf-8', data: new DataView(bytes.buffer) }] } }); }, activeToken);
     assert.equal((await (await memberLookup).json()).data._id, member._id);
     await page.waitForFunction(() => document.querySelector('.member-grid')?.textContent.includes('Test Member'));
+    // Hold one card in place: only one outbound event; the reader stays live.
+    let posts = 0;
+    const countPosts = request => { if (request.url().endsWith('/api/mobile-scans') && request.method() === 'POST' && request.postDataJSON()?.code) posts++; };
+    mobile.on('request', countPosts);
+    await mobile.waitForFunction(() => document.querySelector('.nfc-control p')?.textContent.includes('Ready for the next card'));
+    await sleep(350);
+    const secondLookup = page.waitForResponse(response => response.url().endsWith('/api/member-cards/lookup') && response.status() === 200);
+    await Promise.all([tap(mobile, nextToken), tap(mobile, nextToken), tap(mobile, nextToken)]);
+    assert.equal((await (await secondLookup).json()).data._id, nextMember._id);
+    assert.equal(posts, 1);
+    mobile.off('request', countPosts);
+    // A hidden phone page is suspended by the browser, not disconnected by us.
+    await mobile.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    assert.equal(await mobile.evaluate(() => window.__testReader.signal.aborted), false);
+    await mobile.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event('visibilitychange')); });
+    assert.equal(await mobile.evaluate(() => window.__readers.length), 1);
+    // Switch the counter only: the same open phone reader follows POS.
+    await page.goto(base + '/pos');
+    await page.waitForFunction(() => document.querySelector('.scanner-bridge-live'));
+    const posPhoneLookup = page.waitForResponse(response => response.url().endsWith('/api/member-cards/lookup') && response.status() === 200);
+    await tap(mobile, activeToken);
+    assert.equal((await (await posPhoneLookup).json()).data._id, member._id);
+    assert.equal(await mobile.evaluate(() => window.__testReader.signal.aborted), false);
+    assert.equal(await mobile.evaluate(() => window.__readers.length), 1);
+    await page.waitForFunction(id => document.querySelector('.member-select select')?.value === id, member._id);
+    // A transient delivery failure must allow the same card to be retried.
+    await mobile.route('**/api/mobile-scans', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'Temporary test delivery failure' }) }), { times: 1 });
+    await tap(mobile, nextToken);
+    await mobile.waitForFunction(() => document.querySelector('.nfc-control p')?.textContent.includes('Tap it again to retry'));
+    const retryLookup = page.waitForResponse(response => response.url().endsWith('/api/member-cards/lookup') && response.status() === 200);
+    await tap(mobile, nextToken);
+    assert.equal((await (await retryLookup).json()).data._id, nextMember._id);
+    await page.waitForFunction(id => document.querySelector('.member-select select')?.value === id, nextMember._id);
+    console.log('PASS same phone NFC reader stays live across cards, duplicate bursts, background/foreground and Members-to-POS routing.');
+    console.log('PASS NFC same-card retry immediately after transient delivery failure.');
     await mobile.screenshot({ path: path.join(output, 'phone-nfc.png'), fullPage: true });
     await mobile.goto(base + `/card-write#card=${activeToken}`); await mobile.getByRole('heading', { name: 'Prepare an NFC card', exact: true }).waitFor(); await mobile.locator('.nfc-control button').waitFor(); await mobile.locator('.nfc-control button').click();
     const written = await mobile.evaluate(() => window.__writtenNdef.records[0].data); assert.equal(written, activeToken);

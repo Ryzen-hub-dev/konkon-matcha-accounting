@@ -38,7 +38,9 @@ export function EInvoiceGenerator({ sourceId, sourceType }: { sourceId: string; 
     setBusy(true); setError(""); setMessage("");
     try {
       await apiRequest("/api/e-invoices", { method: "POST", body: JSON.stringify({ sourceId, sourceType, clientRequestId: requestId.current, format, seller: party("seller"), buyer: party("buyer"), taxCategory: form.get("taxCategory"), taxReason: form.get("taxReason"), confirmed: form.get("confirmed") === "on", ...(format === "MYINVOIS_JSON" ? { malaysia: Object.fromEntries(["msic", "activity", "classification", "taxType", "sellerSst", "buyerSst"].map(key => [key, String(form.get(`malaysia.${key}`) || "")])) } : {}) }) });
-      requestId.current = crypto.randomUUID(); setMessage("Electronic document saved. Download it below. It has not been submitted or accepted by a tax authority."); await load();
+      requestId.current = crypto.randomUUID();
+      await load();
+      setMessage("Electronic document saved. Download it below. It has not been submitted or accepted by a tax authority.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not generate the e-invoice."); }
     finally { setBusy(false); }
   }
@@ -69,7 +71,7 @@ export function EInvoiceGenerator({ sourceId, sourceType }: { sourceId: string; 
           <label className="document-confirmation"><input type="checkbox" name="confirmed" required /><span>I checked the parties and tax treatment. I understand this creates an immutable preparation file, not a submitted or validated tax invoice.</span></label>
           <button className="button button-primary" disabled={busy}>{busy ? "Generating…" : "Generate and save file"}</button>
         </form> : data ? <p>Your role can download existing files. Ask an accountant or manager to generate one.</p> : null}
-        {data ? <section className="e-invoice-history"><h3>Saved document snapshots</h3>{data.history.length ? data.history.map(item => <article key={item._id}><div><strong>{item.format.replaceAll("_", " ")}</strong><small>{new Date(item.createdAt).toLocaleString()} · Not submitted</small><details><summary>Integrity checksum</summary><code>{item.sha256}</code></details></div><button className="button button-secondary" onClick={() => void download(item._id, item.filename)}><Download size={16} />Download</button></article>) : <p>No electronic files yet. The original invoice / receipt remains unchanged.</p>}</section> : null}
+        {data ? <section className="e-invoice-history"><h3>Saved document snapshots</h3>{data.history.length ? data.history.map(item => <article key={item._id}><div><strong>{item.format.replaceAll("_", " ")}</strong><small>{new Date(item.createdAt).toLocaleString()} · Not submitted</small><details><summary>Integrity checksum</summary><code>{item.sha256}</code></details></div><button className="button button-secondary" disabled={busy} onClick={() => void download(item._id, item.filename)}><Download size={16} />Download</button></article>) : <p>No electronic files yet. The original invoice / receipt remains unchanged.</p>}</section> : null}
       </div>
     </Modal>
   </>;
