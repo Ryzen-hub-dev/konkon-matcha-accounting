@@ -52,27 +52,87 @@ async function apiChecks({ api, collection, base, cookie, member, sale }) {
   await api('/api/scanner-sessions', 'DELETE', { id: pass.session._id });
   await api('/api/mobile-scans', 'POST', { action: 'CONNECT', token }, 410, false);
   await api('/api/member-cards', 'POST', { action: 'BIND', memberId: member._id, code, readerSessionId: pass.session._id, clientRequestId: randomUUID() }, 410);
+  const shared = await api('/api/scanner-sessions', 'POST', { label: 'Shared NFC permission test', purpose: 'MEMBERS' }, 201);
+  const sharedToken = new URL(shared.url).pathname.split('/').at(-1);
+  const leaseA = randomUUID(), leaseB = randomUUID();
+  await api('/api/scanner-sessions', 'PATCH', { id: shared.session._id, purpose: 'MEMBER_BIND', bindingMemberId: member._id }, 422);
+  await collection('users').updateOne({ username: 'testowner' }, { $set: { role: 'ACCOUNTANT' } });
+  try { await api('/api/scanner-sessions', 'PATCH', { id: shared.session._id, purpose: 'MEMBER_BIND', bindingMemberId: member._id, bindingLeaseId: leaseA }, 403); }
+  finally { await collection('users').updateOne({ username: 'testowner' }, { $set: { role: 'OWNER' } }); }
+  const borrow = { id: shared.session._id, purpose: 'MEMBER_BIND', bindingMemberId: member._id, bindingLeaseId: leaseA };
+  await api('/api/scanner-sessions', 'PATCH', borrow);
+  await api('/api/scanner-sessions', 'PATCH', borrow); // retry is idempotent
+  await api('/api/scanner-sessions', 'PATCH', { id: shared.session._id, purpose: 'POS' }, 410);
+  await api('/api/scanner-sessions', 'PATCH', { ...borrow, bindingMemberId: otherMember._id, bindingLeaseId: leaseB }, 409);
+  await api('/api/mobile-scans', 'POST', { token: sharedToken, code: '9551234567890' }, 422, false);
+  await api('/api/mobile-scans', 'POST', { token: sharedToken, code }, 201, false);
+  await api('/api/scanner-sessions', 'PATCH', { ...borrow, purpose: 'MEMBERS', bindingLeaseId: randomUUID() }, 410);
+  await api('/api/scanner-sessions', 'PATCH', { ...borrow, purpose: 'MEMBERS' });
+  await api('/api/scanner-sessions', 'PATCH', { ...borrow, bindingMemberId: otherMember._id, bindingLeaseId: leaseB });
+  // A delayed event from the previous binding must never reach the next member.
+  await collection('scannerEvents').insertOne({ scannerSessionId: new ObjectId(shared.session._id), purpose: 'MEMBER_BIND', bindingLeaseId: leaseA, code, consumedAt: null, createdAt: new Date(), expiresAt: new Date(Date.now() + 60000) });
+  const sharedQuery = `/api/mobile-scans?sessionId=${shared.session._id}&purpose=MEMBER_BIND&memberId=${otherMember._id}&consumerId=${randomUUID()}`;
+  await api(sharedQuery + '&bindingLeaseId=' + leaseA, 'GET', undefined, 409);
+  assert.deepEqual(await api(sharedQuery + '&bindingLeaseId=' + leaseB), []);
+  await api('/api/member-cards', 'POST', { action: 'BIND', memberId: otherMember._id, code: `KKNT1-S-${randomBytes(32).toString('hex')}`, readerSessionId: shared.session._id, readerBindingLeaseId: leaseA, clientRequestId: randomUUID() }, 409);
+  await api('/api/scanner-sessions', 'PATCH', { id: shared.session._id, purpose: 'MEMBERS', bindingMemberId: otherMember._id, bindingLeaseId: leaseB });
+  await api('/api/mobile-scans', 'POST', { action: 'CONNECT', token: sharedToken }, 200, false);
+  await api('/api/scanner-sessions', 'DELETE', { id: shared.session._id });
+  console.log('PASS shared NFC binding permissions, member locking, stale-event isolation, retry and pass reuse after release.');
   console.log('PASS e-invoice generation/download, encrypted immutable history, concurrent retry, role/origin/source guards and member-locked NFC reader.');
   return { invoice, body, query };
 }
 
-async function browserChecks({ page, mobile, api, member, base, output, fixtures }) {
-  await page.goto(base + `/members/${member._id}/card`);
-  await page.getByRole('button', { name: 'Connect another phone', exact: true }).click();
-  const readerLink = page.getByRole('link', { name: 'Open reader pass', exact: true }); await readerLink.waitFor();
-  await mobile.goto(await readerLink.getAttribute('href'));
-  await mobile.getByRole('heading', { name: 'Member binding reader', exact: true }).waitFor();
+async function browserChecks({ page, mobile, api, member, base, output, fixtures, phoneToken, passId, activeToken }) {
+  await mobile.goto(base + '/scan/' + phoneToken);
   await mobile.waitForFunction(() => Boolean(window.__testReader));
+  await page.goto(base + `/members/${member._id}/card`);
+  await page.getByRole('button', { name: 'Use connected NFC phone', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish binding', exact: true }).waitFor();
+  assert.equal(await page.getByRole('link', { name: 'Open reader pass', exact: true }).count(), 0, 'Reusing a phone needs no new QR');
+  await mobile.evaluate(async () => window.__testReader.onreading({ serialNumber: '11:22:AB:CD:98', message: { records: [] } }));
+  await page.getByRole('button', { name: 'Discard and read again', exact: true }).click();
+  assert.equal(await mobile.evaluate(() => window.__testReader.signal.aborted), false);
   await mobile.evaluate(() => { window.__testReader.onreading({ serialNumber: '11:22:AB:CD:99', message: { records: [] } }); });
   await page.getByRole('button', { name: 'Confirm NFC binding', exact: true }).waitFor();
   await page.screenshot({ path: path.join(output, 'remote-nfc-confirm.png'), fullPage: true });
   await mobile.screenshot({ path: path.join(output, 'remote-nfc-phone.png'), fullPage: true });
   const previous = (await api(`/api/member-cards?memberId=${member._id}`)).length;
   await page.getByRole('button', { name: 'Confirm NFC binding', exact: true }).click();
-  await page.getByText(`NFC card bound to ${member.name}. The card was not changed.`, { exact: true }).waitFor();
+  await page.getByText(`NFC card bound to ${member.name}. The card was not changed. The reader stays ready.`, { exact: true }).waitFor();
   assert.equal((await api(`/api/member-cards?memberId=${member._id}`)).length, previous + 1);
-  await page.getByRole('button', { name: 'Disconnect', exact: true }).click();
-  await page.getByRole('button', { name: 'Connect another phone', exact: true }).waitFor();
+  assert.ok((await api('/api/scanner-sessions?purpose=MEMBERS')).sessions.some(s => s._id === passId && s.purpose === 'MEMBERS'));
+  assert.equal(await mobile.evaluate(() => window.__readers.length), 1);
+  assert.equal(await mobile.evaluate(() => window.__testReader.signal.aborted), false);
+  await page.goto(base + '/members');
+  await page.waitForFunction(() => document.querySelector('.scanner-bridge-live'));
+  await mobile.evaluate(async token => { const data = new TextEncoder().encode(token); await window.__testReader.onreading({ message: { records: [{ recordType: 'text', data: new DataView(data.buffer) }] } }); }, activeToken);
+  await page.waitForFunction(() => document.querySelector('.member-grid')?.textContent.includes('Test Member'));
+  await page.goto(base + `/members/${member._id}/card`);
+  await page.getByRole('button', { name: 'Use connected NFC phone', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish binding', exact: true }).waitFor();
+  // Make the next screen mount before the old binding releases its phone.
+  const delayRelease = async route => {
+    if (route.request().method() === 'PATCH' && route.request().postDataJSON()?.purpose === 'MEMBERS') await new Promise(resolve => setTimeout(resolve, 700));
+    await route.continue();
+  };
+  await page.route('**/api/scanner-sessions', delayRelease);
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Point of sale', exact: true }).click();
+  await page.waitForURL('**/pos');
+  await page.waitForFunction(() => document.querySelector('.scanner-bridge-live'));
+  assert.ok((await api('/api/scanner-sessions?purpose=POS')).sessions.some(s => s._id === passId && s.purpose === 'POS'));
+  assert.equal(await mobile.evaluate(() => window.__readers.length), 1);
+  await page.unroute('**/api/scanner-sessions', delayRelease);
+  console.log('PASS leaving an unfinished binding automatically reconnects POS after a delayed release.');
+  await page.goto(base + `/members/${member._id}/card`);
+  await page.getByRole('button', { name: 'Link a new phone', exact: true }).click();
+  const readerLink = page.getByRole('link', { name: 'Open reader pass', exact: true }); await readerLink.waitFor();
+  const newToken = new URL(await readerLink.getAttribute('href')).pathname.split('/').at(-1);
+  await page.getByRole('button', { name: 'Finish binding', exact: true }).click();
+  await page.getByRole('button', { name: 'Use connected NFC phone', exact: true }).waitFor();
+  const released = await api('/api/mobile-scans', 'POST', { action: 'CONNECT', token: newToken }, 200, false);
+  assert.equal(released.purpose, 'MEMBERS');
+  console.log('PASS shared phone binding/discard/confirm and lookup without restarting NFC; new phone pairing also releases to lookup.');
   await page.goto(base + '/reports');
   await page.getByRole('tab', { name: 'Country report desk', exact: true }).click();
   await page.getByLabel('Reporting country / region').selectOption('GB');

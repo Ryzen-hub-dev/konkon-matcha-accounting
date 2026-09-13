@@ -1,6 +1,7 @@
 "use client";
 
-import { ReactNode, useCallback, useState } from "react";
+import { ReactNode, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertCircle, Check, LoaderCircle, Plus, X } from "lucide-react";
 
 export const money = new Intl.NumberFormat("en-SG", { style: "currency", currency: "SGD" });
@@ -98,21 +99,57 @@ export function LoadingPanel({ label = "Whisking the numbers…" }: { label?: st
 
 export function Modal({ open, title, kicker, children, onClose }: { open: boolean; title: string; kicker?: string; children: ReactNode; onClose: () => void }) {
   if (!open) return null;
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  return <ModalSurface title={title} kicker={kicker} onClose={onClose}>{children}</ModalSurface>;
+}
+
+let openModalCount = 0;
+let previousPageOverflow = "";
+function ModalSurface({ title, kicker, children, onClose }: { title: string; kicker?: string; children: ReactNode; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current!;
+    if (openModalCount++ === 0) { previousPageOverflow = document.documentElement.style.overflow; document.documentElement.style.overflow = "hidden"; }
+    dialog.showModal();
+    window.dispatchEvent(new Event("konkon:modal-change"));
+    return () => { dialog.close(); if (--openModalCount === 0) document.documentElement.style.overflow = previousPageOverflow; window.dispatchEvent(new Event("konkon:modal-change")); };
+  }, []);
+  // Native top-layer dialogs escape transformed page/card ancestors, keep
+  // keyboard focus inside, and restore focus when the dialog closes.
+  return createPortal(
+    <dialog ref={dialogRef} className="modal-backdrop" aria-labelledby={titleId} onCancel={event => { event.preventDefault(); onClose(); }} onPointerDown={event => { if (event.target === event.currentTarget) onClose(); }} onKeyDown={event => {
+      if (event.key !== "Tab") return;
+      const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+        .filter(control => control.tabIndex >= 0 && control.getClientRects().length > 0 && !control.closest('[inert], [hidden]'));
+      const first = controls[0], last = controls[controls.length - 1];
+      if (!first) { event.preventDefault(); return; }
+      // Keep Tab/Shift+Tab cycling through form controls, including after an
+      // async save error. Native inertness still protects the underlying page.
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }}>
+      <section className="modal-card">
         <header>
-          <div>{kicker ? <span className="eyebrow">{kicker}</span> : null}<h2 id="modal-title">{title}</h2></div>
-          <button className="icon-button" onClick={onClose} aria-label="Close dialog"><X size={20} /></button>
+          <div>{kicker ? <span className="eyebrow">{kicker}</span> : null}<h2 id={titleId}>{title}</h2></div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close dialog"><X size={20} /></button>
         </header>
         {children}
       </section>
-    </div>
+    </dialog>, document.body,
   );
 }
 
 export function Notice({ message, tone = "success" }: { message: string; tone?: "success" | "error" }) {
-  return <div className={`notice notice-${tone}`} role="status">{tone === "success" ? <Check size={17} /> : <AlertCircle size={17} />}<span>{message}</span></div>;
+  const [target, setTarget] = useState<Element | null>(null);
+  useLayoutEffect(() => {
+    const followDialog = () => { const dialogs = document.querySelectorAll("dialog.modal-backdrop[open]"); setTarget(dialogs.item(dialogs.length - 1)); };
+    followDialog();
+    window.addEventListener("konkon:modal-change", followDialog);
+    return () => window.removeEventListener("konkon:modal-change", followDialog);
+  }, []);
+  const content = <div className={`notice notice-${tone}`} role="status">{tone === "success" ? <Check size={17} /> : <AlertCircle size={17} />}<span>{message}</span></div>;
+  // Form errors must stay visible above the active native dialog as well.
+  return target ? createPortal(content, target) : content;
 }
 
 export function useNotice() {

@@ -40,13 +40,13 @@ Generation + source locking + audit run in a MongoDB transaction. A unique opera
 
 ## Use another phone for NFC binding
 
-1. On the counter, open **Members → member card → Connect another phone**.
-2. Scan the private QR with a compatible Android phone and open its HTTPS link.
-3. The phone automatically starts NFC listening when the pass opens. On the first browser permission prompt, tap **Start NFC (if needed)** once, then hold one readable card against it.
+1. On the counter, open **Members → member card → Tap-to-read NFC**.
+2. Choose **Use connected NFC phone** to reuse the POS/Members phone with no new QR. If no phone is linked, choose **Connect NFC phone**, or choose **Link a new phone** to pair another Android phone.
+3. The phone automatically starts NFC listening when its pass opens. On first use, tap **Start NFC reader** once if permission is needed, then hold a readable card against it. The same-device reader is part of the same panel.
 4. The counter displays the protected fingerprint suffix and target member. Click **Confirm NFC binding** or discard the read.
-5. Use **Disconnect** to revoke the link immediately. A counter refresh resumes an existing reader for that member; the original private URL is only shown when issued.
+5. Confirmation or **Finish binding** returns a shared pass to member lookup without stopping the phone reader. Discarding a card leaves it listening for the next tap. Use the scanner-management revoke action to invalidate a phone pass. Existing legacy dedicated passes still revoke on finish.
 
-The new `MEMBER_BIND` purpose is locked to one member and the issuing operator. POS, Inventory, Receipts and Members lookup routing cannot adopt or retarget it. It needs `members.write`, an open workspace, current operator access and an active target. Normal pass expiry (up to 24 hours), revocation, session-version and scanner-generation invalidation still apply. The phone sends only protected NFC fingerprints; it cannot query member data. Fingerprints are encrypted while queued, and the persistent binding is keyed/hashed. Binding does not write or erase the physical card. Existing same-phone binding and issued-card writing remain available.
+`MEMBER_BIND` temporarily locks a shared phone to one member and the issuing operator. Other lookup screens cannot take it over during confirmation. A unique binding reservation ID scopes queue reads, confirmations and release; delayed events or cleanup from an old reservation cannot affect the next member. It needs `members.write`, an open workspace, current operator access and an active target. Normal pass expiry (up to 24 hours), revocation, session-version and scanner-generation invalidation still apply. The phone cannot query member data. Fingerprints are encrypted while queued, and the persistent binding is keyed/hashed. Binding does not write or erase the physical card. Issued-card writing remains a separate explicit action.
 
 Web NFC requires compatible Android Chrome, HTTPS, NFC permission, foreground page and a readable NDEF tag. Some hotel/transit/payment cards are inaccessible. iPhone browser NFC and arbitrary low-level card access are not supplied by Web NFC. Static NFC identities can be copied; this is membership lookup, **not** payment authorization or a clone-resistant authentication factor. Real card/device compatibility requires physical acceptance testing; automated QA simulates the browser NFC device boundary.
 

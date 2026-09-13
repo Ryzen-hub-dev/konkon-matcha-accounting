@@ -19,12 +19,13 @@ const purposeSchema = z.enum(SCANNER_PURPOSES);
 const consumerIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,80}$/);
 const consumeSchema = z.object({ sessionId: z.string().length(24), consumerId: consumerIdSchema, eventIds: z.array(z.string().length(24)).min(1).max(50) });
 
-async function claimPendingEvents(db: Awaited<ReturnType<typeof getDb>>, scannerSessionId: ObjectId, consumerId: string, purpose: ScannerPurpose) {
-  const route = scannerPurposeFilter(purpose);
-  const owned = await db.collection("scannerEvents").find({ scannerSessionId, consumedAt: null, claimedBy: consumerId, ...route }).sort({ createdAt: 1 }).limit(50).toArray();
+async function claimPendingEvents(db: Awaited<ReturnType<typeof getDb>>, scannerSessionId: ObjectId, consumerId: string, purpose: ScannerPurpose, bindingLeaseId?: string) {
+  const route = { ...scannerPurposeFilter(purpose), ...(purpose === "MEMBER_BIND" ? { bindingLeaseId: bindingLeaseId || { $exists: false } } : {}) };
+  const limit = purpose === "MEMBER_BIND" ? 1 : 50;
+  const owned = await db.collection("scannerEvents").find({ scannerSessionId, consumedAt: null, claimedBy: consumerId, ...route }).sort({ createdAt: 1 }).limit(limit).toArray();
   if (owned.length) return owned;
   const claimed = [];
-  for (let index = 0; index < 50; index += 1) {
+  for (let index = 0; index < limit; index += 1) {
     const now = new Date();
     const event = await db.collection("scannerEvents").findOneAndUpdate(
       { scannerSessionId, consumedAt: null, ...route, $and: [{ $or: [{ claimedBy: { $exists: false } }, { claimExpiresAt: { $lte: now } }] }] },
@@ -37,10 +38,10 @@ async function claimPendingEvents(db: Awaited<ReturnType<typeof getDb>>, scanner
   return claimed;
 }
 
-async function waitForPendingEvents(db: Awaited<ReturnType<typeof getDb>>, scannerSessionId: ObjectId, consumerId: string, purpose: ScannerPurpose, wait: boolean) {
+async function waitForPendingEvents(db: Awaited<ReturnType<typeof getDb>>, scannerSessionId: ObjectId, consumerId: string, purpose: ScannerPurpose, wait: boolean, bindingLeaseId?: string) {
   const startedAt = Date.now();
   do {
-    const events = await claimPendingEvents(db, scannerSessionId, consumerId, purpose);
+    const events = await claimPendingEvents(db, scannerSessionId, consumerId, purpose, bindingLeaseId);
     if (events.length || !wait || Date.now() - startedAt >= 3_000) return { events, waitedMs: Date.now() - startedAt };
     await new Promise((resolve) => setTimeout(resolve, 250));
   } while (true);
@@ -81,7 +82,7 @@ export async function POST(request: Request) {
     const purpose = scannerPurpose(session.purpose);
     const eventId = new ObjectId();
     const protectedCode = Boolean(memberScanToken(code) || memberBindingScanToken(code) || receiptScanToken(code));
-    const event = { _id: eventId, scannerSessionId: session._id, purpose, ...(protectedCode ? { encryptedCode: encryptMemberToken(code, `scan:${eventId.toHexString()}`) } : { code }), consumedAt: null, expiresAt: session.expiresAt, createdAt: now };
+    const event = { _id: eventId, scannerSessionId: session._id, purpose, ...(purpose === "MEMBER_BIND" && session.bindingLeaseId ? { bindingLeaseId: session.bindingLeaseId } : {}), ...(protectedCode ? { encryptedCode: encryptMemberToken(code, `scan:${eventId.toHexString()}`) } : { code }), consumedAt: null, expiresAt: session.expiresAt, createdAt: now };
     const result = await db.collection("scannerEvents").insertOne(event);
     await db.collection("scannerSessions").updateOne({ _id: session._id }, { $set: { lastUsedAt: now, updatedAt: now } });
     return created({ eventId: result.insertedId.toHexString(), accepted: true, purpose });
@@ -108,6 +109,7 @@ export async function GET(request: Request) {
     const session = await db.collection("scannerSessions").findOne({
       _id: new ObjectId(sessionId),
       createdBy: new ObjectId(auth.session.id),
+      ownerSessionVersion: auth.session.sessionVersion,
       revokedAt: { $exists: false },
       expiresAt: { $gt: new Date() },
       generation: control.scannerGeneration,
@@ -115,7 +117,9 @@ export async function GET(request: Request) {
     });
     if (!session) return fail("The scanner link is no longer active.", 410);
     if (purpose.data === "MEMBER_BIND" && session.bindingMemberId !== url.searchParams.get("memberId")) return fail("This NFC reader belongs to another member.", 409);
-    const { events, waitedMs } = await waitForPendingEvents(db, session._id, consumerId, purpose.data, wait);
+    if (purpose.data === "MEMBER_BIND" && session.bindingLeaseId && session.bindingLeaseId !== url.searchParams.get("bindingLeaseId")) return fail("This card binding has changed. Reload the reader.", 409);
+    const { events, waitedMs } = await waitForPendingEvents(db, session._id, consumerId, purpose.data, wait, session.bindingLeaseId);
+    if (purpose.data === "MEMBER_BIND" && !await db.collection("scannerSessions").findOne({ _id: session._id, purpose: "MEMBER_BIND", bindingMemberId: session.bindingMemberId, bindingLeaseId: session.bindingLeaseId || { $exists: false }, revokedAt: { $exists: false } })) return fail("This card binding has changed. Reload the reader.", 409);
     const response = ok(events.map((event) => ({ _id: event._id.toHexString(), code: event.encryptedCode ? decryptMemberToken(event.encryptedCode, `scan:${event._id.toHexString()}`) : event.code, createdAt: event.createdAt })));
     response.headers.set("Cache-Control", "private, no-store, max-age=0");
     response.headers.set("X-Scanner-Wait-Ms", String(waitedMs));

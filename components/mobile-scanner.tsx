@@ -44,6 +44,7 @@ export function MobileScanner({ token }: { token: string }) {
     busyRef.current = true;
     try {
       const result = await apiRequest<{ purpose: ScannerPurpose }>("/api/mobile-scans", { method: "POST", body: JSON.stringify({ token, code }) });
+      setNfcBinding(result.purpose === "MEMBER_BIND");
       lastRef.current = { code, at: now };
       setStatus(result.purpose === "MEMBER_BIND" ? "Card sent. Confirm the binding on the counter screen." : `Scan sent to ${result.purpose === "POS" ? "Point of sale" : result.purpose.toLowerCase()}.`);
       setTone("good");
@@ -69,6 +70,8 @@ export function MobileScanner({ token }: { token: string }) {
     setTorchAvailable(false);
     setTorchOn(false);
   }, []);
+
+  useEffect(() => { if (nfcBinding) stop(); }, [nfcBinding, stop]);
 
   const start = useCallback(async (automatic = false) => {
     if (cameraActiveRef.current || !videoRef.current) return;
@@ -190,7 +193,7 @@ export function MobileScanner({ token }: { token: string }) {
       <button className="button button-primary mobile-camera-button" onClick={() => cameraActive ? stop() : void start()} disabled={!paired}>{cameraActive ? <CameraOff /> : <Camera />}{cameraActive ? "Stop camera" : paired ? "Start camera" : "Pairing…"}</button>
       <div className="decoder-label"><Radio />{decoder}</div>
       <form className="manual-scan" onSubmit={submit}><label><Keyboard /><input name="code" autoCapitalize="characters" autoComplete="off" placeholder="Type or scan a barcode" required /></label><button disabled={!paired}>Send barcode</button></form></section> : null}
-      <section className={`scanner-lane nfc-lane ${nfcBinding ? "nfc-lane-primary" : ""}`}><header><span className="eyebrow">NFC CARD READER</span><h2>{nfcBinding ? "Member binding reader" : "Tap-to-read NFC"}</h2><p>{nfcBinding ? "This phone only sends a protected card fingerprint. Confirm the member on the counter screen; it cannot sell or view member details." : "This reader is separate from the barcode scanner and stays on while the pass is open."}</p></header><NfcControl autoStart alwaysOn={!nfcBinding} onRead={nfcBinding ? undefined : send} onGenericRead={send} stopAfterGeneric={nfcBinding} disabled={!paired} /></section>
+      <section className={`scanner-lane nfc-lane ${nfcBinding ? "nfc-lane-primary" : ""}`}><header><span className="eyebrow">NFC CARD READER</span><h2>Tap-to-read NFC</h2><p>{nfcBinding ? "Tap an existing card and confirm its member on the counter. This same reader stays open for your next card." : "Use this reader for Members and POS. It stays on while this page is open."}</p></header><NfcControl autoStart alwaysOn onRead={send} onGenericRead={send} disabled={!paired} /></section>
       <div className={`scanner-status ${tone}`} aria-live="polite">{tone === "good" ? <CheckCircle2 /> : <span className="scanner-status-dot" />}<span>{status}</span></div>
       <footer><span>PASS VALIDITY</span><strong>Up to 24 hours</strong><i /></footer>
     </section>

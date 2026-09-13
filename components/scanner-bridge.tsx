@@ -38,6 +38,7 @@ export function ScannerBridge({
   const onScanRef = useRef(onScan);
   const consumerIdRef = useRef(crypto.randomUUID());
   const selectedIdRef = useRef("");
+  const loadVersion = useRef(0);
   onScanRef.current = onScan;
 
   const feedback = useCallback((message: string, tone: "success" | "error" = "success") => {
@@ -45,8 +46,10 @@ export function ScannerBridge({
   }, [onFeedback]);
 
   const loadSessions = useCallback(async (preferredId?: string) => {
+    const version = ++loadVersion.current;
     try {
       const result = await apiRequest<{ sessions: ScannerSession[] }>(`/api/scanner-sessions?purpose=${purpose}`);
+      if (version !== loadVersion.current) return;
       let nextSessions = result.sessions;
       let selected = selectScannerSession(nextSessions, purpose, preferredId, selectedIdRef.current);
       if (selected && selected.purpose !== purpose) {
@@ -54,6 +57,7 @@ export function ScannerBridge({
           method: "PATCH",
           body: JSON.stringify({ id: selected._id, purpose }),
         });
+        if (version !== loadVersion.current) return;
         nextSessions = nextSessions.map((session) => session._id === selected._id ? selected : session);
         feedback(`${selected.label} now sends scans to ${contextLabel}.`);
       }
@@ -61,11 +65,17 @@ export function ScannerBridge({
       selectedIdRef.current = selected?._id || "";
       setSelectedId(selectedIdRef.current);
     } catch (reason) {
+      if (version !== loadVersion.current) return;
       feedback(reason instanceof Error ? reason.message : "Could not load scanner links.", "error");
     }
   }, [contextLabel, feedback, purpose]);
 
-  useEffect(() => { void loadSessions(); }, [loadSessions]);
+  useEffect(() => {
+    const reconnect = () => { void loadSessions(); };
+    window.addEventListener("konkon:nfc-binding-released", reconnect);
+    reconnect();
+    return () => { loadVersion.current++; window.removeEventListener("konkon:nfc-binding-released", reconnect); };
+  }, [loadSessions]);
 
   useEffect(() => {
     let cancelled = false;

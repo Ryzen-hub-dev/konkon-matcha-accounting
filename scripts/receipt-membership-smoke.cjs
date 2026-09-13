@@ -27,7 +27,8 @@ async function main() {
       const runtime = require(path.join(root, 'node_modules/mongodb-memory-server'));
       const { MongoBinary } = require(path.join(root, 'node_modules/mongodb-memory-server-core'));
       const binary = await MongoBinary.getPath({ version: '7.0.24' });
-      replica = new runtime.MongoMemoryReplSet({ binary: { systemBinary: binary, version: '7.0.24' }, replSet: { count: 1, ip: '127.0.0.1', storageEngine: 'wiredTiger', spawn: { windowsHide: true }, args: ['--wiredTigerCacheSizeGB', '0.25', '--oplogSize', '16'] }, instanceOpts: [{ dbPath: runPath, launchTimeout: 60000 }] });
+      // Keep the database process in its disposable local directory, outside synced workspaces.
+      replica = new runtime.MongoMemoryReplSet({ binary: { systemBinary: binary, version: '7.0.24' }, replSet: { count: 1, ip: '127.0.0.1', storageEngine: 'wiredTiger', spawn: { windowsHide: true, cwd: runPath }, args: ['--wiredTigerCacheSizeGB', '0.25', '--oplogSize', '16'] }, instanceOpts: [{ dbPath: runPath, launchTimeout: 60000 }] });
       await replica.start();
       uri = replica.getUri(); assert.match(uri, /^mongodb:\/\/127\.0\.0\.1:/);
     }
@@ -61,6 +62,15 @@ async function main() {
     const product = await api('/api/products', 'POST', { sku: 'QA-TEA', barcode: '9551234567890', name: 'Test Matcha Tea', category: 'Tea', unit: 'pack', price: 10, cost: 3, stock: 20, reorderLevel: 2 }, 201);
     const member = await api('/api/members', 'POST', { name: 'Test Member', phone: '+60123456789', email: 'member@test.example', identityNumber: 'TEST12345', identityType: 'NATIONAL_ID' }, 201);
     assert.ok(!JSON.stringify(member).includes('identityLookupHash'));
+    if (process.argv.includes('--ui-only')) {
+      const { chromium } = require(path.join(process.argv[2], 'playwright'));
+      browser = await chromium.launch({ headless: true, channel: 'msedge' });
+      const context = await browser.newContext();
+      const [name, ...value] = cookie.split('=');
+      await context.addCookies([{ name, value: value.join('='), url: base, httpOnly: true, sameSite: 'Lax' }]);
+      await require('./ui-interactions-smoke.cjs')({ page: await context.newPage(), base, output });
+      return;
+    }
     const cardBody = { memberId: member._id, clientRequestId: randomUUID(), label: 'Primary NFC card', tier: 'MATCHA GOLD', accentColor: '#173f2a' };
     const issued = await Promise.all([api('/api/member-cards', 'POST', cardBody, [200, 201]), api('/api/member-cards', 'POST', cardBody, [200, 201])]);
     const card = issued[0]; assert.equal(issued[1]._id, card._id);
@@ -175,7 +185,7 @@ async function main() {
     await tap(page, activeToken);
     assert.equal((await (await directLookup).json()).data._id, member._id);
     assert.equal(await page.evaluate(() => window.__testReader.signal.aborted), false);
-    assert.equal(await page.getByRole('button', { name: 'NFC reader listening', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('status', { name: 'NFC reader listening', exact: true }).isVisible(), true);
     const directNext = page.waitForResponse(response => response.url().endsWith('/api/member-cards/lookup') && response.status() === 200);
     await tap(page, nextToken);
     assert.equal((await (await directNext).json()).data._id, nextMember._id);
@@ -278,10 +288,14 @@ async function main() {
     assert.equal(exportData.items[0].refundedQuantity, 1);
     assert.equal(exportData.tenderedAmount, 100);
     await mobile.screenshot({ path: path.join(output, 'customer-receipt-mobile.png'), fullPage: true });
-    await documentsQa.browserChecks({ page, mobile, api, member, base, output, fixtures: docFixtures });
+    await documentsQa.browserChecks({ page, mobile, api, member, base, output, fixtures: docFixtures, phoneToken, passId: pass.session._id, activeToken });
+    await require('./ui-interactions-smoke.cjs')({ page, base, output });
     assert.deepEqual(errors, []);
     await api('/api/scanner-sessions', 'DELETE', { id: pass.session._id }); await api('/api/mobile-scans', 'POST', { token: phoneToken, code: activeToken }, 410, false);
     console.log('PASS real browser quantity editing, scanner receipt navigation, card management, mobile receipt export; simulated NFC read/write boundary.');
+  } catch (error) {
+    console.error('ACCEPTANCE FAILURE:', String(error.stack || error).replace(/mongodb(?:\+srv)?:\/\/\S+/gi, '[redacted connection]').slice(0, 4000));
+    throw error;
   } finally {
     await browser?.close();
     if (server) { server.kill(); await sleep(1000); }
@@ -289,7 +303,7 @@ async function main() {
     await client?.close(); await replica?.stop({ doCleanup: false });
     const actual = await fs.realpath(runPath);
     assert.equal(path.dirname(actual), tempRoot); assert.match(path.basename(actual), /^konkon-commerce-[a-zA-Z0-9]+$/);
-    await fs.rm(actual, { recursive: true });
+    await fs.rm(actual, { recursive: true, maxRetries: 10, retryDelay: 500 });
     console.log('CLEANUP isolated temporary database removed; production untouched.');
   }
 }

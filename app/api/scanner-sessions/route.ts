@@ -1,4 +1,5 @@
 import { ObjectId } from "mongodb";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
@@ -13,8 +14,8 @@ import { OwnerRecoveryError, readOwnerRecoveryJson } from "@/lib/owner-recovery"
 export const runtime = "nodejs";
 
 const purposeSchema = z.enum(SCANNER_PURPOSES);
-const createSchema = z.object({ label: z.string().trim().min(2).max(60).default("Mobile scanner"), purpose: purposeSchema.default("POS"), bindingMemberId: z.string().regex(/^[a-f0-9]{24}$/i).optional() });
-const routeSchema = z.object({ id: z.string().length(24), purpose: purposeSchema });
+const createSchema = z.object({ label: z.string().trim().min(2).max(60).default("Mobile scanner"), purpose: purposeSchema.default("POS"), bindingMemberId: z.string().regex(/^[a-f0-9]{24}$/).optional(), sharedReader: z.boolean().default(false) });
+const routeSchema = z.object({ id: z.string().length(24), purpose: purposeSchema, bindingMemberId: z.string().regex(/^[a-f0-9]{24}$/).optional(), bindingLeaseId: z.string().uuid().optional() }).strict();
 const revokeSchema = z.object({ id: z.string().length(24) });
 
 export async function GET(request: Request) {
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
     const sessions = await db.collection("scannerSessions").find({
       ...(requestedPurpose.data === "MEMBER_BIND" ? { purpose: "MEMBER_BIND", bindingMemberId: new URL(request.url).searchParams.get("memberId") || "" } : { purpose: { $ne: "MEMBER_BIND" } }),
       createdBy: new ObjectId(auth.session.id),
+      ownerSessionVersion: auth.session.sessionVersion,
       revokedAt: { $exists: false },
       expiresAt: { $gt: now },
       generation: control.scannerGeneration,
@@ -63,6 +65,7 @@ export async function POST(request: Request) {
       label: input.data.label,
       purpose: input.data.purpose,
       ...(input.data.purpose === "MEMBER_BIND" ? { bindingMemberId: input.data.bindingMemberId } : {}),
+      ...(input.data.purpose === "MEMBER_BIND" && input.data.sharedReader ? { bindingLeaseId: randomUUID(), resumePurpose: "MEMBERS" } : {}),
       tokenHash: scannerTokenHash(token),
       generation: control.scannerGeneration,
       createdBy: new ObjectId(auth.session.id),
@@ -88,15 +91,48 @@ export async function PATCH(request: Request) {
   try {
     const input = routeSchema.safeParse(await readOwnerRecoveryJson(request));
     if (!input.success || !ObjectId.isValid(input.data?.id || "")) return fail("Choose an active scanner destination.", 422);
-    if (input.data.purpose === "MEMBER_BIND") return fail("Issue a dedicated NFC reader from the member card screen.", 422);
     if (!hasPermission(auth.session.role, scannerPermission(input.data.purpose))) return fail("You cannot use this scanner destination.", 403);
     const db = await getDb();
     const control = await getSystemControl(db);
     if (control.mode !== "OPEN") return fail("Scanner routing can only change while the workspace is open.", 423);
     const now = new Date();
+    const owned = { _id: new ObjectId(input.data.id), createdBy: new ObjectId(auth.session.id), ownerSessionVersion: auth.session.sessionVersion, revokedAt: { $exists: false }, expiresAt: { $gt: now }, generation: control.scannerGeneration };
+    const previous = await db.collection("scannerSessions").findOne(owned);
+    if (!previous) return fail("The scanner link is no longer active.", 410);
+    if (input.data.purpose === "MEMBER_BIND") {
+      const { bindingMemberId, bindingLeaseId } = input.data;
+      if (!bindingMemberId || !bindingLeaseId) return fail("Choose a member and start a new card binding.", 422);
+      if (!await db.collection("members").findOne({ _id: new ObjectId(bindingMemberId), active: { $ne: false } })) return fail("Choose an active member for this NFC reader.", 422);
+      if (previous.purpose === "MEMBER_BIND") {
+        if (previous.bindingMemberId === bindingMemberId && previous.bindingLeaseId === bindingLeaseId) return ok(serialise({ ...previous, tokenHash: undefined }));
+        return fail("Finish the current member binding before using this phone here.", 409);
+      }
+      const borrowed = await db.collection("scannerSessions").findOneAndUpdate(
+        { ...owned, purpose: { $ne: "MEMBER_BIND" } },
+        { $set: { purpose: "MEMBER_BIND", bindingMemberId, bindingLeaseId, resumePurpose: scannerPurpose(previous.purpose), routedAt: now, updatedAt: now } },
+        { returnDocument: "after", projection: { tokenHash: 0 } },
+      );
+      if (!borrowed) return fail("This phone changed destination. Reload and try again.", 409);
+      await writeAudit(db, auth.session, "scanner.binding_start", "scannerSession", input.data.id, { memberId: bindingMemberId });
+      return ok(serialise(borrowed));
+    }
+    if (previous.purpose === "MEMBER_BIND") {
+      if (!hasPermission(auth.session.role, "members.write")) return fail("You cannot finish this member binding.", 403);
+      if (!previous.bindingLeaseId || previous.bindingLeaseId !== input.data.bindingLeaseId || previous.bindingMemberId !== input.data.bindingMemberId) return fail("The scanner link is locked to a member binding.", 410);
+      const released = await db.collection("scannerSessions").findOneAndUpdate(
+        { ...owned, purpose: "MEMBER_BIND", bindingMemberId: input.data.bindingMemberId, bindingLeaseId: input.data.bindingLeaseId },
+        { $set: { purpose: input.data.purpose, routedAt: now, updatedAt: now }, $unset: { bindingMemberId: "", bindingLeaseId: "", resumePurpose: "" } },
+        { returnDocument: "after", projection: { tokenHash: 0 } },
+      );
+      if (!released) return fail("This binding has already changed. Reload the reader.", 409);
+      await db.collection("scannerEvents").updateMany({ scannerSessionId: previous._id, bindingLeaseId: input.data.bindingLeaseId, consumedAt: null }, { $set: { consumedAt: now } });
+      await writeAudit(db, auth.session, "scanner.binding_finish", "scannerSession", input.data.id, { memberId: input.data.bindingMemberId, purpose: input.data.purpose });
+      return ok(serialise(released));
+    }
+    if (input.data.bindingLeaseId || input.data.bindingMemberId) return fail("This binding has already finished. Reload the reader.", 409);
     const session = await db.collection("scannerSessions").findOneAndUpdate(
       {
-        _id: new ObjectId(input.data.id),
+        ...owned,
         purpose: { $ne: "MEMBER_BIND" },
         createdBy: new ObjectId(auth.session.id),
         revokedAt: { $exists: false },

@@ -99,6 +99,7 @@ export async function POST(request: Request) {
         const control = await getSystemControl(db);
         const reader = await db.collection("scannerSessions").findOne({ _id: new ObjectId(body.readerSessionId), createdBy: new ObjectId(auth.session.id), purpose: "MEMBER_BIND", bindingMemberId: body.memberId, generation: control.scannerGeneration, ownerSessionVersion: auth.session.sessionVersion, expiresAt: { $gt: new Date() }, revokedAt: { $exists: false } });
         if (control.mode !== "OPEN" || !reader) return fail("The NFC reader expired or belongs to another member. Read the card again.", 410);
+        if (reader.bindingLeaseId && reader.bindingLeaseId !== body.readerBindingLeaseId) return fail("This card binding has changed. Read the card again.", 409);
       }
       if (!await db.collection("members").findOne({ _id: memberId, active: { $ne: false } })) return fail("The member is inactive.", 410);
       const existingRequest = await db.collection("memberCards").findOne({ clientRequestId: body.clientRequestId, memberId }, { projection });
