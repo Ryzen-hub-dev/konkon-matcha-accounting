@@ -40,7 +40,10 @@ export async function GET(request: Request) {
     const source = await db.collection(sourceType === "INVOICE" ? "invoices" : "sales").findOne({ _id: new ObjectId(sourceId) });
     if (!source) return fail("The original document was not found.", 404);
     const snapshot = source.businessSnapshot || {};
-    const history = await db.collection("eInvoices").find({ sourceType, sourceId: source._id }, { projection: metadata }).sort({ createdAt: -1 }).limit(50).toArray();
+    // Created-at values can share the same millisecond during a fast retry or
+    // browser interaction. Use the ObjectId as a stable insertion-order tie
+    // breaker so the newest snapshot is always shown/downloaded first.
+    const history = await db.collection("eInvoices").find({ sourceType, sourceId: source._id }, { projection: metadata }).sort({ createdAt: -1, _id: -1 }).limit(50).toArray();
     return ok(serialise({
       canGenerate: hasPermission(auth.session.role, sourceType === "INVOICE" ? "invoices.write" : "receipts.manage"), sourceStatus: source.status,
       countryCode: snapshot.countryCode || "", currency: snapshot.currency || "", total: source.total, tax: source.tax,

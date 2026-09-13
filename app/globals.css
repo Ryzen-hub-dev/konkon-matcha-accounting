@@ -828,3 +828,25 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .regional-settings :focus-visible { outline: 2px solid var(--koicha); outline-offset: 3px; }
 .regional-settings select:disabled { opacity: .75; }
 @media (max-width: 720px) { .regional-settings .form-grid { grid-template-columns: minmax(0, 1fr); } .regional-settings .field { min-width: 0; } }
+/* Barcode and NFC stay visually and technically separate on the remote phone. */
+.scanner-lane { padding: 16px 18px; border-bottom: 1px dashed #adb9a8; }
+.scanner-lane > header { margin-bottom: 12px; }
+.scanner-lane > header h2 { margin: 4px 0; color: var(--koicha); font-family: var(--display); font-size: 24px; font-weight: 500; }
+.scanner-lane > header p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.barcode-lane { background: #eef1e9; }
+.barcode-lane .camera-stage { margin: 0 0 12px; height: min(42svh, 380px); }
+.barcode-lane .mobile-camera-button { width: 100%; margin: 0 0 10px; }
+.barcode-lane .manual-scan { margin: 0; }
+.nfc-lane { background: #f8f6ec; }
+.nfc-lane-primary { background: var(--foam); }
+.nfc-lane .nfc-control { padding: 0; }
+.nfc-control-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; color: var(--koicha); }
+.nfc-control-heading > div { display: grid; gap: 3px; }
+.nfc-control-heading strong { font-size: 15px; }
+.nfc-control-heading small { color: var(--midori); font-family: var(--utility); font-size: 8px; letter-spacing: .08em; }
+.nfc-signal { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--usucha); border-radius: 50%; }
+.nfc-listening .nfc-signal { color: var(--midori); box-shadow: 0 0 0 5px rgba(82,122,77,.12); animation: nfc-pulse 1.8s ease-in-out infinite; }
+.nfc-lane .nfc-control > button { min-width: 190px; }
+@keyframes nfc-pulse { 50% { box-shadow: 0 0 0 9px rgba(82,122,77,.03); } }
+@media (max-width: 720px) { .scanner-lane { padding: 14px 12px; } .barcode-lane .camera-stage { margin: 0 0 12px; height: min(43svh,390px); } .barcode-lane .manual-scan { margin: 0; grid-template-columns: 1fr; } .barcode-lane .manual-scan button { min-height: 43px; } }
+@media (prefers-reduced-motion: reduce) { .nfc-listening .nfc-signal { animation: none; } }

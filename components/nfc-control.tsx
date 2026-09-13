@@ -21,13 +21,15 @@ async function bindingCode(event: { serialNumber?: string; message: { records: N
   return `KKNT1-${serial ? "S" : "N"}-${fingerprint}`;
 }
 
-export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, writeToken, disabled = false }: { onRead?: (code: string) => void | Promise<void>; onGenericRead?: (code: string) => void | Promise<void>; stopAfterGeneric?: boolean; writeToken?: string; disabled?: boolean }) {
+export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, writeToken, disabled = false, autoStart = false }: { onRead?: (code: string) => void | Promise<void>; onGenericRead?: (code: string) => void | Promise<void>; stopAfterGeneric?: boolean; writeToken?: string; disabled?: boolean; autoStart?: boolean }) {
   const [supported, setSupported] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const controller = useRef<AbortController | null>(null);
   const readRef = useRef(onRead); readRef.current = onRead;
   const genericRef = useRef(onGenericRead); genericRef.current = onGenericRead;
+  const beginRef = useRef<() => void>(() => {});
+  const autoStartAttempted = useRef(false);
   useEffect(() => { if (disabled) { controller.current?.abort(); setBusy(false); } }, [disabled]);
   useEffect(() => {
     setSupported(window.isSecureContext && "NDEFReader" in window);
@@ -90,5 +92,18 @@ export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, wr
       setBusy(false);
     }
   }
-  return <section className="nfc-control no-print"><button type="button" className="button button-secondary" disabled={!supported || disabled} onClick={() => void begin()}><Nfc size={18} />{busy ? "Stop NFC" : writeToken ? "Write member card" : "Start NFC reader"}</button><p aria-live="polite">{message || (supported ? writeToken ? "Writing replaces this tag’s NFC records. Use a dedicated member card." : onGenericRead ? "Tap an issued or readable NFC card. Other cards are fingerprinted without writing to them." : "Tap an issued NDEF member card to identify its holder." : "Web NFC requires a compatible Android phone, Chrome, HTTPS and an NDEF card. Use QR on other devices.")}</p></section>;
+  beginRef.current = () => { void begin(); };
+  useEffect(() => {
+    if (!autoStart || !supported || disabled || writeToken || busy || autoStartAttempted.current) return;
+    autoStartAttempted.current = true;
+    const timer = window.setTimeout(() => beginRef.current(), 0);
+    return () => window.clearTimeout(timer);
+  }, [autoStart, busy, disabled, supported, writeToken]);
+  const defaultMessage = supported
+    ? writeToken ? "Writing replaces this tag’s NFC records. Use a dedicated member card."
+      : autoStart ? "NFC will stay listening while this page is open. If the browser asks for permission, tap Start NFC once."
+        : onGenericRead ? "Tap an issued or readable NFC card. Other cards are fingerprinted without writing to them."
+          : "Tap an issued NDEF member card to identify its holder."
+    : "Web NFC requires a compatible Android phone, Chrome, HTTPS and an NDEF card. Use QR on other devices.";
+  return <section className={`nfc-control no-print ${busy ? "nfc-listening" : ""}`} data-nfc-auto-start={autoStart ? "true" : "false"}><div className="nfc-control-heading"><span className="nfc-signal" aria-hidden="true"><Nfc size={18} /></span><div><strong>{writeToken ? "Write NFC member card" : "NFC reader"}</strong><small>{busy ? "LISTENING LIVE · HOLD A CARD NEAR THE PHONE" : autoStart ? "AUTO-READY · SEPARATE FROM BARCODE SCANNER" : "SEPARATE CARD READER"}</small></div></div><button type="button" className="button button-secondary" disabled={!supported || disabled} onClick={() => void begin()} aria-label={busy ? "Stop NFC reader" : writeToken ? "Write member card" : "Start NFC reader"}><Nfc size={18} />{busy ? "NFC listening" : writeToken ? "Write member card" : autoStart ? "Start NFC (if needed)" : "Start NFC reader"}</button><p aria-live="polite">{message || defaultMessage}</p></section>;
 }

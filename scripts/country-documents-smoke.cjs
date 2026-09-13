@@ -61,8 +61,8 @@ async function browserChecks({ page, mobile, api, member, base, output, fixtures
   await page.getByRole('button', { name: 'Connect another phone', exact: true }).click();
   const readerLink = page.getByRole('link', { name: 'Open reader pass', exact: true }); await readerLink.waitFor();
   await mobile.goto(await readerLink.getAttribute('href'));
-  await mobile.getByRole('heading', { name: 'Member NFC reader', exact: true }).waitFor();
-  await mobile.getByRole('button', { name: 'Start NFC reader', exact: true }).click();
+  await mobile.getByRole('heading', { name: 'Member binding reader', exact: true }).waitFor();
+  await mobile.waitForFunction(() => Boolean(window.__testReader));
   await mobile.evaluate(() => { window.__testReader.onreading({ serialNumber: '11:22:AB:CD:99', message: { records: [] } }); });
   await page.getByRole('button', { name: 'Confirm NFC binding', exact: true }).waitFor();
   await page.screenshot({ path: path.join(output, 'remote-nfc-confirm.png'), fullPage: true });

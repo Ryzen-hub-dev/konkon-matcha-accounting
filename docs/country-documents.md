@@ -42,7 +42,7 @@ Generation + source locking + audit run in a MongoDB transaction. A unique opera
 
 1. On the counter, open **Members → member card → Connect another phone**.
 2. Scan the private QR with a compatible Android phone and open its HTTPS link.
-3. Tap **Start NFC reader** on the phone and hold one readable card against it.
+3. The phone automatically starts NFC listening when the pass opens. On the first browser permission prompt, tap **Start NFC (if needed)** once, then hold one readable card against it.
 4. The counter displays the protected fingerprint suffix and target member. Click **Confirm NFC binding** or discard the read.
 5. Use **Disconnect** to revoke the link immediately. A counter refresh resumes an existing reader for that member; the original private URL is only shown when issued.
 

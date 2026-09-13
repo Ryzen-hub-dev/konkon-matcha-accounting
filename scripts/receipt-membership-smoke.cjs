@@ -184,13 +184,13 @@ async function main() {
     // Simulated browser device boundary; actual NFC hardware is not claimed tested.
     await phone.addInitScript(() => { window.NDEFReader = class { async scan() { window.__testReader = this; } async write(message) { window.__writtenNdef = message; } }; });
     const mobile = await phone.newPage(); await mobile.goto(base + '/scan/' + phoneToken);
-    await mobile.getByRole('button', { name: 'Start NFC reader' }).click();
+    await mobile.waitForFunction(() => Boolean(window.__testReader));
     const memberLookup = page.waitForResponse(response => response.url().endsWith('/api/member-cards/lookup') && response.status() === 200);
     await mobile.evaluate(code => { const bytes = new TextEncoder().encode(code); window.__testReader.onreading({ message: { records: [{ recordType: 'text', encoding: 'utf-8', data: new DataView(bytes.buffer) }] } }); }, activeToken);
     assert.equal((await (await memberLookup).json()).data._id, member._id);
     await page.waitForFunction(() => document.querySelector('.member-grid')?.textContent.includes('Test Member'));
     await mobile.screenshot({ path: path.join(output, 'phone-nfc.png'), fullPage: true });
-    await mobile.goto(base + `/card-write#card=${activeToken}`); await mobile.getByRole('button', { name: 'Write member card' }).click();
+    await mobile.goto(base + `/card-write#card=${activeToken}`); await mobile.getByRole('heading', { name: 'Prepare an NFC card', exact: true }).waitFor(); await mobile.locator('.nfc-control button').waitFor(); await mobile.locator('.nfc-control button').click();
     const written = await mobile.evaluate(() => window.__writtenNdef.records[0].data); assert.equal(written, activeToken);
     await mobile.goto(sale.publicReceiptUrl); await mobile.getByRole('button', { name: 'Export CSV' }).waitFor();
     const [download] = await Promise.all([mobile.waitForEvent('download'), mobile.getByRole('button', { name: 'Export CSV' }).click()]); assert.equal(download.suggestedFilename(), sale.receiptNo + '.csv');

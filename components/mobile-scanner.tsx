@@ -35,7 +35,10 @@ export function MobileScanner({ token }: { token: string }) {
   const send = useCallback(async (rawCode: string) => {
     const code = rawCode.trim();
     if (!code) return;
-    if (busyRef.current) throw new Error("A scan is still being sent. Try again.");
+    // Camera/NFC readers can emit the same value several times while a card or
+    // barcode is held in place. Ignore an in-flight duplicate quietly so it
+    // cannot flash a false error or queue a second request.
+    if (busyRef.current) return;
     const now = Date.now();
     if (lastRef.current.code === code && now - lastRef.current.at < 1_500) return;
     busyRef.current = true;
@@ -178,7 +181,7 @@ export function MobileScanner({ token }: { token: string }) {
     <section className={`scanner-pass scanner-${tone}`}>
       <div className="scanner-pass-edge" aria-hidden="true" />
       <div className="scanner-pass-title"><span>REMOTE COUNTER · {paired ? "AUTO-CONNECTED" : "PAIRING"}</span><h1>Turn this phone<br />into a scanner.</h1><p>No account data is exposed. The pass sends barcode values and protected NFC fingerprints only; it expires or closes immediately when revoked.</p></div>
-      {nfcBinding ? <div className="reader-confirm"><h2>Member NFC reader</h2><p>Tap Start NFC reader below, then hold one card against this phone. Confirm the member and binding on the counter screen. This pass cannot sell or read member details.</p></div> : <><div className="camera-stage">
+      {!nfcBinding ? <section className="scanner-lane barcode-lane"><header><span className="eyebrow">BARCODE SCANNER</span><h2>Camera / USB / Bluetooth</h2><p>Only barcode and QR values are sent to the linked counter.</p></header><div className="camera-stage">
         <video ref={videoRef} muted playsInline />
         <div className="scan-frame"><i /><i /><i /><i /><b /></div>
         {!cameraActive ? <div className="camera-placeholder"><ScanBarcode /><span>{paired ? "Counter paired · camera ready" : "Connecting…"}</span></div> : null}
@@ -186,10 +189,9 @@ export function MobileScanner({ token }: { token: string }) {
       </div>
       <button className="button button-primary mobile-camera-button" onClick={() => cameraActive ? stop() : void start()} disabled={!paired}>{cameraActive ? <CameraOff /> : <Camera />}{cameraActive ? "Stop camera" : paired ? "Start camera" : "Pairing…"}</button>
       <div className="decoder-label"><Radio />{decoder}</div>
-      </>}
-      <NfcControl onRead={nfcBinding ? undefined : send} onGenericRead={send} stopAfterGeneric={nfcBinding} disabled={!paired} />
+      <form className="manual-scan" onSubmit={submit}><label><Keyboard /><input name="code" autoCapitalize="characters" autoComplete="off" placeholder="Type or scan a barcode" required /></label><button disabled={!paired}>Send barcode</button></form></section> : null}
+      <section className={`scanner-lane nfc-lane ${nfcBinding ? "nfc-lane-primary" : ""}`}><header><span className="eyebrow">NFC CARD READER</span><h2>{nfcBinding ? "Member binding reader" : "Tap-to-read NFC"}</h2><p>{nfcBinding ? "This phone only sends a protected card fingerprint. Confirm the member on the counter screen; it cannot sell or view member details." : "This reader is separate from the barcode scanner and remains active while the page is open."}</p></header><NfcControl autoStart onRead={nfcBinding ? undefined : send} onGenericRead={send} stopAfterGeneric={nfcBinding} disabled={!paired} /></section>
       <div className={`scanner-status ${tone}`} aria-live="polite">{tone === "good" ? <CheckCircle2 /> : <span className="scanner-status-dot" />}<span>{status}</span></div>
-      {!nfcBinding ? <form className="manual-scan" onSubmit={submit}><label><Keyboard /><input name="code" autoCapitalize="characters" autoComplete="off" placeholder="Type or scan a code" required /></label><button disabled={!paired}>Send</button></form> : null}
       <footer><span>PASS VALIDITY</span><strong>Up to 24 hours</strong><i /></footer>
     </section>
   </main>;

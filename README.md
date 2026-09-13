@@ -65,6 +65,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Orphaned NFC cleanup: Members shows only existing-card bindings whose member was archived or removed. Authorized staff can review the card metadata and clear that binding; the physical card can then be bound to another member without changing sale, refund, points or accounting history. POS and the keyboard-wedge/linked-phone scanner can scan the bound code and open the same guarded clear action.
 - Random card credentials, SHA-256 lookup hashes and AES-256-GCM encrypted storage. No name, phone or identity number is written to an NFC tag. Sensitive receipt/member scanner events are encrypted until TTL expiry.
 - Phone-based NDEF reading/writing on supported Android Chrome devices, with QR fallback elsewhere. Static tags are copyable identification credentials, not payment authorization or clone-resistant smart cards. See [receipt and NFC guide](docs/receipts-and-nfc.md).
+- The linked-phone pass keeps barcode camera/USB/Bluetooth scanning in its own lane and exposes NFC as a separate reader. NFC attempts to start automatically when the pass opens (one browser permission gesture may still be required), then stays live while the page is foregrounded.
 
 ### Inventory and accounting
 

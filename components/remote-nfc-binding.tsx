@@ -39,7 +39,7 @@ export function RemoteNfcBinding({ memberId, memberName, onBound }: { memberId: 
             pendingRef.current = code; setPending(code); requestId.current = crypto.randomUUID();
             await apiRequest("/api/mobile-scans", { method: "PATCH", body: JSON.stringify({ sessionId: pass!._id, consumerId: consumer.current, eventIds: events.map(event => event._id) }), signal: controller.signal });
             setStatus("Card received. Confirm the member below before binding.");
-          } else setStatus("Reader ready. Open the pass on your phone and start NFC.");
+          } else setStatus("Reader ready. Open the pass on your phone; NFC listening starts automatically.");
         }
       } catch (reason) {
         if (cancelled) return;
@@ -79,7 +79,7 @@ export function RemoteNfcBinding({ memberId, memberName, onBound }: { memberId: 
     <h3><Smartphone size={20} /> Use another phone as the NFC reader</h3>
     <p>Open a private 24-hour pass on a compatible Android phone. This reader is locked to <strong>{memberName}</strong>; other scanner screens cannot take it over.</p>
     {!pass ? <button type="button" className="button button-primary" disabled={busy || restoring} onClick={() => void connect()}>Connect another phone</button> : <>
-      <div className="reader-pairing">{url ? <QrImage value={url} label="Connect another phone as this member’s NFC reader" width={180} /> : <strong>Existing reader resumed</strong>}<div><strong>Scan → Start NFC → Tap card</strong><p>Keep both screens open. No login or member details are sent to the phone. Do not share this pass. Expires {new Date(pass.expiresAt).toLocaleString()}.</p>{url ? <a className="button button-secondary" href={url} target="_blank" rel="noreferrer">Open reader pass</a> : <p>The private link is shown only when issued. Use the phone already connected, or disconnect and create a new link.</p>}<button type="button" className="button button-secondary" disabled={busy} onClick={() => void disconnect()}><Unplug size={16} />Disconnect</button></div></div>
+      <div className="reader-pairing">{url ? <QrImage value={url} label="Connect another phone as this member’s NFC reader" width={180} /> : <strong>Existing reader resumed</strong>}<div><strong>Scan → NFC auto-ready → Tap card</strong><p>Keep both screens open. The phone starts NFC listening automatically after permission. No login or member details are sent to the phone. Do not share this pass. Expires {new Date(pass.expiresAt).toLocaleString()}.</p>{url ? <a className="button button-secondary" href={url} target="_blank" rel="noreferrer">Open reader pass</a> : <p>The private link is shown only when issued. Use the phone already connected, or disconnect and create a new link.</p>}<button type="button" className="button button-secondary" disabled={busy} onClick={() => void disconnect()}><Unplug size={16} />Disconnect</button></div></div>
       {pending ? <div className="reader-confirm"><span className="eyebrow">CARD RECEIVED · •••• {pending.slice(-4).toUpperCase()}</span><p>Bind this card to <strong>{memberName}</strong>?</p><button type="button" className="button button-primary" disabled={busy} onClick={() => void bind()}>{busy ? "Binding…" : "Confirm NFC binding"}</button><button type="button" className="button button-secondary" disabled={busy} onClick={() => { pendingRef.current = ""; setPending(""); setError(""); }}>Discard and read again</button></div> : null}
     </>}
     <p role="status">{status}</p>{error ? <p className="card-error" role="alert">{error}</p> : null}
