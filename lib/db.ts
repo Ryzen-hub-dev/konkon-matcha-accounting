@@ -155,6 +155,8 @@ async function initializeIndexes(db: Db) {
     db.collection("localPaymentEvents").createIndex({ candidateIntentId: 1, status: 1 }),
     db.collection("localPaymentEvents").createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 }),
     db.collection("scannerSessions").createIndex({ tokenHash: 1 }, { unique: true }),
+    db.collection("eInvoices").createIndex({ createdBy: 1, clientRequestId: 1 }, { unique: true }),
+    db.collection("eInvoices").createIndex({ sourceType: 1, sourceId: 1, createdAt: -1 }),
     db.collection("scannerSessions").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     db.collection("scannerSessions").createIndex({ createdBy: 1, expiresAt: -1 }),
     db.collection("paymentDisplaySessions").createIndex({ tokenHash: 1 }, { unique: true }),

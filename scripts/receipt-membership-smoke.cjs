@@ -108,6 +108,8 @@ async function main() {
     const activeCard = await api('/api/member-cards', 'POST', { ...cardBody, clientRequestId: randomUUID(), label: 'Phone NFC test' }, 201);
     const activeToken = (await api('/api/member-cards', 'POST', { action: 'REVEAL', id: activeCard._id })).token;
     const sale = await api('/api/sales', 'POST', { clientRequestId: randomUUID(), paymentMethod: 'CASH', tenderedAmount: 100, memberId: member._id, items: [{ productId: product._id, quantity: 2 }], saleNote: 'PRIVATE ORDER NOTE', paymentReference: 'PRIVATE PAY REF' }, 201);
+    const documentsQa = require('./country-documents-smoke.cjs');
+    const docFixtures = await documentsQa.apiChecks({ api, collection, base, cookie: () => cookie, member, sale });
     assert.ok(sale.publicReceiptUrl); assert.equal(new URL(sale.publicReceiptUrl).origin, base); const receiptToken = new URLSearchParams(new URL(sale.publicReceiptUrl).hash.slice(1)).get('receipt');
     await api(`/api/sales?id=${sale._id}`, 'GET', undefined, 401, false);
     const publicSale = await api('/api/public-receipts', 'POST', { token: receiptToken }, 200, false);
@@ -119,6 +121,7 @@ async function main() {
     await api('/api/refunds', 'POST', { saleId: sale._id, reason: 'Customer return', items: [{ productId: product._id, quantity: 1 }] }, 201);
     const afterRefund = await api('/api/public-receipts', 'POST', { token: receiptToken }, 200, false);
     assert.equal(afterRefund.refundedAmount, 10); assert.equal(afterRefund.status, 'PARTIALLY_REFUNDED');
+    await api('/api/e-invoices', 'POST', { ...docFixtures.body, sourceType: 'RECEIPT', sourceId: sale._id, clientRequestId: randomUUID() }, 409);
     await api('/api/refunds', 'POST', { saleId: sale._id, reason: 'Too many returns', items: [{ productId: product._id, quantity: 2 }] }, 422);
     assert.equal(await collection('journalEntries').countDocuments({ source: 'POS_REFUND' }), 1);
     await collection('users').updateOne({ username: 'testowner' }, { $set: { role: 'ACCOUNTANT' } });
@@ -197,6 +200,7 @@ async function main() {
     assert.equal(exportData.items[0].refundedQuantity, 1);
     assert.equal(exportData.tenderedAmount, 100);
     await mobile.screenshot({ path: path.join(output, 'customer-receipt-mobile.png'), fullPage: true });
+    await documentsQa.browserChecks({ page, mobile, api, member, base, output, fixtures: docFixtures });
     assert.deepEqual(errors, []);
     await api('/api/scanner-sessions', 'DELETE', { id: pass.session._id }); await api('/api/mobile-scans', 'POST', { token: phoneToken, code: activeToken }, 410, false);
     console.log('PASS real browser quantity editing, scanner receipt navigation, card management, mobile receipt export; simulated NFC read/write boundary.');

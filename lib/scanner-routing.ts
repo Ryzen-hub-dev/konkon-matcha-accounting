@@ -1,7 +1,7 @@
-export const SCANNER_PURPOSES = ["POS", "INVENTORY", "RECEIPTS", "MEMBERS"] as const;
+export const SCANNER_PURPOSES = ["POS", "INVENTORY", "RECEIPTS", "MEMBERS", "MEMBER_BIND"] as const;
 export type ScannerPurpose = (typeof SCANNER_PURPOSES)[number];
 export function scannerPermission(purpose: ScannerPurpose) {
-  return ({ POS: "pos.sell", INVENTORY: "inventory.write", RECEIPTS: "receipts.read", MEMBERS: "members.read" } as const)[purpose];
+  return ({ POS: "pos.sell", INVENTORY: "inventory.write", RECEIPTS: "receipts.read", MEMBERS: "members.read", MEMBER_BIND: "members.write" } as const)[purpose];
 }
 export function scannerPurpose(value: unknown): ScannerPurpose { return SCANNER_PURPOSES.includes(value as ScannerPurpose) ? value as ScannerPurpose : "POS"; }
 

@@ -6,6 +6,7 @@ import { ArrowLeft, Printer } from "lucide-react";
 import { InvoicePaper, type InvoicePaperDocument } from "@/components/invoice-paper";
 import { apiRequest, EmptyState, LoadingPanel, Notice, useNotice } from "@/components/ui";
 import { DEFAULT_INVOICE_TEMPLATE, type InvoiceTemplateInput } from "@/lib/invoice-templates";
+import { EInvoiceGenerator } from "./e-invoice-generator";
 
 type InvoiceDocument = InvoicePaperDocument & {
   _id: string;
@@ -32,6 +33,7 @@ export function InvoiceDocumentView({ id }: { id: string }) {
   return <div className="page invoice-document-page page-enter">
     {notice ? <Notice {...notice} /> : null}
     <header className="invoice-document-toolbar"><div><Link className="button button-secondary" href="/invoices"><ArrowLeft size={16} />Invoices</Link><span><small>PAPER PROOF</small><strong>{invoice.invoiceNo}</strong></span></div><button className="button button-primary" onClick={() => window.print()}><Printer size={16} />Print or save PDF</button></header>
+    <div className="document-toolbar no-print"><EInvoiceGenerator sourceId={id} sourceType="INVOICE" /></div>
     <div className="invoice-document-stage"><InvoicePaper document={invoice} template={template} /></div>
   </div>;
 }

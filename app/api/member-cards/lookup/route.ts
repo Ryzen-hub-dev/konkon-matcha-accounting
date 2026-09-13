@@ -31,6 +31,7 @@ export async function POST(request: Request) {
       }
       return fail("This card is unavailable, suspended or voided.", 410);
     }
+    if (card?.status !== "ACTIVE") return fail("This card is unavailable, suspended or voided.", 410);
     return ok(serialise({ ...member, scannedCard: { id: card!._id.toHexString(), tier: card!.tier, label: card!.label, kind: card!.kind || "ISSUED", source: card!.bindingSource || null } }));
   } catch (error) { return error instanceof OwnerRecoveryError ? fail(error.message, error.status) : fail("Member card lookup is temporarily unavailable.", 503); }
 }

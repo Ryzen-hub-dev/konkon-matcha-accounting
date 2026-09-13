@@ -17,6 +17,37 @@
   --utility: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
+/* Country document desk: paper folios, matcha seals and quiet confirmation states. */
+.remote-nfc-binding { padding: 22px; margin: 20px 0; border: 1px solid var(--usucha); border-radius: 12px; background: var(--rice); }
+.remote-nfc-binding h3 { display: flex; align-items: center; gap: 8px; color: var(--koicha); }
+.reader-pairing { display: grid; grid-template-columns: 180px minmax(0,1fr); gap: 22px; align-items: center; margin-top: 20px; }
+.reader-pairing .button, .reader-confirm .button { margin: 8px 8px 0 0; }
+.reader-confirm, .document-readiness { padding: 18px; margin: 18px 0; border-left: 3px solid var(--midori); background: var(--foam); color: var(--koicha); }
+.scanner-pass > .nfc-control { padding: 18px 22px; }
+.document-readiness p { font-size: 13px; line-height: 1.65; margin: 8px 0; }
+.country-report-panel { margin: 20px 0; }
+.country-report-panel > header span { display: inline-flex; gap: 8px; align-items: center; }
+.country-report-controls { display: grid; grid-template-columns: minmax(180px,1fr) minmax(0,1fr); gap: 24px; align-items: center; }
+.country-report-controls p, .country-report-panel > p { font-size: 14px; line-height: 1.7; }
+.country-tax-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin: 18px 0; }
+.country-tax-fields .field, .country-report-controls .field { min-width: 0; }
+.country-tax-fields input, .country-tax-fields select, .country-report-controls select { width: 100%; min-height: 44px; }
+.document-export-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+.e-invoice-desk { padding: 0 4px 8px; }
+.e-invoice-desk p { line-height: 1.7; }
+.e-invoice-party { min-width: 0; border: 1px solid var(--line); padding: 16px; margin: 22px 0; }
+.e-invoice-party legend { font-family: var(--display); color: var(--koicha); font-size: 24px; padding: 0 8px; }
+.document-confirmation { display: flex; gap: 12px; align-items: flex-start; margin: 18px 0; font-size: 14px; line-height: 1.6; }
+.document-confirmation input { margin-top: 4px; width: 18px; height: 18px; flex-shrink: 0; }
+.document-success { padding: 14px; background: var(--foam); color: var(--koicha); }
+.e-invoice-history { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 18px; }
+.e-invoice-history article { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.e-invoice-history article > div { flex: 1; min-width: 0; }
+.e-invoice-history small { display: block; color: var(--muted); margin: 8px 0; }
+.e-invoice-history code { overflow-wrap: anywhere; font-size: 11px; }
+.e-invoice-desk :focus-visible, .remote-nfc-binding :focus-visible, .country-report-panel :focus-visible { outline: 2px solid var(--koicha); outline-offset: 3px; }
+@media (max-width: 640px) { .reader-pairing, .country-tax-fields, .country-report-controls { grid-template-columns: minmax(0,1fr); } .reader-pairing { justify-items: start; } .remote-nfc-binding { padding: 16px; } .e-invoice-party { padding: 12px; } }
+@media print { .remote-nfc-binding, .e-invoice-desk { display: none !important; } }
 /* Digital receipts and membership card tools use the established tea-room palette. */
 .public-receipt-page { max-width: 820px; margin: 0 auto; padding: 32px 20px; }
 .public-receipt-page h1, .member-cards-manager h2 { font-family: var(--display); color: var(--koicha); }

@@ -72,6 +72,8 @@ This count is a delivery benchmark, not a claim of AutoCount parity. Accounting,
 
 ## Country packs
 
+Delivered preparation tools (not filing-ready country packs): the country report desk exports financial statements and reviewed working figures for all 249 selectable countries, with SG/MY/AU/GB working-paper layouts. Invoices/receipts can generate encrypted, immutable general UBL XML / accounting JSON and limited domestic MYR MyInvois 1.0 preparation files. No national tax network, signing certificate, authority acceptance or completed statutory return is claimed. Details and test boundaries: [country documents](country-documents.md).
+
 A filing-ready country pack must include versioned tax codes/rates, chart templates, fiscal-calendar rules, rounding, statutory report layouts, e-invoice schemas, export validation and official-source metadata. It must also include regression fixtures and a qualified local-accountant sign-off date.
 
 Until that lifecycle exists, the UI must call outputs “management reports,” never “certified tax returns.” Singapore is the first planned pack; other countries must be installed as separately versioned packages rather than hard-coded conditionals.

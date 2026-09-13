@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, Boxes, CalendarRange, CheckCircle2, CircleDollarSign, Download,
   Landmark, Printer, ReceiptText, Scale, TrendingUp, WalletCards,
@@ -8,6 +8,8 @@ import {
 import { apiRequest, EmptyState, LoadingPanel, Notice, PageHeader, StatCard, useNotice } from "@/components/ui";
 import { useBusiness } from "@/components/business-context";
 import { dateKeyInTimeZone } from "@/lib/dates";
+import { CountryReportPanel } from "./country-report-panel";
+import { csvCell } from "@/lib/receipt-export";
 
 type FinancialRow = { code: string; name: string; amount: number };
 type TrialRow = FinancialRow & {
@@ -57,7 +59,7 @@ type ReportData = {
   aging: { receivables: AgingReport; payables: AgingReport };
 };
 
-type ReportTab = "OVERVIEW" | "PROFIT_LOSS" | "BALANCE_SHEET" | "CASH_FLOW" | "TRIAL_BALANCE" | "AGING";
+type ReportTab = "OVERVIEW" | "PROFIT_LOSS" | "BALANCE_SHEET" | "CASH_FLOW" | "TRIAL_BALANCE" | "AGING" | "COUNTRY";
 const REPORT_TABS: Array<{ key: ReportTab; label: string }> = [
   { key: "OVERVIEW", label: "Overview" },
   { key: "PROFIT_LOSS", label: "Profit & loss" },
@@ -65,6 +67,7 @@ const REPORT_TABS: Array<{ key: ReportTab; label: string }> = [
   { key: "CASH_FLOW", label: "Cash flow" },
   { key: "TRIAL_BALANCE", label: "Trial balance" },
   { key: "AGING", label: "AR / AP aging" },
+  { key: "COUNTRY", label: "Country report desk" },
 ];
 
 function StatementLines({ rows, money, empty = "No posted movement in this section." }: { rows: FinancialRow[]; money: Intl.NumberFormat; empty?: string }) {
@@ -82,10 +85,6 @@ function AgingPanel({ title, report, money }: { title: string; report: AgingRepo
   </article>;
 }
 
-function csvCell(value: string | number) {
-  return `"${String(value).replaceAll('"', '""')}"`;
-}
-
 export function ReportsView() {
   const { profile } = useBusiness();
   const today = useMemo(() => dateKeyInTimeZone(new Date(), profile.timeZone), [profile.timeZone]);
@@ -94,15 +93,17 @@ export function ReportsView() {
   const [tab, setTab] = useState<ReportTab>("OVERVIEW");
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
+  const loadSequence = useRef(0);
   const { notice, show } = useNotice();
   const money = useMemo(() => new Intl.NumberFormat(profile.locale, { style: "currency", currency: data?.period.currency || profile.currency }), [data?.period.currency, profile.currency, profile.locale]);
 
   const load = useCallback(async () => {
-    if (!from || !to || from > to) return;
+    const sequence = ++loadSequence.current;
+    if (!from || !to || from > to) { setData(null); setLoading(false); return; }
     setLoading(true);
-    try { setData(await apiRequest<ReportData>(`/api/reports?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)); }
-    catch (reason) { show(reason instanceof Error ? reason.message : "Could not build the financial reports.", "error"); }
-    finally { setLoading(false); }
+    try { const result = await apiRequest<ReportData>(`/api/reports?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`); if (sequence === loadSequence.current) setData(result); }
+    catch (reason) { if (sequence === loadSequence.current) { setData(null); show(reason instanceof Error ? reason.message : "Could not build the financial reports.", "error"); } }
+    finally { if (sequence === loadSequence.current) setLoading(false); }
   }, [from, show, to]);
 
   useEffect(() => { void load(); }, [load]);
@@ -116,6 +117,7 @@ export function ReportsView() {
 
   function exportCsv() {
     if (!data) return;
+    if (tab === "COUNTRY") { show("Use Download country report CSV inside the country report desk."); return; }
     const rows: Array<Array<string | number>> = [["Report", REPORT_TABS.find((item) => item.key === tab)?.label || tab], ["Period", `${data.period.from} to ${data.period.to}`], ["Currency", data.period.currency], []];
     if (tab === "PROFIT_LOSS") {
       rows.push(["Section", "Code", "Account", "Amount"], ...data.profitAndLoss.revenue.map((row) => ["Revenue", row.code, row.name, row.amount]), ...data.profitAndLoss.expenses.map((row) => ["Expense", row.code, row.name, row.amount]), ["Net profit", "", "", data.profitAndLoss.netProfit]);
@@ -152,6 +154,7 @@ export function ReportsView() {
         <p><strong>{data.integrity.balanced ? "Ledger balanced" : "Close requires attention"}</strong><span>{data.integrity.journalCount} posted journals in period · {data.integrity.unbalancedEntries} unbalanced entries · equation variance {money.format(data.integrity.equationDifference)}</span></p>
       </section>
       <nav className="report-tabs" aria-label="Financial report"><div role="tablist">{REPORT_TABS.map((item) => <button key={item.key} role="tab" aria-selected={tab === item.key} className={tab === item.key ? "active" : ""} onClick={() => setTab(item.key)}>{item.label}</button>)}</div></nav>
+      {tab === "COUNTRY" ? <CountryReportPanel key={`${data.period.from}-${data.period.to}-${profile.countryCode}`} data={data} countryCode={profile.countryCode} company={profile.legalEntityName || profile.businessName} /> : null}
 
       {tab === "OVERVIEW" ? <div className="report-tab-panel">
         <section className="stat-grid"><StatCard label="Net profit" value={money.format(data.profitAndLoss.netProfit)} detail={`${data.profitAndLoss.margin.toFixed(1)}% net margin`} icon={<CircleDollarSign />} /><StatCard label="Gross profit" value={money.format(data.profitAndLoss.grossProfit)} detail={`${data.operations.summary.transactions} completed sales`} tone="sand" icon={<TrendingUp />} /><StatCard label="Stock at cost" value={money.format(data.operations.inventoryValue.cost)} detail={`${data.operations.inventoryValue.units} units on hand`} tone="ink" icon={<Boxes />} /><StatCard label="Working capital due" value={money.format(data.aging.receivables.total - data.aging.payables.total)} detail={`${data.aging.receivables.count} AR · ${data.aging.payables.count} AP`} tone="plum" icon={<Landmark />} /></section>

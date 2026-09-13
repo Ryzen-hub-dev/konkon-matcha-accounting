@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/audit";
 import { cardCreateSchema, cardStyleSchema, cardUpdateSchema, decryptMemberToken, encryptMemberToken, memberBindingHashFromCode, memberTokenHash, newMemberToken } from "@/lib/member-cards";
 import { OwnerRecoveryError, readOwnerRecoveryJson } from "@/lib/owner-recovery";
 import { hasPermission } from "@/lib/rbac";
+import { getSystemControl } from "@/lib/system-control";
 
 export const runtime = "nodejs";
 const projection = { tokenHash: 0, encryptedToken: 0, bindingHash: 0, clientRequestId: 0 };
@@ -93,6 +94,12 @@ export async function POST(request: Request) {
       const input = cardStyleSchema.safeParse({ label: body.label || "Existing NFC card", tier: body.tier || "MATCHA CLUB", accentColor: body.accentColor || "#173f2a" });
       if (!input.success || !z.string().uuid().safeParse(body.clientRequestId).success) return fail("Check the existing card details.", 422);
       const memberId = new ObjectId(body.memberId);
+      if (body.readerSessionId !== undefined) {
+        if (typeof body.readerSessionId !== "string" || !ObjectId.isValid(body.readerSessionId)) return fail("Choose the connected NFC reader.", 422);
+        const control = await getSystemControl(db);
+        const reader = await db.collection("scannerSessions").findOne({ _id: new ObjectId(body.readerSessionId), createdBy: new ObjectId(auth.session.id), purpose: "MEMBER_BIND", bindingMemberId: body.memberId, generation: control.scannerGeneration, ownerSessionVersion: auth.session.sessionVersion, expiresAt: { $gt: new Date() }, revokedAt: { $exists: false } });
+        if (control.mode !== "OPEN" || !reader) return fail("The NFC reader expired or belongs to another member. Read the card again.", 410);
+      }
       if (!await db.collection("members").findOne({ _id: memberId, active: { $ne: false } })) return fail("The member is inactive.", 410);
       const existingRequest = await db.collection("memberCards").findOne({ clientRequestId: body.clientRequestId, memberId }, { projection });
       if (existingRequest) return ok(serialise(existingRequest));

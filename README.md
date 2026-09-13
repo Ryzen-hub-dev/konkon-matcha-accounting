@@ -61,7 +61,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Protected identity lookup is rate-limited and audit logged.
 - Member “delete” is an archive operation so invoices, receipts, points and audits stay referentially intact.
 - Independently issued QR/NFC member cards with editable label, membership title and colour; suspend, reactivate, permanently void and audit-preserving delete controls.
-- Existing-card NFC binding: on a supported phone, bind a readable hotel/transit/other tag to a member without writing to or replacing the card. The system stores only a keyed fingerprint; the same card can then identify that member. Bound cards have the same suspend, reactivate, void and delete controls as issued cards.
+- Existing-card NFC binding: use this phone or connect another Android phone with a private, member-locked reader pass. The counter confirms the scanned card before binding; POS/inventory routing cannot steal the reader. No writing to the existing card is required. Refresh resumes the reader; disconnect revokes it. Bound cards retain suspend/reactivate/void/delete controls.
 - Orphaned NFC cleanup: Members shows only existing-card bindings whose member was archived or removed. Authorized staff can review the card metadata and clear that binding; the physical card can then be bound to another member without changing sale, refund, points or accounting history. POS and the keyboard-wedge/linked-phone scanner can scan the bound code and open the same guarded clear action.
 - Random card credentials, SHA-256 lookup hashes and AES-256-GCM encrypted storage. No name, phone or identity number is written to an NFC tag. Sensitive receipt/member scanner events are encrypted until TTL expiry.
 - Phone-based NDEF reading/writing on supported Android Chrome devices, with QR fallback elsewhere. Static tags are copyable identification credentials, not payment authorization or clone-resistant smart cards. See [receipt and NFC guide](docs/receipts-and-nfc.md).
@@ -76,6 +76,8 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Searchable main-country settings for 249 countries/regions, editable date/number format and time zone, and explicit country selection during Owner setup.
 - Local-day/month dashboard statistics, calendar-safe invoice due dates and manual journals, and currency-specific precision for product prices, coupons, POS and refunds.
 - Draft/sent/paid/void invoices with custom uploadable JSON templates and printable documents.
+- Country report desk for all 249 selectable countries/regions: financial-statement CSV/JSON exports, tax-ledger evidence and explicit working-paper adapters for SG/MY/AU/GB. No automatic conversion or certified filing claims.
+- E-invoice preparation from invoices and receipts: UBL 2.1 XML, accounting JSON and limited domestic MYR MyInvois 1.0 JSON. Encrypted immutable download history, checksum verification, request idempotency and source reconciliation. **Generated is not submitted or tax-authority validated.** See [country documents and remote NFC guide](docs/country-documents.md) for supported workflows and exclusions.
 - Invoice register search and status filters, explicit sent/paid/void confirmations, safe copy-as-new-draft, and optimistic-concurrency editing for unpaid drafts. Retried creates carry an idempotency key; issued and paid documents remain immutable.
 - Sales, margin, tender, inventory-value and receivable reports.
 
@@ -109,7 +111,7 @@ Core endpoints:
 - `/api/scanner-sessions`, `/api/mobile-scans`, `/api/payment-display-sessions`, `/api/payment-display`
 - `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`, `/api/local-payment-events`
 - `/api/receipt-lookup`, `/api/public-receipts`, `/api/member-cards`, `/api/member-cards/lookup`
-- `/api/invoices`, `/api/invoice-templates`, `/api/journals`, `/api/reports`
+- `/api/invoices`, `/api/invoice-templates`, `/api/journals`, `/api/reports`, `/api/e-invoices`
 - `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`
 - `/api/settings`, `/api/settings/history`, `/api/locations`
 
@@ -156,7 +158,7 @@ See [docs/deployment-vercel.md](docs/deployment-vercel.md) and [SECURITY.md](SEC
 
 The main country is configurable and new workspaces choose their country and accounting currency during setup. Existing workspaces can change the main country, locale and time zone without relabelling their fixed ledger currency or rewriting historical documents. Tax rate and tax-inclusive/exclusive pricing remain explicit settings. Generated reports are management reports; they are **not** automatically certified tax returns. See [regional settings](docs/regional-settings.md) for the currency-protection rules and offline data sources.
 
-Country-pack installation, statutory forms, e-invoicing networks, payroll, bank feeds, fixed assets, consolidation and jurisdiction-specific electronic filing remain separate implementation phases. Each country pack must be versioned, sourced from the relevant tax authority and reviewed by a qualified local accountant before the UI can label it filing-ready. See [docs/feature-coverage.md](docs/feature-coverage.md).
+The country report desk and electronic-invoice **file preparation** are implemented as described in [country documents](docs/country-documents.md). Country-pack installation, complete statutory forms, e-invoicing network submission/signatures, payroll, bank feeds, fixed assets, consolidation and jurisdiction-specific electronic filing remain separate implementation phases. Each country pack must be versioned, sourced from the relevant tax authority and reviewed by a qualified local accountant before the UI can label it filing-ready. See [docs/feature-coverage.md](docs/feature-coverage.md).
 
 ## Legacy prototype
 

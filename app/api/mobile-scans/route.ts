@@ -67,6 +67,7 @@ export async function POST(request: Request) {
     if (!session) return fail("This scanner link has expired or was revoked.", 410);
     const owner = await db.collection("users").findOne({ _id: session.createdBy, active: true });
     if (!owner || owner.mustChangePassword || !hasPermission(owner.role as UserRole, scannerPermission(scannerPurpose(session.purpose))) || (session.ownerSessionVersion !== undefined && Number(session.ownerSessionVersion || 0) !== Number(owner.sessionVersion || 0))) return fail("This scanner link has expired or was revoked.", 410);
+    if (session.purpose === "MEMBER_BIND" && (!ObjectId.isValid(session.bindingMemberId || "") || !await db.collection("members").findOne({ _id: new ObjectId(session.bindingMemberId), active: { $ne: false } }))) return fail("The member for this NFC reader is no longer active.", 410);
     if (connectInput.success) {
       await db.collection("scannerSessions").updateOne({ _id: session._id }, { $set: { connectedAt: now, updatedAt: now } });
       return ok({ connected: true, label: session.label, purpose: session.purpose || "POS", expiresAt: session.expiresAt });
@@ -74,6 +75,7 @@ export async function POST(request: Request) {
     if (!input.success) return fail("The scanner request is invalid.", 422);
     const code = normaliseScanCode(input.data.code);
     if (!code) return fail("The scanned code is invalid.", 422);
+    if (session.purpose === "MEMBER_BIND" && !memberBindingScanToken(code)) return fail("This pass accepts readable NFC fingerprints only. Issued member cards cannot be reassigned here.", 422);
     const recent = await db.collection("scannerEvents").countDocuments({ scannerSessionId: session._id, createdAt: { $gt: new Date(now.getTime() - 60_000) } });
     if (recent >= 120) return fail("This scanner is sending codes too quickly. Wait a moment.", 429);
     const purpose = scannerPurpose(session.purpose);
@@ -112,6 +114,7 @@ export async function GET(request: Request) {
       ...scannerPurposeFilter(purpose.data),
     });
     if (!session) return fail("The scanner link is no longer active.", 410);
+    if (purpose.data === "MEMBER_BIND" && session.bindingMemberId !== url.searchParams.get("memberId")) return fail("This NFC reader belongs to another member.", 409);
     const { events, waitedMs } = await waitForPendingEvents(db, session._id, consumerId, purpose.data, wait);
     const response = ok(events.map((event) => ({ _id: event._id.toHexString(), code: event.encryptedCode ? decryptMemberToken(event.encryptedCode, `scan:${event._id.toHexString()}`) : event.code, createdAt: event.createdAt })));
     response.headers.set("Cache-Control", "private, no-store, max-age=0");

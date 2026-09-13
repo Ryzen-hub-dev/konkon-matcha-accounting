@@ -25,6 +25,7 @@ export function MobileScanner({ token }: { token: string }) {
   const lastRef = useRef({ code: "", at: 0 });
   const [cameraActive, setCameraActive] = useState(false);
   const [paired, setPaired] = useState(false);
+  const [nfcBinding, setNfcBinding] = useState(false);
   const [decoder, setDecoder] = useState("Multi-format decoder ready");
   const [torchAvailable, setTorchAvailable] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
@@ -33,19 +34,21 @@ export function MobileScanner({ token }: { token: string }) {
 
   const send = useCallback(async (rawCode: string) => {
     const code = rawCode.trim();
-    if (!code || busyRef.current) return;
+    if (!code) return;
+    if (busyRef.current) throw new Error("A scan is still being sent. Try again.");
     const now = Date.now();
     if (lastRef.current.code === code && now - lastRef.current.at < 1_500) return;
     busyRef.current = true;
     try {
       const result = await apiRequest<{ purpose: ScannerPurpose }>("/api/mobile-scans", { method: "POST", body: JSON.stringify({ token, code }) });
       lastRef.current = { code, at: now };
-      setStatus(`Scan sent to ${result.purpose === "POS" ? "Point of sale" : result.purpose.toLowerCase()}.`);
+      setStatus(result.purpose === "MEMBER_BIND" ? "Card sent. Confirm the binding on the counter screen." : `Scan sent to ${result.purpose === "POS" ? "Point of sale" : result.purpose.toLowerCase()}.`);
       setTone("good");
       navigator.vibrate?.([45, 30, 45]);
     } catch (reason) {
       setStatus(reason instanceof Error ? reason.message : "The code could not be sent.");
       setTone("bad");
+      throw reason;
     } finally {
       window.setTimeout(() => { busyRef.current = false; }, 320);
     }
@@ -107,7 +110,7 @@ export function MobileScanner({ token }: { token: string }) {
       const { BrowserMultiFormatReader } = await import("@zxing/browser");
       const reader = new BrowserMultiFormatReader(undefined, { delayBetweenScanAttempts: 80, delayBetweenScanSuccess: 350, tryPlayVideoTimeout: 5_000 });
       controlsRef.current = await reader.decodeFromConstraints(constraints, videoRef.current, (result) => {
-        if (result?.getText()) void send(result.getText());
+        if (result?.getText()) void send(result.getText()).catch(() => {});
       });
       cameraActiveRef.current = true;
       setCameraActive(true);
@@ -131,11 +134,12 @@ export function MobileScanner({ token }: { token: string }) {
         const result = await apiRequest<{ connected: boolean; label: string; purpose: ScannerPurpose }>("/api/mobile-scans", { method: "POST", body: JSON.stringify({ token, action: "CONNECT" }) });
         if (cancelled) return;
         setPaired(true);
+        setNfcBinding(result.purpose === "MEMBER_BIND");
         setStatus(`Connected automatically to ${result.label} · ${result.purpose === "POS" ? "Point of sale" : result.purpose.toLowerCase()}.`);
         setTone("good");
         try {
           const permission = await navigator.permissions?.query({ name: "camera" as PermissionName });
-          if (permission?.state === "granted") void start(true);
+          if (permission?.state === "granted" && result.purpose !== "MEMBER_BIND") void start(true);
         } catch { /* camera permission APIs vary by browser */ }
       } catch (reason) {
         if (cancelled) return;
@@ -166,7 +170,7 @@ export function MobileScanner({ token }: { token: string }) {
     event.preventDefault();
     const target = event.currentTarget;
     const code = String(new FormData(target).get("code") || "");
-    void send(code).then(() => target.reset());
+    void send(code).then(() => target.reset()).catch(() => {});
   }
 
   return <main className="mobile-scan-page">
@@ -174,7 +178,7 @@ export function MobileScanner({ token }: { token: string }) {
     <section className={`scanner-pass scanner-${tone}`}>
       <div className="scanner-pass-edge" aria-hidden="true" />
       <div className="scanner-pass-title"><span>REMOTE COUNTER · {paired ? "AUTO-CONNECTED" : "PAIRING"}</span><h1>Turn this phone<br />into a scanner.</h1><p>No account data is exposed. The pass sends barcode values and protected NFC fingerprints only; it expires or closes immediately when revoked.</p></div>
-      <div className="camera-stage">
+      {nfcBinding ? <div className="reader-confirm"><h2>Member NFC reader</h2><p>Tap Start NFC reader below, then hold one card against this phone. Confirm the member and binding on the counter screen. This pass cannot sell or read member details.</p></div> : <><div className="camera-stage">
         <video ref={videoRef} muted playsInline />
         <div className="scan-frame"><i /><i /><i /><i /><b /></div>
         {!cameraActive ? <div className="camera-placeholder"><ScanBarcode /><span>{paired ? "Counter paired · camera ready" : "Connecting…"}</span></div> : null}
@@ -182,9 +186,10 @@ export function MobileScanner({ token }: { token: string }) {
       </div>
       <button className="button button-primary mobile-camera-button" onClick={() => cameraActive ? stop() : void start()} disabled={!paired}>{cameraActive ? <CameraOff /> : <Camera />}{cameraActive ? "Stop camera" : paired ? "Start camera" : "Pairing…"}</button>
       <div className="decoder-label"><Radio />{decoder}</div>
-      <NfcControl onRead={send} onGenericRead={send} disabled={!paired} />
+      </>}
+      <NfcControl onRead={nfcBinding ? undefined : send} onGenericRead={send} stopAfterGeneric={nfcBinding} disabled={!paired} />
       <div className={`scanner-status ${tone}`} aria-live="polite">{tone === "good" ? <CheckCircle2 /> : <span className="scanner-status-dot" />}<span>{status}</span></div>
-      <form className="manual-scan" onSubmit={submit}><label><Keyboard /><input name="code" autoCapitalize="characters" autoComplete="off" placeholder="Type or scan a code" required /></label><button disabled={!paired}>Send</button></form>
+      {!nfcBinding ? <form className="manual-scan" onSubmit={submit}><label><Keyboard /><input name="code" autoCapitalize="characters" autoComplete="off" placeholder="Type or scan a code" required /></label><button disabled={!paired}>Send</button></form> : null}
       <footer><span>PASS VALIDITY</span><strong>Up to 24 hours</strong><i /></footer>
     </section>
   </main>;

@@ -27,6 +27,8 @@ export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, wr
   const [message, setMessage] = useState("");
   const controller = useRef<AbortController | null>(null);
   const readRef = useRef(onRead); readRef.current = onRead;
+  const genericRef = useRef(onGenericRead); genericRef.current = onGenericRead;
+  useEffect(() => { if (disabled) { controller.current?.abort(); setBusy(false); } }, [disabled]);
   useEffect(() => {
     setSupported(window.isSecureContext && "NDEFReader" in window);
     const pause = () => { if (document.visibilityState === "hidden") { controller.current?.abort(); setBusy(false); } };
@@ -46,8 +48,9 @@ export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, wr
         await reader.write({ records: [{ recordType: "text", data: code }] }, { signal: abort.signal });
         setMessage("Member card written. Test it at the counter before handing it over."); setBusy(false);
       } else {
-        let lastCode = ""; let lastAt = 0;
+        let lastCode = ""; let lastAt = 0; let processing = false;
         reader.onreading = async event => {
+          if (abort.signal.aborted || processing) return;
           const genericEvent = event as typeof event & { serialNumber?: string };
           const rawRecords = event.message.records;
           for (const record of event.message.records) {
@@ -55,17 +58,26 @@ export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, wr
             try {
               const token = memberScanToken(new TextDecoder(record.encoding || "utf-8").decode(record.data));
               if (!token) continue;
+              if (!readRef.current) { setMessage("This is an issued member credential. Use it for lookup; it cannot be rebound as an existing card."); return; }
               if (lastCode === token && Date.now() - lastAt < 2000) return;
               lastCode = token; lastAt = Date.now();
               setMessage("Member card read. Checking at the counter…");
               void Promise.resolve(readRef.current?.(token)).catch(() => setMessage("The card could not be sent. Try again.")); return;
             } catch { /* other NDEF records are not membership credentials */ }
           }
-          if (onGenericRead) {
+          if (genericRef.current) {
+            processing = true;
+            try {
             const code = await bindingCode({ serialNumber: genericEvent.serialNumber, message: { records: rawRecords } });
+            if (abort.signal.aborted) return;
             if (!code || !memberBindingScanToken(code)) { setMessage("This card did not expose a readable NFC identity. Use QR or a supported NDEF reader."); return; }
-            setMessage("Existing NFC card read. Saving its protected binding…");
-            void Promise.resolve(onGenericRead(code)).then(() => { if (stopAfterGeneric) { abort.abort(); setBusy(false); } }).catch(() => setMessage("The card could not be sent. Try again."));
+            if (lastCode === code && Date.now() - lastAt < 2000) return;
+            setMessage("NFC fingerprint read. Sending securely…");
+            await genericRef.current(code);
+            lastCode = code; lastAt = Date.now();
+            setMessage("NFC fingerprint sent. Check the counter for confirmation.");
+            if (stopAfterGeneric) { abort.abort(); setBusy(false); }
+            } catch { setMessage("The card could not be sent. Try again."); } finally { processing = false; }
             return;
           }
           setMessage("No Kōn-Kōn member credential found. Use a card issued by this store.");
