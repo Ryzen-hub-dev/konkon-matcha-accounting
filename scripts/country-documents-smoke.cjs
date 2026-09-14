@@ -83,7 +83,7 @@ async function apiChecks({ api, collection, base, cookie, member, sale }) {
   return { invoice, body, query };
 }
 
-async function browserChecks({ page, mobile, api, member, base, output, fixtures, phoneToken, passId, activeToken }) {
+async function browserChecks({ page, mobile, api, member, base, output, fixtures, phoneToken, passId, activeToken, nextToken }) {
   await mobile.goto(base + '/scan/' + phoneToken);
   await mobile.waitForFunction(() => Boolean(window.__testReader));
   await page.goto(base + `/members/${member._id}/card`);
@@ -133,6 +133,22 @@ async function browserChecks({ page, mobile, api, member, base, output, fixtures
   const released = await api('/api/mobile-scans', 'POST', { action: 'CONNECT', token: newToken }, 200, false);
   assert.equal(released.purpose, 'MEMBERS');
   console.log('PASS shared phone binding/discard/confirm and lookup without restarting NFC; new phone pairing also releases to lookup.');
+  await page.goto(base + '/pos');
+  await page.getByRole('button', { name: '2 phones linked', exact: true }).waitFor();
+  await page.getByRole('button', { name: '2 phones linked', exact: true }).click();
+  const linkDialog = page.getByRole('dialog', { name: 'Link an online scanner', exact: true });
+  assert.equal(await linkDialog.getByRole('button', { name: 'Listening', exact: true }).count(), 2);
+  assert.equal(await linkDialog.getByRole('button', { name: 'Use here', exact: true }).count(), 0);
+  await page.screenshot({ path: path.join(output, 'two-phone-listeners.png'), fullPage: true });
+  await linkDialog.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  const firstLookup = page.waitForRequest(request => request.url().endsWith('/api/member-cards/lookup') && request.method() === 'POST' && request.postDataJSON()?.code === activeToken);
+  const secondLookup = page.waitForRequest(request => request.url().endsWith('/api/member-cards/lookup') && request.method() === 'POST' && request.postDataJSON()?.code === nextToken);
+  await Promise.all([
+    api('/api/mobile-scans', 'POST', { token: phoneToken, code: activeToken }, 201, false),
+    api('/api/mobile-scans', 'POST', { token: newToken, code: nextToken }, 201, false),
+  ]);
+  await Promise.all([firstLookup, secondLookup]);
+  console.log('PASS independent POS scanner phone and Tap-to-read NFC phone listen simultaneously and queue both inputs.');
   await page.goto(base + '/reports');
   await page.getByRole('tab', { name: 'Country report desk', exact: true }).click();
   await page.getByLabel('Reporting country / region').selectOption('GB');

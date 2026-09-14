@@ -294,7 +294,7 @@ async function main() {
     assert.equal(exportData.items[0].refundedQuantity, 1);
     assert.equal(exportData.tenderedAmount, 100);
     await mobile.screenshot({ path: path.join(output, 'customer-receipt-mobile.png'), fullPage: true });
-    await documentsQa.browserChecks({ page, mobile, api, member, base, output, fixtures: docFixtures, phoneToken, passId: pass.session._id, activeToken });
+    await documentsQa.browserChecks({ page, mobile, api, member, base, output, fixtures: docFixtures, phoneToken, passId: pass.session._id, activeToken, nextToken });
     await api('/api/users', 'POST', { fullName: 'Responsive Staff Long Name', username: 'responsive_staff', email: 'responsive.staff.long.address@test.example', role: 'CASHIER', password: 'IsolatedResponsive123!' }, 201);
     await require('./ui-interactions-smoke.cjs')({ page, base, output });
     assert.deepEqual(errors, []);

@@ -151,7 +151,7 @@ Deletion/storage regression checks are included in `scripts/receipt-membership-s
 
 - Node.js routes are short-lived and stateless; MongoDB owns durable scanner and transaction state.
 - MongoDB client reuse is global per warm function instance with `maxPoolSize: 5`, `minPoolSize: 0` and idle cleanup.
-- POS, Inventory, Receipts and Members automatically route the newest live phone pass to the active workflow. Each event snapshots its destination so simultaneous pages cannot consume the wrong scan. A bounded three-second wait returns scans in 250 ms slices, aborts when the page unmounts and pauses while the tab is hidden.
+- POS, Inventory, Receipts and Members automatically route a live phone pass to the active workflow. Every phone already routed to that workflow listens independently at the same time, so a barcode/camera phone and a Tap-to-read NFC phone can remain online together. Arriving scans are processed in order; each event snapshots its destination so simultaneous pages cannot consume the wrong scan. A bounded three-second wait returns scans in 250 ms slices, aborts when the page unmounts and pauses while the tab is hidden.
 - TTL indexes automatically remove expired scanner sessions/events, authentication throttles and sensitive lookup events.
 - One daily authenticated maintenance job at 19:00 UTC, bounded to small batches and a 20-second work budget inside a 30-second function. Configure a private random `CRON_SECRET` (at least 32 characters); see the [retention policy](docs/data-retention.md).
 - No long-running server, filesystem persistence, WebSocket server or background worker is required.

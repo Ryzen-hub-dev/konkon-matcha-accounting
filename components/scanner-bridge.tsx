@@ -38,6 +38,7 @@ export function ScannerBridge({
   const onScanRef = useRef(onScan);
   const consumerIdRef = useRef(crypto.randomUUID());
   const selectedIdRef = useRef("");
+  const scanQueueRef = useRef<Promise<void>>(Promise.resolve());
   const loadVersion = useRef(0);
   onScanRef.current = onScan;
 
@@ -86,51 +87,66 @@ export function ScannerBridge({
     return () => { cancelled = true; };
   }, [issuedUrl]);
 
-  useEffect(() => {
-    if (!selectedId || !enabled) { setBridgeState(selectedId ? "CONNECTING" : "OFFLINE"); return; }
-    let stopped = false;
-    let controller: AbortController | null = null;
-    let retryTimer: number | null = null;
+  const listeningSessions = sessions.filter((session) => session.purpose === purpose);
+  const listeningKey = listeningSessions.map((session) => session._id).sort().join(",");
 
-    const listen = async () => {
-      setBridgeState("CONNECTING");
+  useEffect(() => {
+    const listeningIds = listeningKey ? listeningKey.split(",") : [];
+    if (!listeningIds.length || !enabled) { setBridgeState(listeningIds.length ? "CONNECTING" : "OFFLINE"); return; }
+    let stopped = false;
+    const controllers = new Map<string, AbortController>();
+    const liveIds = new Set<string>();
+    const updateState = () => { if (!stopped) setBridgeState(liveIds.size ? "LIVE" : "CONNECTING"); };
+
+    const listen = async (sessionId: string) => {
+      updateState();
       while (!stopped) {
         if (document.visibilityState === "hidden") {
-          await new Promise<void>((resolve) => { retryTimer = window.setTimeout(resolve, 500); });
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
           continue;
         }
-        controller = new AbortController();
+        const controller = new AbortController();
+        controllers.set(sessionId, controller);
         try {
-          const events = await apiRequest<ScanEvent[]>(`/api/mobile-scans?sessionId=${selectedId}&consumerId=${encodeURIComponent(consumerIdRef.current)}&purpose=${purpose}&wait=1`, { signal: controller.signal });
+          const events = await apiRequest<ScanEvent[]>(`/api/mobile-scans?sessionId=${sessionId}&consumerId=${encodeURIComponent(consumerIdRef.current)}&purpose=${purpose}&wait=1`, { signal: controller.signal });
           if (stopped) break;
-          setBridgeState("LIVE");
+          liveIds.add(sessionId); updateState();
           const processed: string[] = [];
           for (const event of events) {
-            await onScanRef.current(event.code);
+            const task = scanQueueRef.current.then(() => onScanRef.current(event.code));
+            scanQueueRef.current = task.catch(() => {});
+            await task;
             processed.push(event._id);
             setLastScanAt(new Date(event.createdAt));
           }
-          if (processed.length) await apiRequest("/api/mobile-scans", { method: "PATCH", body: JSON.stringify({ sessionId: selectedId, consumerId: consumerIdRef.current, eventIds: processed }) });
+          if (processed.length) await apiRequest("/api/mobile-scans", { method: "PATCH", body: JSON.stringify({ sessionId, consumerId: consumerIdRef.current, eventIds: processed }) });
         } catch (reason) {
           if (stopped || (reason instanceof DOMException && reason.name === "AbortError")) break;
-          setBridgeState("OFFLINE");
+          liveIds.delete(sessionId); updateState();
           if (reason instanceof Error && /expired|inactive|closed|longer active/i.test(reason.message)) {
-            selectedIdRef.current = "";
-            setSelectedId("");
-            feedback("This scanner moved to another screen. Reopen Link phone to route it back here.", "error");
+            setSessions((current) => {
+              const remaining = current.filter((session) => session._id !== sessionId);
+              if (selectedIdRef.current === sessionId) {
+                selectedIdRef.current = remaining.find((session) => session.purpose === purpose)?._id || "";
+                setSelectedId(selectedIdRef.current);
+              }
+              return remaining;
+            });
+            feedback("One phone moved to another screen. Other linked phones keep listening here.", "error");
             break;
           }
-          await new Promise<void>((resolve) => { retryTimer = window.setTimeout(resolve, 1_000); });
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 1_000));
+        } finally {
+          controllers.delete(sessionId);
         }
       }
     };
-    void listen();
+    for (const sessionId of listeningIds) void listen(sessionId);
     return () => {
       stopped = true;
-      controller?.abort();
-      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      for (const controller of controllers.values()) controller.abort();
     };
-  }, [enabled, feedback, purpose, selectedId]);
+  }, [enabled, feedback, listeningKey, purpose]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -181,22 +197,23 @@ export function ScannerBridge({
   }
 
   const selected = sessions.find((session) => session._id === selectedId);
+  const linkedLabel = listeningSessions.length > 1 ? `${listeningSessions.length} phones listening` : selected?.label;
 
   return <>
     <form className={`scanner-bridge scanner-bridge-${bridgeState.toLowerCase()}`} onSubmit={submit}>
       <div className="scanner-bridge-mark"><ScanLine /><i /></div>
-      <div className="scanner-bridge-route"><span>LIVE WHISK LINE · {contextLabel.toUpperCase()}</span><strong>{selected ? selected.label : "USB / Bluetooth scanner"}</strong></div>
+      <div className="scanner-bridge-route"><span>LIVE WHISK LINE · {contextLabel.toUpperCase()}</span><strong>{linkedLabel || "USB / Bluetooth scanner"}</strong></div>
       <label><span>SCAN DESTINATION</span><input value={code} onChange={(event) => setCode(event.target.value)} autoComplete="off" autoCapitalize="characters" placeholder={enabled ? placeholder : "Loading the scan destination…"} disabled={!enabled} aria-label={`${contextLabel} barcode input`} /></label>
       <button className="scanner-read" disabled={!enabled} aria-label="Read code"><Barcode />Read</button>
-      <button type="button" className="scanner-connect" onClick={() => { setOpen(true); void loadSessions(); }}><Smartphone />{selected ? "Scanner linked" : "Link / scan"}</button>
-      <small><Radio />{!enabled ? "PREPARING SCAN DESTINATION" : bridgeState === "LIVE" ? "LOW-LATENCY LISTENER LIVE" : bridgeState === "CONNECTING" ? "CONNECTING AUTOMATICALLY" : "LOCAL SCANNER READY"}{lastScanAt ? ` · LAST ${lastScanAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}</small>
+      <button type="button" className="scanner-connect" onClick={() => { setOpen(true); void loadSessions(); }}><Smartphone />{listeningSessions.length > 1 ? `${listeningSessions.length} phones linked` : selected ? "Scanner linked" : "Link / scan"}</button>
+      <small><Radio />{!enabled ? "PREPARING SCAN DESTINATION" : bridgeState === "LIVE" ? listeningSessions.length > 1 ? `${listeningSessions.length} PHONE LISTENERS LIVE` : "LOW-LATENCY LISTENER LIVE" : bridgeState === "CONNECTING" ? "CONNECTING AUTOMATICALLY" : "LOCAL SCANNER READY"}{lastScanAt ? ` · LAST ${lastScanAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}</small>
     </form>
     <Modal open={open} onClose={() => setOpen(false)} title="Link an online scanner" kicker="LINK OR SCAN QR">
       <div className="scanner-link-panel">
-        <div className="scanner-link-intro"><Link2 /><div><strong>Automatic active-screen routing</strong><p>Open the pass on a phone. The active POS, Inventory, Receipts or Members screen connects to the newest device automatically. Each scan is locked to that destination; the phone cannot read products, customers, prices or reports.</p></div></div>
+        <div className="scanner-link-intro"><Link2 /><div><strong>Independent phones, one destination</strong><p>Every phone routed here listens at the same time. Keep one phone on barcode/camera scanning and another on Tap-to-read NFC; scans are queued safely in arrival order. Each phone can only send codes and cannot read products, customers, prices or reports.</p></div></div>
         <form onSubmit={createSession}><label className="field"><span>Device label</span><input name="label" defaultValue={`${contextLabel} phone`} minLength={2} maxLength={60} required /></label><button className="button button-primary" disabled={busy}><Plus />{busy ? "Issuing…" : "Issue 24-hour pass"}</button></form>
         {issuedUrl ? <div className="issued-scanner-connect">{issuedQr ? <img src={issuedQr} alt="QR code that connects a phone scanner to this POS session" /> : null}<div className="issued-scanner-link"><span>SCAN QR OR COPY ONCE · OPEN ON THE PHONE</span><code>{issuedUrl}</code><div><a className="button button-secondary" href={issuedUrl} target="_blank" rel="noreferrer"><Link2 />Open pass</a><button type="button" className="button button-secondary" onClick={() => navigator.clipboard.writeText(issuedUrl)}><Copy />Copy secure link</button></div></div></div> : null}
-        <div className="scanner-session-list">{sessions.length ? sessions.map((session) => <article key={session._id} className={selectedId === session._id ? "listening" : ""}><div><strong>{session.label}</strong><span>{session.connectedAt ? "Phone connected" : "Waiting for phone"} · routes to {session.purpose} · expires {dateTime.format(new Date(session.expiresAt))}</span></div><button type="button" className="button button-secondary" onClick={() => void useHere(session)} disabled={selectedId === session._id && session.purpose === purpose}>{selectedId === session._id && session.purpose === purpose ? "Listening" : "Use here"}</button><button type="button" className="icon-button danger" title="Revoke scanner pass" onClick={() => void revokeSession(session)}><Unplug /></button></article>) : <p className="scanner-empty">No active phone passes. Issue one to connect automatically.</p>}</div>
+        <div className="scanner-session-list">{sessions.length ? sessions.map((session) => <article key={session._id} className={session.purpose === purpose ? "listening" : ""}><div><strong>{session.label}</strong><span>{session.connectedAt ? "Phone connected" : "Waiting for phone"} · routes to {session.purpose} · expires {dateTime.format(new Date(session.expiresAt))}</span></div><button type="button" className="button button-secondary" onClick={() => void useHere(session)} disabled={session.purpose === purpose}>{session.purpose === purpose ? "Listening" : "Use here"}</button><button type="button" className="icon-button danger" title="Revoke scanner pass" onClick={() => void revokeSession(session)}><Unplug /></button></article>) : <p className="scanner-empty">No active phone passes. Issue one to connect automatically.</p>}</div>
       </div>
     </Modal>
   </>;
