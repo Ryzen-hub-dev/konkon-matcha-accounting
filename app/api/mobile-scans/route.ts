@@ -141,7 +141,7 @@ export async function PATCH(request: Request) {
     if (!session) return fail("The scanner link could not be found.", 404);
     const result = await db.collection("scannerEvents").updateMany(
       { _id: { $in: input.data.eventIds.map((id) => new ObjectId(id)) }, scannerSessionId: session._id, consumedAt: null, claimedBy: input.data.consumerId },
-      { $set: { consumedAt: new Date(), consumedBy: new ObjectId(auth.session.id) } },
+      { $set: { consumedAt: new Date(), consumedBy: new ObjectId(auth.session.id) }, $min: { expiresAt: new Date(Date.now() + 60_000) }, $unset: { encryptedCode: "", code: "" } },
     );
     return ok({ consumed: result.modifiedCount });
   } catch (error) {

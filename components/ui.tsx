@@ -112,22 +112,27 @@ function ModalSurface({ title, kicker, children, onClose }: { title: string; kic
     if (openModalCount++ === 0) { previousPageOverflow = document.documentElement.style.overflow; document.documentElement.style.overflow = "hidden"; }
     dialog.showModal();
     window.dispatchEvent(new Event("konkon:modal-change"));
-    return () => { dialog.close(); if (--openModalCount === 0) document.documentElement.style.overflow = previousPageOverflow; window.dispatchEvent(new Event("konkon:modal-change")); };
+    const cycleFocus = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const dialogs = document.querySelectorAll("dialog.modal-backdrop[open]");
+      if (dialogs.item(dialogs.length - 1) !== dialog) return;
+      const controls = Array.from(dialog.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]'))
+        .filter(control => control.tabIndex >= 0 && !control.matches(':disabled') && control.getClientRects().length > 0 && !control.closest('[inert], [hidden]') && getComputedStyle(control).visibility !== 'hidden');
+      // Disabling the focused submit button can move focus to body on touch
+      // browsers. Capture at document level so the next Tab still enters the form.
+      event.preventDefault();
+      if (!controls.length) { dialog.focus(); return; }
+      const index = controls.indexOf(document.activeElement as HTMLElement);
+      const next = index < 0 ? event.shiftKey ? controls.length - 1 : 0 : (index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
+      controls[next].focus();
+    };
+    document.addEventListener("keydown", cycleFocus, true);
+    return () => { document.removeEventListener("keydown", cycleFocus, true); dialog.close(); if (--openModalCount === 0) document.documentElement.style.overflow = previousPageOverflow; window.dispatchEvent(new Event("konkon:modal-change")); };
   }, []);
   // Native top-layer dialogs escape transformed page/card ancestors, keep
   // keyboard focus inside, and restore focus when the dialog closes.
   return createPortal(
-    <dialog ref={dialogRef} className="modal-backdrop" aria-labelledby={titleId} onCancel={event => { event.preventDefault(); onClose(); }} onPointerDown={event => { if (event.target === event.currentTarget) onClose(); }} onKeyDown={event => {
-      if (event.key !== "Tab") return;
-      const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
-        .filter(control => control.tabIndex >= 0 && control.getClientRects().length > 0 && !control.closest('[inert], [hidden]'));
-      const first = controls[0], last = controls[controls.length - 1];
-      if (!first) { event.preventDefault(); return; }
-      // Keep Tab/Shift+Tab cycling through form controls, including after an
-      // async save error. Native inertness still protects the underlying page.
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    }}>
+    <dialog ref={dialogRef} className="modal-backdrop" aria-labelledby={titleId} onCancel={event => { event.preventDefault(); onClose(); }} onPointerDown={event => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="modal-card">
         <header>
           <div>{kicker ? <span className="eyebrow">{kicker}</span> : null}<h2 id={titleId}>{title}</h2></div>

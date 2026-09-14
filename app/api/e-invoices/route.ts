@@ -5,7 +5,7 @@ import { getDb, getMongoClient } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import { serialise } from "@/lib/format";
 import { eInvoiceInputSchema, EInvoiceError, generateEInvoice } from "@/lib/e-invoices";
-import { encryptMemberToken, decryptMemberToken } from "@/lib/member-cards";
+import { packDocument, unpackDocument } from "@/lib/document-storage";
 import { OwnerRecoveryError, readOwnerRecoveryJson } from "@/lib/owner-recovery";
 import { hasPermission } from "@/lib/rbac";
 
@@ -32,8 +32,9 @@ export async function GET(request: Request) {
       if (!ObjectId.isValid(id)) return fail("Choose a generated document.", 422);
       const artifact = await db.collection("eInvoices").findOne({ _id: new ObjectId(id), sourceType, sourceId: new ObjectId(sourceId) });
       if (!artifact) return fail("The generated document was not found.", 404);
-      const content = decryptMemberToken(artifact.encryptedContent, `einvoice:${id}`);
-      if (digest(content) !== artifact.sha256) throw new EInvoiceError("Document integrity check failed. Ask the Owner to restore a verified backup.", 503);
+      let content: string;
+      try { content = unpackDocument({ encryptedContent: artifact.encryptedContent, contentEncoding: artifact.contentEncoding, sha256: artifact.sha256 }, `einvoice:${id}`); }
+      catch { throw new EInvoiceError("Document integrity check failed. Ask the Owner to restore a verified backup.", 503); }
       await writeAudit(db, auth.session, "einvoice.download", "eInvoice", id);
       return new Response(content, { headers: { "Content-Type": `${artifact.mimeType};charset=utf-8`, "Content-Disposition": `attachment; filename="${artifact.filename}"`, "Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff", "X-Document-SHA256": artifact.sha256 } });
     }
@@ -83,7 +84,7 @@ export async function POST(request: Request) {
         const sha256 = digest(generated.content);
         // A source write makes concurrent payment/refund transactions conflict and retry.
         await collection.updateOne({ _id: sourceId }, { $set: { lastEInvoiceGeneratedAt: new Date() } }, { session: mongoSession });
-        await db.collection("eInvoices").insertOne({ _id, sourceType: input.sourceType, sourceId, sourceStatus: source.status, sourceUpdatedAt: source.updatedAt || source.createdAt, number: generated.document.number, format: input.format, countryCode: generated.document.countryCode, currency: generated.document.currency, total: generated.document.totals.gross, status: "GENERATED_NOT_SUBMITTED", validation: "LOCAL_STRUCTURE_AND_TOTALS_ONLY", filename: generated.filename, mimeType: generated.mimeType, sha256, encryptedContent: encryptMemberToken(generated.content, `einvoice:${_id.toHexString()}`), inputHash, clientRequestId: input.clientRequestId, createdBy: new ObjectId(auth.session.id), createdAt: new Date() }, { session: mongoSession });
+        await db.collection("eInvoices").insertOne({ _id, sourceType: input.sourceType, sourceId, sourceStatus: source.status, sourceUpdatedAt: source.updatedAt || source.createdAt, number: generated.document.number, format: input.format, countryCode: generated.document.countryCode, currency: generated.document.currency, total: generated.document.totals.gross, status: "GENERATED_NOT_SUBMITTED", validation: "LOCAL_STRUCTURE_AND_TOTALS_ONLY", filename: generated.filename, mimeType: generated.mimeType, sha256, ...packDocument(generated.content, `einvoice:${_id.toHexString()}`), inputHash, clientRequestId: input.clientRequestId, createdBy: new ObjectId(auth.session.id), createdAt: new Date() }, { session: mongoSession });
         await writeAudit(db, auth.session, "einvoice.generate", "eInvoice", _id.toHexString(), { sourceType: input.sourceType, sourceId: input.sourceId, format: input.format, sha256 }, mongoSession);
         return { id: _id.toHexString(), sha256, reused: false };
       });

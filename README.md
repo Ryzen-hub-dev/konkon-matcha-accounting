@@ -14,7 +14,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Staff account generation with temporary passwords and mandatory password change.
 - Self-service password change and administrator password reset.
 - Versioned sessions: password, role, disable and archive changes revoke existing sessions.
-- Reversible account disable plus audit-preserving archive (“delete”) controls.
+- Reversible account disable, plus transactional deletion that removes login/contact details and revokes linked devices. Deleted staff disappear from Team; usernames/emails can be reused while stable IDs preserve historical evidence.
 - Owner-only 24-hour ownership-transfer cooling period with cancel/complete steps.
 - Open, read-only and closed workspace modes with an optional automatic reopen time.
 - Audit records for security, ownership, inventory, member, sale and configuration changes.
@@ -59,11 +59,12 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Exact National ID/passport/business-ID search without storing or returning the full identifier.
 - Identity values are normalized and protected with an `IDENTITY_LOOKUP_SECRET`-keyed HMAC; only the hash and last four characters are stored. `AUTH_SECRET` is a local-development fallback only.
 - Protected identity lookup is rate-limited and audit logged.
-- Member “delete” is an archive operation so invoices, receipts, points and audits stay referentially intact.
+- Member deletion clears profile contacts, identity lookup keys and the printable card code; issued credentials are revoked. Phone/identity details can be registered again with a new member ID, while old receipts, points and accounting references remain separate and intact.
 - Independently issued QR/NFC member cards with editable label, membership title and colour; suspend, reactivate, permanently void and audit-preserving delete controls.
 - Existing-card NFC binding is integrated into **Tap-to-read NFC**: reuse a connected POS/Members phone or link a new one, and confirm the target member before binding. A temporary member lock and per-binding reservation ID prevent other screens or delayed events from assigning the wrong member. Confirmation/Finish binding returns shared passes to lookup without restarting NFC. Same-device reading also requires confirmation. Existing dedicated legacy passes retain their original revoke-on-finish behavior. Bound cards retain suspend/reactivate/void/delete controls.
 - Orphaned NFC cleanup: Members shows only existing-card bindings whose member was archived or removed. Authorized staff can review the card metadata and clear that binding; the physical card can then be bound to another member without changing sale, refund, points or accounting history. POS and the keyboard-wedge/linked-phone scanner can scan the bound code and open the same guarded clear action.
-- Random card credentials, SHA-256 lookup hashes and AES-256-GCM encrypted storage. No name, phone or identity number is written to an NFC tag. Sensitive receipt/member scanner events are encrypted until TTL expiry.
+- Random card credentials, SHA-256 lookup hashes and AES-256-GCM encrypted storage. No name, phone or identity number is written to an NFC tag. Consumed scanner payloads are removed immediately on acknowledgement, with the remaining event metadata expiring within one minute (subject to MongoDB's TTL sweep).
+- [Bounded data maintenance](docs/data-retention.md): daily temporary-record cleanup, legacy deleted-profile scrubbing, 90-day operational-log retention and lossless compression before encryption for electronic-invoice files. Financial records and mutation audit evidence are not automatically deleted.
 - Phone-based NDEF reading/writing on supported Android Chrome devices, with QR fallback elsewhere. Static tags are copyable identification credentials, not payment authorization or clone-resistant smart cards. See [receipt and NFC guide](docs/receipts-and-nfc.md).
 - The linked-phone pass keeps barcode camera/USB/Bluetooth scanning in its own lane and exposes NFC as a separate reader. NFC attempts to start automatically when the pass opens (one browser permission gesture may still be required), then stays live while the page is foregrounded.
 - POS and Members also mount the same NFC reader directly: tap an issued or bound card to select/lookup the member without opening the barcode scanner. A linked phone follows the active counter page without reopening its pass. Normal reading stays active after each tap, suppresses duplicate/in-flight events and permits retries after failed delivery. Web NFC suspends in the background and resumes the same subscription in the foreground; supported phones request a screen wake lock. First use may require one permission tap, and the phone must remain unlocked. Pass expiry, revocation and the one-card binding confirmation step still apply.
@@ -116,7 +117,7 @@ Core endpoints:
 - `/api/receipt-lookup`, `/api/public-receipts`, `/api/member-cards`, `/api/member-cards/lookup`
 - `/api/invoices`, `/api/invoice-templates`, `/api/journals`, `/api/reports`, `/api/e-invoices`
 - `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`
-- `/api/settings`, `/api/settings/history`, `/api/locations`
+- `/api/settings`, `/api/settings/history`, `/api/locations`, `/api/maintenance`
 
 Workspace writes require a same-origin browser request and authenticated role permission. Initial setup, private owner recovery and token-restricted phone scan submission have their own authorization rules. Customer receipt retrieval is a read-only POST requiring the signed receipt token; it never authorizes refunds. Public errors do not include stack traces, secrets or database internals.
 
@@ -144,12 +145,15 @@ The current suite covers authentication errors, origin protection, RBAC, MongoDB
 
 Invoice acceptance also covers impossible calendar dates, currency-safe line calculations, idempotent draft creation, unpaid-draft editing, template snapshot retention, optimistic version conflicts, immutable sent/paid transitions, payment journal posting and mobile invoice-register controls.
 
+Deletion/storage regression checks are included in `scripts/receipt-membership-smoke.cjs`, which uses a disposable local MongoDB replica and production build. They cover member/staff identifier reuse, old-session/card invalidation, concurrent card issuance/deletion, old orphan-card visibility, maintenance authorization/dry-run/retries, retained financial evidence and legacy encrypted-document migration. `scripts/team-browser-smoke.cjs` renders the actual Team component with HTTP fixtures and tests create/reset/role/disable/delete at 320, 390, 768, 1024 and 1360 pixels. Both browser scripts take the directory containing Playwright as their first argument.
+
 ## Vercel Hobby design
 
 - Node.js routes are short-lived and stateless; MongoDB owns durable scanner and transaction state.
 - MongoDB client reuse is global per warm function instance with `maxPoolSize: 5`, `minPoolSize: 0` and idle cleanup.
 - POS, Inventory, Receipts and Members automatically route the newest live phone pass to the active workflow. Each event snapshots its destination so simultaneous pages cannot consume the wrong scan. A bounded three-second wait returns scans in 250 ms slices, aborts when the page unmounts and pauses while the tab is hidden.
 - TTL indexes automatically remove expired scanner sessions/events, authentication throttles and sensitive lookup events.
+- One daily authenticated maintenance job at 19:00 UTC, bounded to small batches and a 20-second work budget inside a 30-second function. Configure a private random `CRON_SECRET` (at least 32 characters); see the [retention policy](docs/data-retention.md).
 - No long-running server, filesystem persistence, WebSocket server or background worker is required.
 - `vercel.json` pins functions to Singapore and enables Fluid Compute.
 

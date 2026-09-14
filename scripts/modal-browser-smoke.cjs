@@ -12,14 +12,15 @@ const fs = require('node:fs/promises');
       import { Modal, Notice, useNotice, apiRequest } from ${JSON.stringify(uiPath)};
       function TestApp() {
         const [open, setOpen] = useState(false);
+        const [busy, setBusy] = useState(false);
         const { notice, show } = useNotice();
         return <div style={{ transform: 'translateZ(0)', minHeight: 1600 }}>
           {notice && <Notice {...notice} />}
           <button className="button button-primary" onClick={() => setOpen(true)}>Open test form</button>
           <Modal open={open} title="Test member form" onClose={() => setOpen(false)}>
-            <form className="modal-form" onSubmit={async event => { event.preventDefault(); try { await apiRequest('/api/test-save', { method: 'POST', body: '{}' }); } catch (error) { show(error.message, 'error'); } }}>
+            <form className="modal-form" onSubmit={async event => { event.preventDefault(); setBusy(true); try { await apiRequest('/api/test-save', { method: 'POST', body: '{}' }); } catch (error) { show(error.message, 'error'); } finally { setBusy(false); } }}>
               <label className="field"><span>Name</span><input name="name" required /></label>
-              <button className="button button-primary">Save test member</button>
+              <button className="button button-primary" disabled={busy}>Save test member</button>
             </form>
           </Modal>
         </div>;
@@ -33,7 +34,7 @@ const fs = require('node:fs/promises');
   const browser = await chromium.launch({ headless: true, channel: 'msedge' });
   try {
     for (const width of [390, 768, 1024, 1360]) {
-      const context = await browser.newContext({ viewport: { width, height: 844 }, hasTouch: width < 900 });
+      const context = await browser.newContext({ viewport: { width, height: 844 }, hasTouch: width < 900, isMobile: width < 700 });
       const page = await context.newPage(), errors = [];
       page.on('pageerror', error => errors.push(error.message));
       await page.route('**/*', route => {
@@ -56,6 +57,10 @@ const fs = require('node:fs/promises');
         const close = dialog.getByRole('button', { name: 'Close dialog' });
         assert.equal(await close.evaluate(el => { const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return el === hit || el.contains(hit); }), true);
         await page.keyboard.press('Tab');
+        assert.equal(await dialog.evaluate(el => el.contains(document.activeElement)), true);
+        await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
+        assert.equal(await dialog.evaluate(el => el.contains(document.activeElement)), true, 'Recover focus when Tab originates outside dialog');
+        await page.keyboard.press('Shift+Tab');
         assert.equal(await dialog.evaluate(el => el.contains(document.activeElement)), true);
         if (attempt === 0) await activate(close); else await page.keyboard.press('Escape');
         await dialog.waitFor({ state: 'detached' });

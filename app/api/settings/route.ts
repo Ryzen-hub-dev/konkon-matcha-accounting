@@ -79,6 +79,7 @@ export async function PATCH(request: Request) {
         const currencyError = ledgerCurrencyChangeError(current.currency, input.data.currency);
         if (currencyError) throw new CurrencyChangeConflict(currencyError);
         const changedFields = Object.keys(input.data).filter((field) => JSON.stringify(current[field as keyof typeof current]) !== JSON.stringify(input.data[field as keyof typeof input.data]));
+        if (!changedFields.length) { settings = current; return; }
         const updated = await db.collection("settings").findOneAndUpdate(
           { key: "business" },
           { $set: { ...input.data, acceptedCurrencies: [...new Set(input.data.acceptedCurrencies)], updatedAt: now, updatedBy: auth.session.id }, $setOnInsert: { key: "business", createdAt: now } },

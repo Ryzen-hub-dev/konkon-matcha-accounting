@@ -130,6 +130,7 @@ export async function PATCH(request: Request) {
       return ok(serialise(released));
     }
     if (input.data.bindingLeaseId || input.data.bindingMemberId) return fail("This binding has already finished. Reload the reader.", 409);
+    if (previous.purpose === input.data.purpose) return ok(serialise({ ...previous, tokenHash: undefined }));
     const session = await db.collection("scannerSessions").findOneAndUpdate(
       {
         ...owned,

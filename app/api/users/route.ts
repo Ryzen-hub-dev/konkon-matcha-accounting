@@ -4,7 +4,8 @@ import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
 import { hashPassword, normalizeIdentity } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { getDb, getMongoClient } from "@/lib/db";
+import { clearArchivedUser } from "@/lib/record-deletion";
 import { canManageRole } from "@/lib/rbac";
 import { USER_ROLES } from "@/lib/types";
 import { serialise } from "@/lib/format";
@@ -37,7 +38,7 @@ export async function GET() {
   try {
     const db = await getDb();
     const [users, audit] = await Promise.all([
-      db.collection("users").find({}, { projection }).sort({ role: 1, fullName: 1 }).limit(200).toArray(),
+      db.collection("users").find({ archivedAt: { $exists: false } }, { projection }).sort({ role: 1, fullName: 1 }).limit(200).toArray(),
       db.collection("auditLogs").find({}).sort({ createdAt: -1 }).limit(20).toArray(),
     ]);
     return ok(serialise({ users, audit }));
@@ -98,10 +99,11 @@ export async function PATCH(request: Request) {
     if (input.data.action === "RESET_PASSWORD") {
       const temporaryPassword = `Ko!${randomBytes(12).toString("base64url")}9a`;
       const changedAt = new Date();
-      await db.collection("users").updateOne(
-        { _id: target._id },
+      const result = await db.collection("users").updateOne(
+        { _id: target._id, archivedAt: { $exists: false }, role: target.role },
         { $set: { passwordHash: await hashPassword(temporaryPassword), mustChangePassword: true, updatedAt: changedAt }, $inc: { sessionVersion: 1 } },
       );
+      if (!result.matchedCount) return fail("This account was deleted or changed. Reload the directory.", 409);
       await writeAudit(db, auth.session, "user.password_reset", "user", input.data.id, { forcedChange: true });
       return ok({ user: serialise(await db.collection("users").findOne({ _id: target._id }, { projection })), temporaryPassword });
     }
@@ -111,10 +113,11 @@ export async function PATCH(request: Request) {
       updatedAt: new Date(),
     };
     const user = await db.collection("users").findOneAndUpdate(
-      { _id: target._id },
+      { _id: target._id, archivedAt: { $exists: false }, role: target.role },
       { $set: changes, $inc: { sessionVersion: 1 } },
       { returnDocument: "after", projection },
     );
+    if (!user) return fail("This account was deleted or changed. Reload the directory.", 409);
     await writeAudit(db, auth.session, "user.update", "user", input.data.id, changes);
     return ok(serialise(user));
   } catch (error) {
@@ -129,18 +132,26 @@ export async function DELETE(request: Request) {
   try {
     const input = deleteSchema.safeParse(await request.json());
     if (!input.success || !ObjectId.isValid(input.data.id)) return fail("Check the account reference.", 422);
-    if (input.data.id === auth.session.id) return fail("You cannot archive your own account.", 409);
+    if (input.data.id === auth.session.id) return fail("You cannot delete your own account.", 409);
     const db = await getDb();
     const target = await db.collection("users").findOne({ _id: new ObjectId(input.data.id), archivedAt: { $exists: false } });
     if (!target) return fail("The account no longer exists.", 404);
     if (!canManageRole(auth.session.role, target.role)) return fail("You cannot archive this account.", 403);
     const now = new Date();
-    await db.collection("users").updateOne(
-      { _id: target._id },
-      { $set: { active: false, archivedAt: now, archivedBy: new ObjectId(auth.session.id), updatedAt: now }, $inc: { sessionVersion: 1 } },
-    );
-    await writeAudit(db, auth.session, "user.archive", "user", input.data.id, { username: target.username });
-    return ok({ archived: true });
+    const session = (await getMongoClient()).startSession();
+    try {
+      const deleted = await session.withTransaction(async () => {
+        const result = await db.collection("users").updateOne(
+          { _id: target._id, archivedAt: { $exists: false }, role: target.role },
+          { $set: { active: false, archivedAt: now, archivedBy: new ObjectId(auth.session.id), updatedAt: now }, $inc: { sessionVersion: 1 } }, { session },
+        );
+        if (!result.matchedCount) return false;
+        await clearArchivedUser(db, target._id, now, session);
+        await writeAudit(db, auth.session, "user.archive", "user", input.data.id, { credentialsRemoved: true }, session);
+        return true;
+      });
+      return deleted ? ok({ archived: true, deleted: true }) : fail("This account changed. Reload the directory.", 409);
+    } finally { await session.endSession(); }
   } catch (error) {
     return publicError(error);
   }

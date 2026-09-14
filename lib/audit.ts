@@ -1,5 +1,6 @@
 import { ObjectId, type Db, type ClientSession } from "mongodb";
 import type { SessionPayload } from "@/lib/types";
+import { auditExpiry } from "./data-retention";
 
 export async function writeAudit(
   db: Db,
@@ -10,6 +11,8 @@ export async function writeAudit(
   details: Record<string, unknown> = {},
   session?: ClientSession,
 ) {
+  const createdAt = new Date();
+  const expiresAt = auditExpiry(action, createdAt);
   await db.collection("auditLogs").insertOne(
     {
       actorId: ObjectId.isValid(actor.id) ? new ObjectId(actor.id) : actor.id,
@@ -19,7 +22,8 @@ export async function writeAudit(
       entityType,
       entityId,
       details,
-      createdAt: new Date(),
+      createdAt,
+      ...(expiresAt ? { expiresAt } : {}),
     },
     session ? { session } : undefined,
   );

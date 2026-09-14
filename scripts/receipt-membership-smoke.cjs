@@ -40,7 +40,7 @@ async function main() {
     isolatedDb = rawDb;
     console.log(`READY ${dbName}; production collections are not accessed.`);
     const collection = name => rawDb.collection(prefix + name);
-    const env = { ...process.env, MONGODB_URI: uri, MONGODB_DB_NAME: dbName, MONGODB_COLLECTION_PREFIX: prefix, AUTH_SECRET: randomBytes(40).toString('hex'), IDENTITY_LOOKUP_SECRET: randomBytes(40).toString('hex'), NEXT_PUBLIC_APP_URL: base, NODE_ENV: 'production' };
+    const env = { ...process.env, MONGODB_URI: uri, MONGODB_DB_NAME: dbName, MONGODB_COLLECTION_PREFIX: prefix, AUTH_SECRET: randomBytes(40).toString('hex'), IDENTITY_LOOKUP_SECRET: randomBytes(40).toString('hex'), CRON_SECRET: randomBytes(40).toString('hex'), NEXT_PUBLIC_APP_URL: base, NODE_ENV: 'production' };
     let ready = false; let exited = false;
     server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '--hostname', '127.0.0.1', '--port', String(port)], { windowsHide: true, env, stdio: ['ignore', 'pipe', 'pipe'] });
     server.stdout.on('data', data => { if (String(data).includes('Ready')) ready = true; });
@@ -126,6 +126,10 @@ async function main() {
     const sale = await api('/api/sales', 'POST', { clientRequestId: randomUUID(), paymentMethod: 'CASH', tenderedAmount: 100, memberId: member._id, items: [{ productId: product._id, quantity: 2 }], saleNote: 'PRIVATE ORDER NOTE', paymentReference: 'PRIVATE PAY REF' }, 201);
     const documentsQa = require('./country-documents-smoke.cjs');
     const docFixtures = await documentsQa.apiChecks({ api, collection, base, cookie: () => cookie, member, sale });
+    if (process.argv.includes('--maintenance-only')) {
+      await require('./deletion-maintenance-smoke.cjs')({ api, collection, base, cookie: () => cookie, env, product });
+      return;
+    }
     assert.ok(sale.publicReceiptUrl); assert.equal(new URL(sale.publicReceiptUrl).origin, base); const receiptToken = new URLSearchParams(new URL(sale.publicReceiptUrl).hash.slice(1)).get('receipt');
     await api(`/api/sales?id=${sale._id}`, 'GET', undefined, 401, false);
     const publicSale = await api('/api/public-receipts', 'POST', { token: receiptToken }, 200, false);
@@ -160,6 +164,8 @@ async function main() {
     const events = await api(`/api/mobile-scans?sessionId=${pass.session._id}&consumerId=${consumer}&purpose=RECEIPTS`);
     assert.equal(events[0].code, sale.publicReceiptUrl.toUpperCase());
     await api('/api/mobile-scans', 'PATCH', { sessionId: pass.session._id, consumerId: consumer, eventIds: events.map(event => event._id) });
+    const consumed = await collection('scannerEvents').findOne({ _id: storedEvent._id });
+    assert.ok(!consumed || !consumed.encryptedCode && !consumed.code && consumed.expiresAt <= new Date(Date.now() + 61000));
     await api('/api/scanner-sessions', 'PATCH', { id: pass.session._id, purpose: 'MEMBERS' });
     console.log('PASS phone receipt routing, encrypted event storage, claim and acknowledgement.');
     const { chromium } = require(path.join(process.argv[2], 'playwright'));
@@ -289,9 +295,11 @@ async function main() {
     assert.equal(exportData.tenderedAmount, 100);
     await mobile.screenshot({ path: path.join(output, 'customer-receipt-mobile.png'), fullPage: true });
     await documentsQa.browserChecks({ page, mobile, api, member, base, output, fixtures: docFixtures, phoneToken, passId: pass.session._id, activeToken });
+    await api('/api/users', 'POST', { fullName: 'Responsive Staff Long Name', username: 'responsive_staff', email: 'responsive.staff.long.address@test.example', role: 'CASHIER', password: 'IsolatedResponsive123!' }, 201);
     await require('./ui-interactions-smoke.cjs')({ page, base, output });
     assert.deepEqual(errors, []);
     await api('/api/scanner-sessions', 'DELETE', { id: pass.session._id }); await api('/api/mobile-scans', 'POST', { token: phoneToken, code: activeToken }, 410, false);
+    await require('./deletion-maintenance-smoke.cjs')({ api, collection, base, cookie: () => cookie, env, product });
     console.log('PASS real browser quantity editing, scanner receipt navigation, card management, mobile receipt export; simulated NFC read/write boundary.');
   } catch (error) {
     console.error('ACCEPTANCE FAILURE:', String(error.stack || error).replace(/mongodb(?:\+srv)?:\/\/\S+/gi, '[redacted connection]').slice(0, 4000));

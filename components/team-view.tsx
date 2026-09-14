@@ -1,12 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { Activity, Archive, Copy, KeyRound, RotateCcw, ShieldCheck, UserCog, UserPlus } from "lucide-react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { Activity, Copy, KeyRound, RotateCcw, ShieldCheck, Trash2, UserCog, UserPlus } from "lucide-react";
 import { useBusiness } from "@/components/business-context";
 import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
 import type { UserRole } from "@/lib/types";
 
-type TeamUser = { _id: string; fullName: string; username: string; email: string; role: UserRole; active: boolean; mustChangePassword?: boolean; archivedAt?: string; createdAt: string; lastLoginAt?: string };
+type TeamUser = { _id: string; fullName: string; username: string; email?: string; role: UserRole; active: boolean; mustChangePassword?: boolean };
 type Audit = { _id: string; actorName: string; action: string; entityType: string; createdAt: string };
 type TeamData = { users: TeamUser[]; audit: Audit[] };
 
@@ -17,24 +17,78 @@ function generatedPassword() {
 
 export function TeamView({ actorRole }: { actorRole: UserRole }) {
   const { dateTime } = useBusiness();
-  const [data, setData] = useState<TeamData>({ users: [], audit: [] }); const [loading, setLoading] = useState(true); const [open, setOpen] = useState(false); const [busy, setBusy] = useState(false); const [password, setPassword] = useState(""); const [issued, setIssued] = useState<{ username: string; password: string } | null>(null); const { notice, show } = useNotice();
+  const [data, setData] = useState<TeamData>({ users: [], audit: [] });
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pendingId, setPendingId] = useState("");
+  const actionPending = useRef(false);
+  const [password, setPassword] = useState("");
+  const [issued, setIssued] = useState<{ username: string; password: string } | null>(null);
+  const { notice, show } = useNotice();
   const canWrite = ["OWNER", "ADMIN"].includes(actorRole);
-  async function load() { setLoading(true); try { setData(await apiRequest<TeamData>("/api/users")); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not load access controls.", "error"); } finally { setLoading(false); } }
+  const manageable = (user: TeamUser) => canWrite && user.role !== "OWNER" && !(actorRole === "ADMIN" && user.role === "ADMIN");
+
+  async function load() {
+    setLoading(true);
+    try { setData(await apiRequest<TeamData>("/api/users")); }
+    catch (reason) { show(reason instanceof Error ? reason.message : "Could not load access controls.", "error"); }
+    finally { setLoading(false); }
+  }
   useEffect(() => { void load(); }, []);
   function openCreate() { setPassword(generatedPassword()); setOpen(true); }
-  async function create(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setBusy(true); const form = new FormData(event.currentTarget); const username = String(form.get("username")); try { await apiRequest("/api/users", { method: "POST", body: JSON.stringify({ fullName: form.get("fullName"), username, email: form.get("email"), role: form.get("role"), password }) }); setOpen(false); setIssued({ username, password }); show("Staff account generated and audit logged."); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not create the account.", "error"); } finally { setBusy(false); } }
-  async function update(user: TeamUser, patch: { role?: UserRole; active?: boolean }) { try { await apiRequest("/api/users", { method: "PATCH", body: JSON.stringify({ id: user._id, ...patch }) }); show("Access updated."); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not update access.", "error"); } }
-  async function resetPassword(user: TeamUser) { try { const result = await apiRequest<{ temporaryPassword: string }>("/api/users", { method: "PATCH", body: JSON.stringify({ id: user._id, action: "RESET_PASSWORD" }) }); setIssued({ username: user.username, password: result.temporaryPassword }); show("Password reset and existing sessions revoked."); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not reset the password.", "error"); } }
-  async function archiveUser(user: TeamUser) { if (!window.confirm(`Archive @${user.username}? Their history stays in the audit ledger and all sessions will be revoked.`)) return; try { await apiRequest("/api/users", { method: "DELETE", body: JSON.stringify({ id: user._id }) }); show("Account archived and signed out everywhere."); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not archive the account.", "error"); } }
-  const manageable = (user: TeamUser) => canWrite && user.role !== "OWNER" && !(actorRole === "ADMIN" && user.role === "ADMIN");
-  return <div className="page page-enter">
-    <PageHeader eyebrow="OWNER CONTROL" title="Team & access" description="Generate staff accounts, assign the smallest useful role and keep every change traceable." action={canWrite ? <AddButton onClick={openCreate}>Generate account</AddButton> : undefined} />
+  async function create(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (actionPending.current) return;
+    actionPending.current = true; setBusy(true);
+    const form = new FormData(event.currentTarget), username = String(form.get("username"));
+    try {
+      await apiRequest("/api/users", { method: "POST", body: JSON.stringify({ fullName: form.get("fullName"), username, email: form.get("email"), role: form.get("role"), password }) });
+      setOpen(false); setIssued({ username, password }); setPassword(""); show("Staff account generated."); await load();
+    } catch (reason) { show(reason instanceof Error ? reason.message : "Could not create the account.", "error"); }
+    finally { actionPending.current = false; setBusy(false); }
+  }
+  async function change(user: TeamUser, method: "PATCH" | "DELETE", fields: Record<string, unknown>, message: string) {
+    if (actionPending.current) return;
+    actionPending.current = true; setPendingId(user._id);
+    try {
+      const result = await apiRequest<{ temporaryPassword?: string }>("/api/users", { method, body: JSON.stringify({ id: user._id, ...fields }) });
+      if (result.temporaryPassword) setIssued({ username: user.username, password: result.temporaryPassword });
+      else if (method === "DELETE") setIssued(current => current?.username === user.username ? null : current);
+      show(message); await load();
+    } catch (reason) { show(reason instanceof Error ? reason.message : "Could not change the account.", "error"); }
+    finally { actionPending.current = false; setPendingId(""); }
+  }
+  function deleteUser(user: TeamUser) {
+    if (window.confirm(`Delete @${user.username}? Login credentials and contact details will be removed, and linked devices signed out. The username/email can be reused. Historical transactions and audit evidence are preserved.`)) void change(user, "DELETE", {}, "Account deleted. Login details released; historical records preserved.");
+  }
+
+  return <div className="page page-enter team-page">
+    <PageHeader eyebrow="OWNER CONTROL" title="Team & access" description="Give each person the access they need. Disable temporarily, or delete their login and contact details." action={canWrite ? <AddButton onClick={openCreate}>Generate account</AddButton> : undefined} />
     {notice ? <Notice {...notice} /> : null}
-    <section className="access-callout"><ShieldCheck /><div><strong>Owner is the highest authority</strong><p>Only the Owner can create or manage Admin accounts. Passwords are hashed before storage and never displayed again after this screen.</p></div><span>RBAC ACTIVE</span></section>
-    <section className="team-layout"><article className="panel resource-panel"><header className="panel-header"><div><span className="eyebrow">STAFF DIRECTORY</span><h2>{data.users.length} accounts</h2></div><UserCog /></header>{loading ? <LoadingPanel /> : data.users.length ? <div className="team-list">{data.users.map((user) => <div className={`team-row ${user.archivedAt ? "is-archived" : ""}`} key={user._id}><div className="member-avatar">{user.fullName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2)}</div><div><strong>{user.fullName}</strong><span>@{user.username} · {user.email || "No email"}{user.mustChangePassword ? " · password change required" : ""}</span></div><StatusPill value={user.archivedAt ? "ARCHIVED" : user.active ? "ACTIVE" : "DISABLED"} />{manageable(user) && !user.archivedAt ? <select value={user.role} onChange={(event) => update(user, { role: event.target.value as UserRole })}><option value="ADMIN" disabled={actorRole !== "OWNER"}>Admin</option><option value="MANAGER">Manager</option><option value="ACCOUNTANT">Accountant</option><option value="CASHIER">Cashier</option></select> : <span className="role-label">{user.role}</span>}{manageable(user) && !user.archivedAt ? <div className="team-actions"><button className="button button-quiet" title="Reset password" onClick={() => resetPassword(user)}><RotateCcw size={14} />Reset</button><button className={`button ${user.active ? "button-quiet danger" : "button-secondary"}`} onClick={() => update(user, { active: !user.active })}>{user.active ? "Disable" : "Enable"}</button><button className="button button-quiet danger" title="Archive account" onClick={() => archiveUser(user)}><Archive size={14} /></button></div> : <span />}</div>)}</div> : <EmptyState title="No staff accounts" detail="Generate the first account for a manager, accountant or cashier." />}</article>
-      <aside className="panel audit-panel"><header className="panel-header"><div><span className="eyebrow">SECURITY LOG</span><h2>Recent activity</h2></div><Activity /></header><div className="audit-list">{data.audit.map((item) => <div key={item._id}><i /><div><strong>{item.action.replaceAll(".", " · ")}</strong><span>{item.actorName} · {item.entityType}</span></div><time>{dateTime.format(new Date(item.createdAt))}</time></div>)}</div></aside>
+    <section className="access-callout"><ShieldCheck /><div><strong>Owner is the highest authority</strong><p>Only the Owner can manage Admin accounts. Deleted accounts cannot be re-enabled; their historical records stay traceable.</p></div><span>RBAC ACTIVE</span></section>
+    <section className="team-layout">
+      <article className="panel resource-panel"><header className="panel-header"><div><span className="eyebrow">STAFF DIRECTORY</span><h2>{data.users.length} accounts</h2></div><UserCog /></header>
+        {loading ? <LoadingPanel /> : data.users.length ? <div className="team-list">{data.users.map(user => <article className="team-row" key={user._id} aria-label={`Account ${user.username}`} aria-busy={pendingId === user._id}>
+          <div className="member-avatar">{user.fullName.split(/\s+/).map(part => part[0]).join("").slice(0, 2)}</div>
+          <div className="team-identity"><strong>{user.fullName}</strong><span>@{user.username}</span>{user.email ? <span>{user.email}</span> : null}{user.mustChangePassword ? <small>Password change required</small> : null}</div>
+          <StatusPill value={user.active ? "ACTIVE" : "DISABLED"} />
+          {manageable(user) ? <label className="team-role"><span>Role</span><select aria-label={`Role for ${user.username}`} value={user.role} disabled={Boolean(pendingId)} onChange={event => void change(user, "PATCH", { role: event.target.value }, "Role updated; previous sessions revoked.")}><option value="ADMIN" disabled={actorRole !== "OWNER"}>Admin</option><option value="MANAGER">Manager</option><option value="ACCOUNTANT">Accountant</option><option value="CASHIER">Cashier</option></select></label> : <span className="role-label team-role">{user.role}</span>}
+          {manageable(user) ? <div className="team-actions">
+            <button type="button" className="button button-secondary" disabled={Boolean(pendingId)} onClick={() => void change(user, "PATCH", { action: "RESET_PASSWORD" }, "Password reset and existing sessions revoked.")}><RotateCcw size={15} />Reset password</button>
+            <button type="button" className="button button-secondary" disabled={Boolean(pendingId)} onClick={() => void change(user, "PATCH", { active: !user.active }, "Access updated.")}>{user.active ? "Disable" : "Enable"}</button>
+            <button type="button" className="button button-quiet danger" disabled={Boolean(pendingId)} onClick={() => deleteUser(user)}><Trash2 size={15} />Delete</button>
+          </div> : null}
+        </article>)}</div> : <EmptyState title="No staff accounts" detail="Generate an account for a manager, accountant or cashier." />}
+      </article>
+      <aside className="panel audit-panel"><header className="panel-header"><div><span className="eyebrow">SECURITY LOG</span><h2>Recent activity</h2></div><Activity /></header><div className="audit-list">{data.audit.map(item => <div key={item._id}><i /><div><strong>{item.action.replaceAll(".", " · ")}</strong><span>{item.actorName} · {item.entityType}</span></div><time>{dateTime.format(new Date(item.createdAt))}</time></div>)}</div></aside>
     </section>
-    <Modal open={open} onClose={() => setOpen(false)} title="Generate staff account" kicker="OWNER CONTROL"><form className="modal-form" onSubmit={create}><div className="form-grid two"><label className="field"><span>Full name</span><input name="fullName" required autoFocus /></label><label className="field"><span>Username</span><input name="username" pattern="[A-Za-z0-9._-]+" required /></label></div><div className="form-grid two"><label className="field"><span>Email · optional</span><input name="email" type="email" /></label><label className="field"><span>Role</span><select name="role" defaultValue="CASHIER"><option value="ADMIN" disabled={actorRole !== "OWNER"}>Admin</option><option value="MANAGER">Manager</option><option value="ACCOUNTANT">Accountant</option><option value="CASHIER">Cashier</option></select></label></div><label className="field"><span>Temporary password</span><div className="generated-password"><KeyRound size={16} /><input value={password} onChange={(event) => setPassword(event.target.value)} required minLength={12} /><button type="button" onClick={() => setPassword(generatedPassword())}>Regenerate</button></div></label><p className="form-hint">Share this password through a secure channel. The staff member can change it in Workspace settings.</p><footer><button type="button" className="button button-secondary" onClick={() => setOpen(false)}>Cancel</button><button className="button button-primary" disabled={busy}><UserPlus size={16} />{busy ? "Generating…" : "Generate account"}</button></footer></form></Modal>
-    <Modal open={Boolean(issued)} onClose={() => setIssued(null)} title="Account ready" kicker="COPY ONCE">{issued ? <div className="credentials-card"><p>These credentials will not be shown again.</p><label><span>Username</span><strong>{issued.username}</strong></label><label><span>Temporary password</span><strong>{issued.password}</strong></label><button className="button button-primary" onClick={async () => { await navigator.clipboard.writeText(`Username: ${issued.username}\nTemporary password: ${issued.password}`); show("Credentials copied."); }}><Copy size={16} />Copy credentials</button></div> : null}</Modal>
+    <Modal open={open} onClose={() => { setOpen(false); setPassword(""); }} title="Generate staff account" kicker="OWNER CONTROL"><form className="modal-form" onSubmit={create}>
+      <div className="form-grid two"><label className="field"><span>Full name</span><input name="fullName" required minLength={2} maxLength={100} autoFocus /></label><label className="field"><span>Username</span><input name="username" pattern="[A-Za-z0-9._-]+" minLength={3} maxLength={32} required /></label></div>
+      <div className="form-grid two"><label className="field"><span>Email · optional</span><input name="email" type="email" maxLength={160} /></label><label className="field"><span>Role</span><select name="role" defaultValue="CASHIER"><option value="ADMIN" disabled={actorRole !== "OWNER"}>Admin</option><option value="MANAGER">Manager</option><option value="ACCOUNTANT">Accountant</option><option value="CASHIER">Cashier</option></select></label></div>
+      <label className="field"><span>Temporary password</span><div className="generated-password"><KeyRound size={16} /><input value={password} onChange={event => setPassword(event.target.value)} required minLength={12} maxLength={128} autoComplete="new-password" /><button type="button" onClick={() => setPassword(generatedPassword())}>Regenerate</button></div></label>
+      <p className="form-hint">Share the password securely. The staff member must change it at first sign-in.</p><footer><button type="button" className="button button-secondary" onClick={() => { setOpen(false); setPassword(""); }}>Cancel</button><button className="button button-primary" disabled={busy}><UserPlus size={16} />{busy ? "Generating…" : "Generate account"}</button></footer>
+    </form></Modal>
+    <Modal open={Boolean(issued)} onClose={() => setIssued(null)} title="Account ready" kicker="COPY ONCE">{issued ? <div className="credentials-card"><p>These credentials will not be shown again.</p><label><span>Username</span><strong>{issued.username}</strong></label><label><span>Temporary password</span><strong>{issued.password}</strong></label><button className="button button-primary" onClick={async () => { try { await navigator.clipboard.writeText(`Username: ${issued.username}\nTemporary password: ${issued.password}`); show("Credentials copied."); } catch { show("Clipboard unavailable. Copy the credentials manually.", "error"); } }}><Copy size={16} />Copy credentials</button></div> : null}</Modal>
   </div>;
 }

@@ -3,7 +3,8 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
-import { getDb } from "@/lib/db";
+import { getDb, getMongoClient } from "@/lib/db";
+import { clearArchivedMember } from "@/lib/record-deletion";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { normalisePrivateIdentifier, privateIdentifierHash } from "@/lib/sensitive";
 
@@ -155,14 +156,21 @@ export async function DELETE(request: Request) {
     if (!input.success || !ObjectId.isValid(input.data.id)) return fail("Check the member reference.", 422);
     const db = await getDb();
     const now = new Date();
-    const member = await db.collection("members").findOneAndUpdate(
-      { _id: new ObjectId(input.data.id), active: { $ne: false } },
-      { $set: { active: false, archivedAt: now, archivedBy: new ObjectId(auth.session.id), updatedAt: now } },
-      { returnDocument: "after", projection: safeProjection },
-    );
-    if (!member) return fail("The member no longer exists.", 404);
-    await writeAudit(db, auth.session, "member.archive", "member", input.data.id, { memberNo: member.memberNo });
-    return ok({ archived: true });
+    const session = (await getMongoClient()).startSession();
+    try {
+      const deleted = await session.withTransaction(async () => {
+        const member = await db.collection("members").findOneAndUpdate(
+          { _id: new ObjectId(input.data.id), active: { $ne: false } },
+          { $set: { active: false, archivedAt: now, archivedBy: new ObjectId(auth.session.id), updatedAt: now } },
+          { returnDocument: "after", projection: safeProjection, session },
+        );
+        if (!member) return false;
+        await clearArchivedMember(db, member._id, now, session);
+        await writeAudit(db, auth.session, "member.archive", "member", input.data.id, { memberNo: member.memberNo, contactsRemoved: true }, session);
+        return true;
+      });
+      return deleted ? ok({ archived: true, deleted: true }) : fail("The member no longer exists.", 404);
+    } finally { await session.endSession(); }
   } catch (error) {
     return publicError(error);
   }

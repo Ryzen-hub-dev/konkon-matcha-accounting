@@ -4,6 +4,7 @@ import { z } from "zod";
 import { fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { isAuthConfigured, normalizeIdentity, setSession, verifyPassword } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { writeAudit } from "@/lib/audit";
 import type { UserRole } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -77,16 +78,7 @@ export async function POST(request: Request) {
     await setSession(sessionUser);
     await db.collection("authThrottle").deleteOne({ key });
     await db.collection("users").updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } });
-    await db.collection("auditLogs").insertOne({
-      actorId: user._id,
-      actorName: user.fullName,
-      actorRole: user.role,
-      action: "auth.login",
-      entityType: "user",
-      entityId: id,
-      details: {},
-      createdAt: new Date(),
-    });
+    await writeAudit(db, sessionUser, "auth.login", "user", id);
     return ok({ user: sessionUser, redirectTo: user.mustChangePassword ? "/change-password" : "/dashboard" });
   } catch (error) {
     return publicError(error);

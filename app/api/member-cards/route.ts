@@ -1,7 +1,7 @@
-import { ObjectId } from "mongodb";
+import { ObjectId, type Db, type Document } from "mongodb";
 import { z } from "zod";
 import { authorize, fail, ok, created, sameOrigin } from "@/lib/api";
-import { getDb } from "@/lib/db";
+import { getDb, getMongoClient, scopedCollectionName } from "@/lib/db";
 import { serialise } from "@/lib/format";
 import { writeAudit } from "@/lib/audit";
 import { cardCreateSchema, cardStyleSchema, cardUpdateSchema, decryptMemberToken, encryptMemberToken, memberBindingHashFromCode, memberTokenHash, newMemberToken } from "@/lib/member-cards";
@@ -15,6 +15,19 @@ function errorResponse(error: unknown) {
   return error instanceof OwnerRecoveryError ? fail(error.message, error.status) : fail("The member card service is temporarily unavailable.", 503);
 }
 
+// Serialize card creation with member deletion and concurrent card issues.
+async function insertCard(db: Db, card: Document & { memberId: ObjectId }) {
+  const session = (await getMongoClient()).startSession();
+  try {
+    return await session.withTransaction(async () => {
+      const member = await db.collection("members").updateOne({ _id: card.memberId, active: { $ne: false } }, { $inc: { cardRevision: 1 } }, { session });
+      if (!member.matchedCount) throw new OwnerRecoveryError("The member is inactive.", 410);
+      if (await db.collection("memberCards").countDocuments({ memberId: card.memberId, status: { $in: ["ACTIVE", "SUSPENDED"] } }, { session }) >= 20) throw new OwnerRecoveryError("Maximum 20 current cards per member. Void an unused card first.", 409);
+      await db.collection("memberCards").insertOne(card, { session });
+    });
+  } finally { await session.endSession(); }
+}
+
 export async function GET(request: Request) {
   const auth = await authorize("members.read");
   if (auth.error) return auth.error;
@@ -23,17 +36,16 @@ export async function GET(request: Request) {
     if (!hasPermission(auth.session.role, "members.write")) return fail("You do not have permission to review orphaned NFC registrations.", 403);
     try {
       const db = await getDb();
-      const cards = await db.collection("memberCards").find({ kind: "BOUND", status: { $in: ["ACTIVE", "SUSPENDED", "VOID"] } }, { projection }).sort({ updatedAt: -1 }).limit(100).toArray();
-      const memberIds = cards.filter((card) => card.memberId instanceof ObjectId).map((card) => card.memberId as ObjectId);
-      const members = memberIds.length
-        ? await db.collection("members").find({ _id: { $in: memberIds } }, { projection: { name: 1, memberNo: 1, active: 1, archivedAt: 1 } }).toArray()
-        : [];
-      const byId = new Map(members.map((member) => [member._id.toHexString(), member]));
-      const orphanedCards = cards.filter((card) => {
-        const member = byId.get(String(card.memberId));
-        return !member || member.active === false;
-      }).map((card) => {
-        const member = byId.get(String(card.memberId));
+      // Filter orphaned registrations before limiting: newer live cards must
+      // not hide an older deleted member's card from the cleanup screen.
+      const cards = await db.collection("memberCards").aggregate([
+        { $match: { kind: "BOUND", status: { $in: ["ACTIVE", "SUSPENDED", "VOID"] } } },
+        { $lookup: { from: scopedCollectionName("members"), localField: "memberId", foreignField: "_id", pipeline: [{ $project: { name: 1, memberNo: 1, active: 1, archivedAt: 1 } }], as: "owner" } },
+        { $match: { $or: [{ "owner.0": { $exists: false } }, { "owner.active": false }] } },
+        { $sort: { updatedAt: -1 } }, { $limit: 100 }, { $project: projection },
+      ]).toArray();
+      const orphanedCards = cards.map(({ owner, ...card }) => {
+        const member = owner[0];
         return {
           ...card,
           member: member ? { name: member.name, memberNo: member.memberNo, archivedAt: member.archivedAt || null } : null,
@@ -47,7 +59,7 @@ export async function GET(request: Request) {
   if (!ObjectId.isValid(memberId)) return fail("Choose a member.", 422);
   try {
     const db = await getDb();
-    return ok(serialise(await db.collection("memberCards").find({ memberId: new ObjectId(memberId) }, { projection }).sort({ createdAt: -1 }).limit(100).toArray()));
+    return ok(serialise(await db.collection("memberCards").find({ memberId: new ObjectId(memberId), status: { $ne: "DELETED" } }, { projection }).sort({ createdAt: -1 }).limit(100).toArray()));
   } catch (error) { return errorResponse(error); }
 }
 
@@ -113,7 +125,7 @@ export async function POST(request: Request) {
       const _id = new ObjectId(); const now = new Date();
       const card = { _id, memberId, clientRequestId: body.clientRequestId, label: input.data.label, tier: input.data.tier, accentColor: input.data.accentColor,
         kind: "BOUND", bindingSource: binding.source, bindingHash: binding.bindingHash, last4: binding.fingerprint.slice(-4).toUpperCase(), status: "ACTIVE", createdAt: now, updatedAt: now, createdBy: new ObjectId(auth.session.id) };
-      try { await db.collection("memberCards").insertOne(card); }
+      try { await insertCard(db, card); }
       catch (error) { if ((error as { code?: number }).code !== 11000) throw error; const retry = await db.collection("memberCards").findOne({ bindingHash: binding.bindingHash }, { projection }); return retry?.memberId?.equals(memberId) ? ok(serialise(retry)) : fail("This NFC card is already bound. Reload and try another card.", 409); }
       await writeAudit(db, auth.session, "member_card.bind", "memberCard", _id.toHexString(), { memberId: memberId.toHexString(), source: binding.source });
       return created(serialise(await db.collection("memberCards").findOne({ _id }, { projection })));
@@ -129,7 +141,7 @@ export async function POST(request: Request) {
     const token = newMemberToken(); const now = new Date();
     const card = { _id, memberId, clientRequestId: input.data.clientRequestId, label: input.data.label, tier: input.data.tier, accentColor: input.data.accentColor,
       tokenHash: memberTokenHash(token), encryptedToken: encryptMemberToken(token, _id.toHexString()), last4: token.slice(-4), status: "ACTIVE", createdAt: now, updatedAt: now, createdBy: new ObjectId(auth.session.id) };
-    try { await db.collection("memberCards").insertOne(card); }
+    try { await insertCard(db, card); }
     catch (error) { if ((error as { code?: number }).code !== 11000) throw error; const retry = await db.collection("memberCards").findOne({ clientRequestId: input.data.clientRequestId, memberId }, { projection }); return retry ? ok(serialise(retry)) : fail("Card request conflicts with another issue. Reload and try again.", 409); }
     await writeAudit(db, auth.session, "member_card.issue", "memberCard", _id.toHexString(), { memberId: memberId.toHexString(), tier: card.tier });
     return created(serialise(await db.collection("memberCards").findOne({ _id }, { projection })));
@@ -161,7 +173,7 @@ export async function DELETE(request: Request) {
     const body = await readOwnerRecoveryJson(request) as { id?: unknown };
     if (typeof body?.id !== "string" || !ObjectId.isValid(body.id)) return fail("Choose a card.", 422);
     const db = await getDb();
-    const result = await db.collection("memberCards").updateOne({ _id: new ObjectId(body.id), status: { $ne: "DELETED" } }, { $set: { status: "DELETED", deletedAt: new Date(), updatedAt: new Date() }, $unset: { encryptedToken: "", bindingHash: "" } });
+    const result = await db.collection("memberCards").updateOne({ _id: new ObjectId(body.id), status: { $ne: "DELETED" } }, { $set: { status: "DELETED", deletedAt: new Date(), updatedAt: new Date() }, $unset: { encryptedToken: "", bindingHash: "", tokenHash: "" } });
     if (!result.modifiedCount) return fail("This card is already deleted.", 404);
     await writeAudit(db, auth.session, "member_card.delete", "memberCard", body.id);
     return ok({ deleted: true });

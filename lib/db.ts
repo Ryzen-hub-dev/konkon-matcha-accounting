@@ -1,4 +1,5 @@
 import { CollectionOptions, Db, MongoClient, ServerApiVersion } from "mongodb";
+import { EXPIRING_AUDIT_ACTIONS, OPERATIONAL_LOG_DAYS } from "./data-retention";
 
 type MongoCache = {
   clientPromise?: Promise<MongoClient>;
@@ -76,6 +77,7 @@ async function initializeIndexes(db: Db) {
     ensureMemberCardIndexes(db),
     db.collection("memberCards").createIndex({ clientRequestId: 1 }, { unique: true }),
     db.collection("memberCards").createIndex({ memberId: 1, status: 1 }),
+    db.collection("memberCards").createIndex({ deletedAt: 1 }, { expireAfterSeconds: OPERATIONAL_LOG_DAYS * 86_400, partialFilterExpression: { status: "DELETED" } }),
     db.collection("users").createIndex({ usernameNormalized: 1 }, { unique: true }),
     db.collection("users").createIndex(
       { emailNormalized: 1 },
@@ -133,6 +135,7 @@ async function initializeIndexes(db: Db) {
     db.collection("invoiceTemplates").createIndex({ isDefault: -1, updatedAt: -1 }),
     db.collection("auditLogs").createIndex({ createdAt: -1 }),
     db.collection("auditLogs").createIndex({ actorId: 1, createdAt: -1 }),
+    db.collection("auditLogs").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, partialFilterExpression: { action: { $in: EXPIRING_AUDIT_ACTIONS } } }),
     db.collection("coupons").createIndex({ code: 1 }, { unique: true }),
     db.collection("coupons").createIndex({ active: 1, expiresAt: 1 }),
     db.collection("couponRedemptions").createIndex({ couponId: 1, memberId: 1, createdAt: -1 }),

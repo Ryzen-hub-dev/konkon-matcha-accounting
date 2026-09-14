@@ -63,6 +63,21 @@ module.exports = async function uiInteractions({ page: staffPage, base, output }
     await scanner.getByRole('textbox', { name: 'Device label', exact: true }).fill('QA phone');
     await page.screenshot({ path: path.join(output, `clickable-dialog-${width}.png`) });
     await activate(scanner.getByRole('button', { name: 'Close dialog', exact: true }));
+    await page.goto(base + '/team');
+    await page.getByRole('heading', { name: 'Team & access', exact: true }).waitFor();
+    const teamStaff = page.getByRole('article', { name: 'Account responsive_staff', exact: true });
+    if (await teamStaff.count()) {
+      for (const button of await teamStaff.getByRole('button').all()) {
+        await button.scrollIntoViewIfNeeded();
+        assert.equal(await button.evaluate(el => { const r = el.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return r.height >= 44 && r.left >= 0 && r.right <= innerWidth && (el === hit || el.contains(hit)); }), true, 'Staff controls accessible inside the real app shell');
+      }
+    }
+    await activate(page.getByRole('button', { name: 'Generate account', exact: true }));
+    const teamForm = page.getByRole('dialog', { name: 'Generate staff account', exact: true });
+    await teamForm.getByRole('textbox', { name: 'Full name', exact: true }).fill('Responsive form check');
+    await activate(teamForm.getByRole('button', { name: 'Cancel', exact: true }));
+    await teamForm.waitFor({ state: 'detached' });
+    await page.screenshot({ path: path.join(output, `team-shell-${width}.png`), fullPage: true });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2), true);
     assert.deepEqual(errors, []);
     } catch (error) {
@@ -70,5 +85,5 @@ module.exports = async function uiInteractions({ page: staffPage, base, output }
       throw error;
     } finally { await context.close(); }
   }
-  console.log('PASS real pointer clicks, navigation, visible form errors, modal fields/close/Escape/focus, scrolled-page dialogs at 390/768/1024/1360px.');
+  console.log('PASS real pointer clicks, navigation, visible form errors, modal fields/close/Escape/focus, scrolled-page dialogs and Team app-shell controls at 390/768/1024/1360px.');
 };
