@@ -16,7 +16,11 @@ public partial class MainPage : ContentPage
         {
             string? saved = null;
             try { saved = await SecureStorage.Default.GetAsync(EndpointKey); }
-            catch { SecureStorage.Default.Remove(EndpointKey); }
+            catch
+            {
+                try { SecureStorage.Default.Remove(EndpointKey); }
+                catch { /* The app remains usable when a device keystore is unavailable. */ }
+            }
             EndpointEntry.Text = saved ?? DefaultEndpoint;
             if (saved is not null) await ConnectAsync();
         };
@@ -56,9 +60,14 @@ public partial class MainPage : ContentPage
             Workspace.IsVisible = true;
             ConnectPanel.IsVisible = false;
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        catch (Exception exception)
         {
-            ShowError(exception is TaskCanceledException ? "The server did not answer within 15 seconds." : $"Connection check failed. {exception.Message}");
+            var message = exception is TaskCanceledException
+                ? "The server did not answer within 15 seconds."
+                : exception is HttpRequestException or JsonException or InvalidOperationException
+                    ? $"Connection check failed. {exception.Message}"
+                    : "The client could not open this service. Check the address and device WebView, then try again.";
+            ShowError(message);
         }
         finally
         {
@@ -77,9 +86,15 @@ public partial class MainPage : ContentPage
 
     private void OnNavigated(object? sender, WebNavigatedEventArgs e)
     {
-        StatusLabel.Text = e.Result == WebNavigationResult.Success && allowedOrigin is not null
-            ? $"LIVE LEDGER · {allowedOrigin.Host.ToUpperInvariant()}"
-            : "CONNECTION NEEDS ATTENTION";
+        if (e.Result == WebNavigationResult.Success && allowedOrigin is not null)
+        {
+            StatusLabel.Text = $"LIVE LEDGER · {allowedOrigin.Host.ToUpperInvariant()}";
+            return;
+        }
+        StatusLabel.Text = "CONNECTION NEEDS ATTENTION";
+        Workspace.IsVisible = false;
+        ConnectPanel.IsVisible = true;
+        ShowError("The device WebView could not load the workspace. Update Android System WebView or choose another service.");
     }
 
     private void OnBackClicked(object? sender, EventArgs e) { if (Workspace.CanGoBack) Workspace.GoBack(); }
