@@ -13,6 +13,7 @@
 - Coupon and manual discount values are recomputed and authorized server-side inside the sale workflow.
 - Financial deletion is implemented as archive/void/refund so audit references survive.
 - Security response headers deny framing, MIME sniffing, foreign connections/forms/objects and unnecessary browser capabilities.
+- The Windows/Android client accepts only HTTPS service endpoints in release builds, blocks cross-origin navigation inside its WebView, stores only the chosen endpoint in platform secure storage and contains no database or private API credentials.
 
 ## Deployment responsibilities
 
@@ -24,6 +25,7 @@
 6. Upgrade the hosting plan before commercial use and configure monitoring/alerting.
 7. Run dependency, secret and application security scans in CI before each production deployment.
 8. Commission an independent penetration test before storing real customer identity or financial data.
+9. Sign public Windows and Android packages with business-controlled identities kept outside the repository; rotate a signing key immediately if it is exposed.
 
 ## Reporting a vulnerability
 

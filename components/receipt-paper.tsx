@@ -12,6 +12,9 @@ export type ReceiptPaperDocument = {
   status?: string;
   createdAt: string | Date;
   cashierName?: string;
+  counterCode?: string;
+  counterName?: string;
+  locationName?: string;
   memberName?: string;
   memberNo?: string;
   pointsEarned?: number;
@@ -86,7 +89,8 @@ export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, co
     </section>
     {document.status && document.status !== "COMPLETED" ? <div className="receipt-refund-stamp"><strong>{document.status.replaceAll("_", " ")}</strong>{document.refundedAmount ? <span>{money.format(document.refundedAmount)} refunded</span> : null}</div> : null}
 
-    {(template.showCashier || template.showMember) ? <dl className="receipt-paper-meta">
+    {(template.showCashier || template.showMember || document.counterName) ? <dl className="receipt-paper-meta">
+      {document.counterName ? <div><dt>Counter</dt><dd>{document.counterCode ? `${document.counterCode} · ` : ""}{document.counterName}{document.locationName ? ` · ${document.locationName}` : ""}</dd></div> : null}
       {template.showCashier && document.cashierName ? <div><dt>Cashier</dt><dd>{document.cashierName}</dd></div> : null}
       {template.showMember && document.memberName ? <div><dt>Customer</dt><dd>{document.memberName}{document.memberNo ? ` · ${document.memberNo}` : ""}</dd></div> : null}
     </dl> : null}

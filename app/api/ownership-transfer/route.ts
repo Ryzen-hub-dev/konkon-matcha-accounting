@@ -12,9 +12,8 @@ const actionSchema = z.object({ id: z.string().length(24), action: z.enum(["CANC
 const COOLING_PERIOD_MS = 24 * 60 * 60 * 1000;
 
 async function owner(request?: Request) {
-  const auth = await authorize("team.write");
+  const auth = await authorize("owner.control");
   if (auth.error) return auth;
-  if (auth.session.role !== "OWNER") return { error: fail("Only the current Owner can transfer ownership.", 403) } as const;
   if (request && !sameOrigin(request)) return { error: fail("This request was blocked.", 403) } as const;
   return auth;
 }

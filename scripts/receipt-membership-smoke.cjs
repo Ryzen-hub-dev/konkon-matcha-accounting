@@ -9,6 +9,19 @@ const { createHash, randomBytes, randomUUID } = require('node:crypto');
 const { MongoClient, ObjectId } = require('mongodb');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+async function removeTemporaryRun(directory) {
+  let lastError;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try { await fs.rm(directory, { recursive: true, force: true }); return; }
+    catch (error) {
+      if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(error.code)) throw error;
+      lastError = error;
+      await sleep(1000);
+    }
+  }
+  throw lastError;
+}
+
 async function main() {
   const root = path.resolve('.artifacts/regional-mongo');
   const externalUri = process.env.COMMERCE_TEST_MONGODB_URI;
@@ -68,7 +81,9 @@ async function main() {
       const context = await browser.newContext();
       const [name, ...value] = cookie.split('=');
       await context.addCookies([{ name, value: value.join('='), url: base, httpOnly: true, sameSite: 'Lax' }]);
-      await require('./ui-interactions-smoke.cjs')({ page: await context.newPage(), base, output });
+      const page = await context.newPage();
+      await require('./ui-interactions-smoke.cjs')({ page, base, output });
+      await require('./app-bug-crawler.cjs')({ page, base, output });
       return;
     }
     const cardBody = { memberId: member._id, clientRequestId: randomUUID(), label: 'Primary NFC card', tier: 'MATCHA GOLD', accentColor: '#173f2a' };
@@ -123,7 +138,22 @@ async function main() {
     const existingSerial = 'AB-CD-01';
     const existingCode = `KKNT1-S-${createHash('sha256').update('serial:' + existingSerial).digest('hex')}`;
     await api('/api/member-cards', 'POST', { action: 'BIND', memberId: member._id, code: existingCode, clientRequestId: randomUUID(), label: 'Live reader existing card', tier: 'MATCHA CLUB', accentColor: '#173f2a' }, 201);
-    const sale = await api('/api/sales', 'POST', { clientRequestId: randomUUID(), paymentMethod: 'CASH', tenderedAmount: 100, memberId: member._id, items: [{ productId: product._id, quantity: 2 }], saleNote: 'PRIVATE ORDER NOTE', paymentReference: 'PRIVATE PAY REF' }, 201);
+    const manager = await api('/api/users', 'POST', { fullName: 'Counter Manager', username: 'counter_manager', email: 'counter.manager@test.example', role: 'MANAGER', password: 'IsolatedManager123!' }, 201);
+    const headquarters = (await api('/api/locations'))[0];
+    const gardenLocation = await api('/api/locations', 'POST', { code: 'GARDEN', name: 'Garden branch', type: 'BRANCH', countryCode: headquarters.countryCode, timeZone: headquarters.timeZone, locale: headquarters.locale, currency: headquarters.currency, address: 'QA branch', parentLocationId: headquarters._id }, 201);
+    const defaultCounters = await api('/api/counters'); assert.equal(defaultCounters.length, 1); assert.equal(defaultCounters[0].code, 'MAIN');
+    const gardenCounter = await api('/api/counters', 'POST', { code: 'GARDEN-02', name: 'Garden counter', locationId: gardenLocation._id, managerIds: [manager._id] }, 201);
+    assert.deepEqual(gardenCounter.managerIds, [manager._id]); assert.deepEqual(gardenCounter.managerNames, ['Counter Manager']);
+    await api('/api/locations', 'DELETE', { id: gardenLocation._id }, 409);
+    await collection('users').updateOne({ username: 'testowner' }, { $set: { role: 'MANAGER' } });
+    try { await api('/api/counters'); await api('/api/counters', 'POST', { code: 'DENIED', name: 'Denied counter', locationId: headquarters._id, managerIds: [] }, 403); }
+    finally { await collection('users').updateOne({ username: 'testowner' }, { $set: { role: 'OWNER' } }); }
+    await collection('locations').updateOne({ _id: new ObjectId(gardenLocation._id) }, { $set: { active: false } });
+    await api('/api/sales', 'POST', { clientRequestId: randomUUID(), counterId: gardenCounter._id, paymentMethod: 'CASH', tenderedAmount: 20, items: [{ productId: product._id, quantity: 1 }] }, 409);
+    await collection('locations').updateOne({ _id: new ObjectId(gardenLocation._id) }, { $set: { active: true } });
+    const sale = await api('/api/sales', 'POST', { clientRequestId: randomUUID(), counterId: gardenCounter._id, paymentMethod: 'CASH', tenderedAmount: 100, memberId: member._id, items: [{ productId: product._id, quantity: 2 }], saleNote: 'PRIVATE ORDER NOTE', paymentReference: 'PRIVATE PAY REF' }, 201);
+    assert.equal(sale.counterCode, 'GARDEN-02'); assert.equal(sale.locationId, gardenLocation._id); assert.equal(sale.locationName, 'Garden branch');
+    console.log('PASS multi-counter creation, Manager binding, Manager read-only policy, location guard and immutable sale attribution.');
     const documentsQa = require('./country-documents-smoke.cjs');
     const docFixtures = await documentsQa.apiChecks({ api, collection, base, cookie: () => cookie, member, sale });
     if (process.argv.includes('--maintenance-only')) {
@@ -297,6 +327,7 @@ async function main() {
     await documentsQa.browserChecks({ page, mobile, api, member, base, output, fixtures: docFixtures, phoneToken, passId: pass.session._id, activeToken, nextToken });
     await api('/api/users', 'POST', { fullName: 'Responsive Staff Long Name', username: 'responsive_staff', email: 'responsive.staff.long.address@test.example', role: 'CASHIER', password: 'IsolatedResponsive123!' }, 201);
     await require('./ui-interactions-smoke.cjs')({ page, base, output });
+    await require('./app-bug-crawler.cjs')({ page, base, output });
     assert.deepEqual(errors, []);
     await api('/api/scanner-sessions', 'DELETE', { id: pass.session._id }); await api('/api/mobile-scans', 'POST', { token: phoneToken, code: activeToken }, 410, false);
     await require('./deletion-maintenance-smoke.cjs')({ api, collection, base, cookie: () => cookie, env, product });
@@ -311,7 +342,7 @@ async function main() {
     await client?.close(); await replica?.stop({ doCleanup: false });
     const actual = await fs.realpath(runPath);
     assert.equal(path.dirname(actual), tempRoot); assert.match(path.basename(actual), /^konkon-commerce-[a-zA-Z0-9]+$/);
-    await fs.rm(actual, { recursive: true, maxRetries: 10, retryDelay: 500 });
+    await removeTemporaryRun(actual);
     console.log('CLEANUP isolated temporary database removed; production untouched.');
   }
 }

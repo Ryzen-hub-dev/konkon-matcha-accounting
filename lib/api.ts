@@ -44,7 +44,7 @@ export async function authorize(permission: Permission, options: { allowReadOnly
     if (session.mustChangePassword) {
       return { error: fail("Change your temporary password before using the workspace.", 428) } as const;
     }
-    if (system.mode === "CLOSED" && !["settings.read", "settings.write", "team.read", "team.write"].includes(permission)) {
+    if (system.mode === "CLOSED" && !["settings.read", "settings.write", "team.read", "team.write", "owner.control"].includes(permission)) {
       return { error: fail(system.reason || "This workspace is temporarily closed by the Owner.", 423) } as const;
     }
     if (system.mode === "READ_ONLY" && isWritePermission(permission) && !options.allowReadOnlyWrite) {

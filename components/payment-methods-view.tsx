@@ -13,7 +13,7 @@ type AssetAccount = { _id: string; code: string; name: string; type: "ASSET" };
 type ExchangeRate = { _id?: string; baseCurrency: string; quoteCurrency: string; rate: number; source: string; effectiveAt: string };
 type ExchangeData = { baseCurrency: string; acceptedCurrencies: string[]; rates: ExchangeRate[] };
 
-export function PaymentMethodsView() {
+export function PaymentMethodsView({ canManage }: { canManage: boolean }) {
   const [methods, setMethods] = useState<PaymentMethodRecord[]>([]);
   const [accounts, setAccounts] = useState<AssetAccount[]>([]);
   const [exchange, setExchange] = useState<ExchangeData | null>(null);
@@ -54,8 +54,8 @@ export function PaymentMethodsView() {
     setLoading(true);
     try {
       const [paymentData, accountData, exchangeData] = await Promise.all([
-        apiRequest<PaymentMethodRecord[]>("/api/payment-methods?includeArchived=1"),
-        apiRequest<AssetAccount[]>("/api/payment-methods/accounts"),
+        apiRequest<PaymentMethodRecord[]>(`/api/payment-methods${canManage ? "?includeArchived=1" : ""}`),
+        canManage ? apiRequest<AssetAccount[]>("/api/payment-methods/accounts") : Promise.resolve([]),
         apiRequest<ExchangeData>("/api/exchange-rates"),
       ]);
       setMethods(paymentData);
@@ -166,10 +166,10 @@ export function PaymentMethodsView() {
   const selected = editing;
 
   return <div className="page page-enter payment-page">
-    <PageHeader eyebrow="REGISTER ROUTING" title="Payment methods" description="Add the tender names staff see at checkout and control exactly where each amount posts in the ledger." action={<button className="button button-primary" onClick={openNewMethod}><Plus />New payment method</button>} />
+    <PageHeader eyebrow="REGISTER ROUTING" title="Payment methods" description="Add the tender names staff see at checkout and control exactly where each amount posts in the ledger." action={canManage ? <button className="button button-primary" onClick={openNewMethod}><Plus />New payment method</button> : undefined} />
     {notice ? <Notice {...notice} /> : null}
     <section className="payment-route-hero"><div><Banknote /><span>ACTIVE TENDERS</span><strong>{active.length}</strong></div><i /><div><ShieldCheck /><span>REFERENCE CONTROL</span><strong>{referenceCount}</strong></div><i /><p><b>One sale, one trusted route.</b><span>Every POS payment is revalidated by the API and debited to the chosen cash or bank asset account.</span></p></section>
-    <LocalPaymentBridgePanel />
+    {canManage ? <LocalPaymentBridgePanel /> : null}
     {loading ? <LoadingPanel label="Reading the till routes…" /> : methods.length ? <section className="payment-route-list">{methods.map((method) => {
       const Icon = method.kind === "CASH" ? Banknote : method.code.includes("CARD") ? CreditCard : Landmark;
       return <article key={method._id} className={method.active === false ? "archived" : ""}>
@@ -178,10 +178,10 @@ export function PaymentMethodsView() {
         <div className="payment-route-line"><i /><ReceiptText /><i /></div>
         <div><span>LEDGER DESTINATION</span><strong>{method.accountCode} · {method.accountName}</strong><small>{method.kind === "CASH" ? "Cash tender · change enabled" : "Non-cash tender · exact amount"} · {(method.supportedCurrencies || []).join(" / ") || exchange?.baseCurrency}</small></div>
         <StatusPill value={method.active === false ? "ARCHIVED" : "ACTIVE"} />
-        <div className="row-actions">{method.active === false ? <><button className="icon-button" title="Configure payment method" onClick={() => openMethod(method)}><Pencil /></button><button className="button button-secondary" onClick={() => openMethod(method, true)}><RotateCcw />Restore</button></> : <><button className="icon-button" title="Edit payment method" onClick={() => openMethod(method)}><Pencil /></button><button className="icon-button danger" title="Archive payment method" onClick={() => void archiveMethod(method)}><Archive /></button></>}</div>
+        {canManage ? <div className="row-actions">{method.active === false ? <><button className="icon-button" title="Configure payment method" onClick={() => openMethod(method)}><Pencil /></button><button className="button button-secondary" onClick={() => openMethod(method, true)}><RotateCcw />Restore</button></> : <><button className="icon-button" title="Edit payment method" onClick={() => openMethod(method)}><Pencil /></button><button className="icon-button danger" title="Archive payment method" onClick={() => void archiveMethod(method)}><Archive /></button></>}</div> : null}
       </article>;
-    })}</section> : <EmptyState title="No payment routes" detail="Add at least one cash or non-cash method before using the register." action={<button className="button button-primary" onClick={openNewMethod}><Plus />Add payment method</button>} />}
-    {exchange ? <section className="panel exchange-rate-panel"><header className="panel-header"><div><span className="eyebrow">CROSS-BORDER SETTLEMENT</span><h2>{exchange.baseCurrency} exchange rates</h2></div><Globe2 /></header><p>Rates are quoted as foreign currency per 1 {exchange.baseCurrency}. Every completed receipt stores the exact rate used.</p><div className="exchange-rate-list">{exchange.rates.map((rate) => <div key={rate.quoteCurrency}><strong>{rate.baseCurrency}/{rate.quoteCurrency}</strong><span>{rate.rate.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span><small>{rate.source}</small></div>)}</div>{exchange.acceptedCurrencies.some((currency) => currency !== exchange.baseCurrency) ? <form className="exchange-rate-form" onSubmit={saveRate}><label className="field"><span>Settlement currency</span><select name="quoteCurrency" defaultValue={exchange.acceptedCurrencies.find((currency) => currency !== exchange.baseCurrency)}>{exchange.acceptedCurrencies.filter((currency) => currency !== exchange.baseCurrency).map((currency) => <option key={currency}>{currency}</option>)}</select></label><label className="field"><span>Rate per 1 {exchange.baseCurrency}</span><input name="rate" type="number" min="0.00000001" max="1000000000" step="0.00000001" required /></label><label className="field"><span>Source</span><input name="source" defaultValue="MANUAL TREASURY RATE" maxLength={60} required /></label><button className="button button-primary">Save locked rate</button></form> : <p className="form-hint">Add another accepted currency in Workspace settings before creating an FX rate.</p>}</section> : null}
+    })}</section> : <EmptyState title="No payment routes" detail={canManage ? "Add at least one cash or non-cash method before using the register." : "No active payment method is available."} action={canManage ? <button className="button button-primary" onClick={openNewMethod}><Plus />Add payment method</button> : undefined} />}
+    {exchange ? <section className="panel exchange-rate-panel"><header className="panel-header"><div><span className="eyebrow">CROSS-BORDER SETTLEMENT</span><h2>{exchange.baseCurrency} exchange rates</h2></div><Globe2 /></header><p>Rates are quoted as foreign currency per 1 {exchange.baseCurrency}. Every completed receipt stores the exact rate used.</p><div className="exchange-rate-list">{exchange.rates.map((rate) => <div key={rate.quoteCurrency}><strong>{rate.baseCurrency}/{rate.quoteCurrency}</strong><span>{rate.rate.toLocaleString(undefined, { maximumFractionDigits: 8 })}</span><small>{rate.source}</small></div>)}</div>{canManage ? exchange.acceptedCurrencies.some((currency) => currency !== exchange.baseCurrency) ? <form className="exchange-rate-form" onSubmit={saveRate}><label className="field"><span>Settlement currency</span><select name="quoteCurrency" defaultValue={exchange.acceptedCurrencies.find((currency) => currency !== exchange.baseCurrency)}>{exchange.acceptedCurrencies.filter((currency) => currency !== exchange.baseCurrency).map((currency) => <option key={currency}>{currency}</option>)}</select></label><label className="field"><span>Rate per 1 {exchange.baseCurrency}</span><input name="rate" type="number" min="0.00000001" max="1000000000" step="0.00000001" required /></label><label className="field"><span>Source</span><input name="source" defaultValue="MANUAL TREASURY RATE" maxLength={60} required /></label><button className="button button-primary">Save locked rate</button></form> : <p className="form-hint">Add another accepted currency in Workspace settings before creating an FX rate.</p> : <p className="form-hint">Rates are read-only for this role.</p>}</section> : null}
     <Modal open={adding || Boolean(editing)} onClose={closeMethod} title={restoring && selected ? `Restore ${selected.name}` : selected ? `Edit ${selected.name}` : "New payment method"} kicker="TENDER + LEDGER">
       <form className="modal-form" onSubmit={save} key={selected?._id || "new-payment"}>
         {restoring ? <p className="form-hint">Review the configuration below. Saving will validate and restore this payment method in one step.</p> : null}

@@ -22,6 +22,8 @@ Thumbs.db
 MatchaAccounting/bin/
 MatchaAccounting/obj/
 packages/
+clients/**/bin/
+clients/**/obj/
 
 # Runtime exports
 /Receipts/

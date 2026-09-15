@@ -17,18 +17,16 @@ function validCron(request: Request) {
 export async function GET(request: Request) {
   const cron = validCron(request);
   if (!cron) {
-    const auth = await authorize("settings.read");
+    const auth = await authorize("owner.control");
     if (auth.error) return auth.error;
-    if (auth.session.role !== "OWNER") return fail("Only the Owner can inspect data maintenance.", 403);
   }
   try { return ok(await maintainData(await getDb(), !cron || new URL(request.url).searchParams.get("dryRun") === "1")); }
   catch (error) { return publicError(error); }
 }
 
 export async function POST(request: Request) {
-  const auth = await authorize("settings.write");
+  const auth = await authorize("owner.control");
   if (auth.error) return auth.error;
-  if (auth.session.role !== "OWNER") return fail("Only the Owner can run data maintenance.", 403);
   if (!sameOrigin(request)) return fail("This request was blocked.", 403);
   try { return ok(await maintainData(await getDb(), false)); }
   catch (error) { return publicError(error); }

@@ -14,11 +14,14 @@ import { currencyCodeSchema, roundCurrency } from "@/lib/international";
 import { effectiveProvider, effectiveVerificationMode, ensureDefaultPaymentMethods, paymentCurrencies } from "@/lib/payment-methods";
 import { paymentAmountsMatch, staticQrPaymentIsConfirmed } from "@/lib/payment-verification";
 import { receiptAccessUrl } from "@/lib/receipt-access";
+import { ensureDefaultCounter } from "@/lib/counters";
+import { hasPermission } from "@/lib/rbac";
 
 export const runtime = "nodejs";
 
 const saleSchema = z.object({
   clientRequestId: z.string().uuid(),
+  counterId: z.union([z.string().length(24), z.literal("")]).default(""),
   memberId: z.union([z.string().length(24), z.literal(""), z.null()]).optional(),
   paymentMethod: z.string().trim().toUpperCase().regex(/^[A-Z0-9_-]{2,24}$/),
   paymentReference: z.string().trim().max(80).default(""),
@@ -71,7 +74,7 @@ export async function GET(request: Request) {
     }
     const query = url.searchParams.get("q")?.trim().slice(0, 60) || "";
     const filter = query ? {
-      $or: ["receiptNo", "memberName", "cashierName", "paymentReference"].map((field) => ({ [field]: { $regex: escapedSearch(query), $options: "i" } })),
+      $or: ["receiptNo", "memberName", "cashierName", "counterName", "counterCode", "paymentReference"].map((field) => ({ [field]: { $regex: escapedSearch(query), $options: "i" } })),
     } : {};
     const sales = await db.collection("sales").find(filter).sort({ createdAt: -1 }).limit(200).toArray();
     return ok(serialise(sales));
@@ -100,6 +103,20 @@ export async function POST(request: Request) {
 
     const db = await getDb();
     const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
+    if (input.data.counterId && !ObjectId.isValid(input.data.counterId)) {
+      return fail("Choose a valid counter before checkout.", 422, { counterId: ["This counter reference is invalid."] });
+    }
+    const counter = input.data.counterId
+      ? await db.collection("counters").findOne({ _id: new ObjectId(input.data.counterId), active: { $ne: false } })
+      : await ensureDefaultCounter(db);
+    if (!counter) return fail("Choose an active counter before checkout.", 422, { counterId: ["This counter is unavailable."] });
+    if (!ObjectId.isValid(String(counter.locationId || ""))) return fail("The selected counter has an invalid location.", 409);
+    const counterLocation = await db.collection("locations").findOne({ _id: new ObjectId(String(counter.locationId)), active: { $ne: false } });
+    if (!counterLocation) return fail("The selected counter's location is inactive. Ask an Admin to reassign the counter.", 409);
+    if (auth.session.role === "MANAGER" && Array.isArray(counter.managerIds) && counter.managerIds.length
+      && !counter.managerIds.some((id: ObjectId) => String(id) === auth.session.id)) {
+      return fail("This Manager is not bound to the selected counter.", 403);
+    }
     const money = (value: unknown) => roundCurrency(value, business.currency);
     const existingSale = await db.collection("sales").findOne({ clientRequestId, createdBy: new ObjectId(auth.session.id) });
     if (existingSale) return ok(saleResponse(existingSale, request));
@@ -134,7 +151,7 @@ export async function POST(request: Request) {
     });
     const subtotal = money(items.reduce((sum, item) => sum + item.lineTotal, 0));
     const manualDiscount = money(input.data.manualDiscount ?? input.data.discount ?? 0);
-    if (manualDiscount > 0 && !["OWNER", "ADMIN", "MANAGER"].includes(auth.session.role)) {
+    if (manualDiscount > 0 && !hasPermission(auth.session.role, "coupons.manage")) {
       return fail("A Manager must approve a manual discount. Use an active coupon instead.", 403);
     }
     const requestedTemplate = input.data.templateId && ObjectId.isValid(input.data.templateId)
@@ -195,6 +212,11 @@ export async function POST(request: Request) {
       receiptAccessVersion: randomBytes(16).toString("hex"),
       clientRequestId,
       receiptNo,
+      counterId: counter._id,
+      counterCode: String(counter.code),
+      counterName: String(counter.name),
+      locationId: counterLocation._id,
+      locationName: String(counterLocation.name),
       memberId: member?._id || null,
       memberName: member?.name || "Walk-in guest",
       memberNo: member?.memberNo || "",
@@ -326,6 +348,8 @@ export async function POST(request: Request) {
             type: "SALE",
             reason: receiptNo,
             referenceId: saleId,
+            counterId: counter._id,
+            locationId: counterLocation._id,
             createdBy: new ObjectId(auth.session.id),
             createdAt: now,
           }, { session: mongoSession });
@@ -349,6 +373,8 @@ export async function POST(request: Request) {
           memo: `POS sale ${receiptNo}`,
           reference: receiptNo,
           source: "POS",
+          counterId: counter._id,
+          locationId: counterLocation._id,
           status: "POSTED",
           lines: [
             { accountCode: paymentAccount[0], accountName: paymentAccount[1], debit: total, credit: 0 },
@@ -361,7 +387,7 @@ export async function POST(request: Request) {
           createdBy: new ObjectId(auth.session.id),
           createdAt: now,
         }, { session: mongoSession });
-        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, total, currency: business.currency, tenderCurrency, tenderTotal, exchangeRate: exchange.rate, verificationMode, manualPaymentConfirmed: verificationMode === "STATIC_QR", itemCount: items.length, couponCode: couponResult?.coupon.code || "", manualDiscount }, mongoSession);
+        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, counterCode: counter.code, locationId: counterLocation._id.toHexString(), total, currency: business.currency, tenderCurrency, tenderTotal, exchangeRate: exchange.rate, verificationMode, manualPaymentConfirmed: verificationMode === "STATIC_QR", itemCount: items.length, couponCode: couponResult?.coupon.code || "", manualDiscount }, mongoSession);
       });
     } finally {
       await mongoSession.endSession();

@@ -2,24 +2,17 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
-import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { getDb } from "@/lib/db";
 import { serialise } from "@/lib/format";
-import { locationFields, locationParentChainIsValid, locationUpdateSchema } from "@/lib/locations";
+import { ensureHeadquarters, locationFields, locationParentChainIsValid, locationUpdateSchema } from "@/lib/locations";
 
 export const runtime = "nodejs";
 
 const archiveSchema = z.object({ id: z.string().length(24) });
 
-async function ensureHeadquarters() {
+async function dbWithHeadquarters() {
   const db = await getDb();
-  const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
-  const now = new Date();
-  await db.collection("locations").updateOne(
-    { systemKey: "HEADQUARTERS" },
-    { $setOnInsert: { code: "HQ", name: `${business.businessName} HQ`, type: "HEADQUARTERS", countryCode: business.countryCode, timeZone: business.timeZone, locale: business.locale, currency: business.currency, address: business.address, active: true, systemKey: "HEADQUARTERS", createdAt: now, updatedAt: now } },
-    { upsert: true },
-  );
+  await ensureHeadquarters(db);
   return db;
 }
 
@@ -42,7 +35,7 @@ export async function GET(request: Request) {
   const auth = await authorize("settings.read");
   if (auth.error) return auth.error;
   try {
-    const db = await ensureHeadquarters();
+    const db = await dbWithHeadquarters();
     const includeArchived = new URL(request.url).searchParams.get("includeArchived") === "1";
     const locations = await db.collection("locations").find(includeArchived ? {} : { active: { $ne: false } }).sort({ active: -1, type: 1, code: 1 }).toArray();
     const response = ok(serialise(locations));
@@ -58,7 +51,7 @@ export async function POST(request: Request) {
   try {
     const input = locationFields.safeParse(await request.json());
     if (!input.success) return fail("Check the location details.", 422, input.error.flatten().fieldErrors);
-    const db = await ensureHeadquarters();
+    const db = await dbWithHeadquarters();
     const parent = await parentDetails(db, input.data.parentLocationId);
     const now = new Date();
     const document = { ...input.data, ...parent, parentLocationId: parent?.parentLocationId || null, active: true, createdBy: new ObjectId(auth.session.id), createdAt: now, updatedAt: now };
@@ -79,7 +72,7 @@ export async function PATCH(request: Request) {
   try {
     const input = locationUpdateSchema.safeParse(await request.json());
     if (!input.success || !ObjectId.isValid(input.data?.id || "")) return fail("Check the location update.", 422, input.success ? undefined : input.error.flatten().fieldErrors);
-    const db = await ensureHeadquarters();
+    const db = await dbWithHeadquarters();
     const current = await db.collection("locations").findOne({ _id: new ObjectId(input.data.id) });
     if (!current) return fail("This location could not be found.", 404);
     const { id, parentLocationId, ...changes } = input.data;
@@ -91,6 +84,9 @@ export async function PATCH(request: Request) {
     )) return fail("The primary headquarters code, type, parent and active status are protected.", 409);
     if (changes.active === false && await db.collection("locations").countDocuments({ parentLocationId: current._id, active: { $ne: false } })) {
       return fail("Move or archive child locations before deactivating this parent.", 409);
+    }
+    if (changes.active === false && await db.collection("counters").countDocuments({ locationId: current._id, active: { $ne: false } })) {
+      return fail("Reassign or archive active counters before deactivating this location.", 409);
     }
     const parent = parentLocationId === undefined ? null : await parentDetails(db, parentLocationId, id);
     if (changes.active === true && parentLocationId === undefined && current.parentLocationId) {
@@ -115,12 +111,13 @@ export async function DELETE(request: Request) {
   try {
     const input = archiveSchema.safeParse(await request.json());
     if (!input.success || !ObjectId.isValid(input.data.id)) return fail("Check the location reference.", 422);
-    const db = await ensureHeadquarters();
+    const db = await dbWithHeadquarters();
     const id = new ObjectId(input.data.id);
     const current = await db.collection("locations").findOne({ _id: id, active: { $ne: false } });
     if (!current) return fail("This location is already inactive.", 404);
     if (current.systemKey === "HEADQUARTERS") return fail("The primary headquarters cannot be archived.", 409);
     if (await db.collection("locations").countDocuments({ parentLocationId: id, active: { $ne: false } })) return fail("Move or archive child locations before archiving this parent.", 409);
+    if (await db.collection("counters").countDocuments({ locationId: id, active: { $ne: false } })) return fail("Reassign or archive active counters before archiving this location.", 409);
     const now = new Date();
     await db.collection("locations").updateOne({ _id: id }, { $set: { active: false, archivedAt: now, archivedBy: new ObjectId(auth.session.id), updatedAt: now } });
     await writeAudit(db, auth.session, "location.archive", "location", input.data.id, { code: current.code });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { asMoney, makeDocumentNo } from "../lib/format";
-import { canManageRole, hasPermission } from "../lib/rbac";
+import { ACCESS_AREAS, accessLevel, canManageRole, hasPermission } from "../lib/rbac";
 import { POST as login } from "../app/api/auth/login/route";
 import { POST as setup } from "../app/api/setup/route";
 import { publicError } from "../lib/api";
@@ -52,6 +52,7 @@ import { buildAmountLockedDuitNowQr, inspectDuitNowQr } from "../lib/duitnow-qr"
 import { createPaymentDisplayToken, paymentDisplayTokenHash } from "../lib/payment-display";
 import { customerQrDisplaySignature, staticQrInputSignature } from "../lib/customer-payment-qr";
 import { adbDiscoveryLabel, discoverAdbCommand } from "../lib/adb-discovery";
+import { counterFields } from "../lib/counters";
 
 function sameOriginRequest(path: string, body: string) {
   return new Request(`http://localhost${path}`, {
@@ -87,6 +88,18 @@ test("cashier permissions stop at the counter", () => {
   assert.equal(hasPermission("MANAGER", "purchasing.approve"), true);
   assert.equal(hasPermission("MANAGER", "payables.write"), false);
   assert.equal(hasPermission("ACCOUNTANT", "payables.write"), true);
+  assert.equal(hasPermission("OWNER", "owner.control"), true);
+  assert.equal(hasPermission("ADMIN", "owner.control"), false);
+  assert.equal(hasPermission("MANAGER", "counters.read"), true);
+  assert.equal(hasPermission("MANAGER", "counters.manage"), false);
+  assert.equal(accessLevel("ADMIN", ACCESS_AREAS.find((area) => area.label === "Ownership & shutdown")!), "NONE");
+});
+
+test("counter input requires one active-style location reference and bounded unique Manager bindings", () => {
+  const valid = counterFields.safeParse({ code: " bar-02 ", name: "Garden counter", locationId: "a".repeat(24), managerIds: ["b".repeat(24), "b".repeat(24)] });
+  assert.equal(valid.success, true);
+  if (valid.success) { assert.equal(valid.data.code, "BAR-02"); assert.equal(valid.data.managerIds.length, 1); }
+  assert.equal(counterFields.safeParse({ code: "!", name: "X", locationId: "bad", managerIds: [] }).success, false);
 });
 
 test("custom payment methods preserve trusted tender and ledger rules", () => {
@@ -487,6 +500,7 @@ test("system modes recognise every business mutation as a write", () => {
   assert.equal(isWritePermission("inventory.write"), true);
   assert.equal(isWritePermission("coupons.manage"), true);
   assert.equal(isWritePermission("payments.manage"), true);
+  assert.equal(isWritePermission("owner.control"), true);
   assert.equal(isWritePermission("reports.read"), false);
 });
 

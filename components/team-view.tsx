@@ -1,10 +1,11 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { Activity, Copy, KeyRound, RotateCcw, ShieldCheck, Trash2, UserCog, UserPlus } from "lucide-react";
+import { Activity, CheckCircle2, Copy, KeyRound, LockKeyhole, RotateCcw, ShieldCheck, Trash2, UserCog, UserPlus } from "lucide-react";
 import { useBusiness } from "@/components/business-context";
 import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
-import type { UserRole } from "@/lib/types";
+import { USER_ROLES, type UserRole } from "@/lib/types";
+import { ACCESS_AREAS, ROLE_PROFILES, accessLevel } from "@/lib/rbac";
 
 type TeamUser = { _id: string; fullName: string; username: string; email?: string; role: UserRole; active: boolean; mustChangePassword?: boolean };
 type Audit = { _id: string; actorName: string; action: string; entityType: string; createdAt: string };
@@ -67,6 +68,7 @@ export function TeamView({ actorRole }: { actorRole: UserRole }) {
     <PageHeader eyebrow="OWNER CONTROL" title="Team & access" description="Give each person the access they need. Disable temporarily, or delete their login and contact details." action={canWrite ? <AddButton onClick={openCreate}>Generate account</AddButton> : undefined} />
     {notice ? <Notice {...notice} /> : null}
     <section className="access-callout"><ShieldCheck /><div><strong>Owner is the highest authority</strong><p>Only the Owner can manage Admin accounts. Deleted accounts cannot be re-enabled; their historical records stay traceable.</p></div><span>RBAC ACTIVE</span></section>
+    <section className="panel role-matrix-panel"><header className="panel-header"><div><span className="eyebrow">AUTHORITATIVE ROLE POLICY</span><h2>What every role can and cannot do</h2></div><ShieldCheck /></header><div className="role-profile-row">{USER_ROLES.map((role) => <article key={role}><strong>{ROLE_PROFILES[role].label}</strong><p>{ROLE_PROFILES[role].summary}</p></article>)}</div><div className="role-matrix-scroll"><table><thead><tr><th scope="col">Area</th>{USER_ROLES.map((role) => <th scope="col" key={role}>{ROLE_PROFILES[role].label}</th>)}</tr></thead><tbody>{ACCESS_AREAS.map((area) => <tr key={area.label}><th scope="row">{area.label}</th>{USER_ROLES.map((role) => { const level = accessLevel(role, area); return <td key={role} className={`access-${level.toLowerCase()}`}>{level === "NONE" ? <LockKeyhole /> : <CheckCircle2 />}<span>{level === "NONE" ? "Locked" : level === "MANAGE" ? "Manage" : level === "USE" ? "Use" : "View"}</span></td>; })}</tr>)}</tbody></table></div><footer><span><CheckCircle2 />Manage includes viewing and operating that area.</span><span><LockKeyhole />Locked routes remain protected by the server API, not only hidden in the menu.</span></footer></section>
     <section className="team-layout">
       <article className="panel resource-panel"><header className="panel-header"><div><span className="eyebrow">STAFF DIRECTORY</span><h2>{data.users.length} accounts</h2></div><UserCog /></header>
         {loading ? <LoadingPanel /> : data.users.length ? <div className="team-list">{data.users.map(user => <article className="team-row" key={user._id} aria-label={`Account ${user.username}`} aria-busy={pendingId === user._id}>

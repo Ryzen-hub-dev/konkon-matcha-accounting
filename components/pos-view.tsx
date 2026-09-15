@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, Banknote, CheckCircle2, ChevronRight, Cloud, CreditCard, Expand, ExternalLink, History,
   Minus, Minimize2, Nfc, Palette, Plus, QrCode, ReceiptText, Search, ShieldCheck, ShoppingBasket,
-  Smartphone, TicketPercent, Trash2, UserRound,
+  Smartphone, Store, TicketPercent, Trash2, UserRound,
 } from "lucide-react";
 import { useBusiness } from "@/components/business-context";
 import { ReceiptPaper, type ReceiptPaperDocument } from "@/components/receipt-paper";
@@ -27,6 +27,7 @@ import { playProductAddedTone } from "@/lib/pos-sound";
 import type { ReceiptTemplateRecord } from "@/lib/receipt-templates";
 import { calculateTaxTotals } from "@/lib/tax";
 import type { MemberRecord, ProductRecord } from "@/lib/types";
+import type { CounterRecord } from "@/lib/counters";
 
 type CartLine = ProductRecord & { quantity: number };
 type RegisterConfig = {
@@ -75,6 +76,8 @@ export function PosView({
   const [members, setMembers] = useState<MemberRecord[]>([]);
   const [templates, setTemplates] = useState<ReceiptTemplateRecord[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodRecord[]>([]);
+  const [counters, setCounters] = useState<CounterRecord[]>([]);
+  const [counterId, setCounterId] = useState("");
   const [exchange, setExchange] = useState<ExchangeData>({ baseCurrency: profile.currency, acceptedCurrencies: profile.acceptedCurrencies, rates: [] });
   const [register, setRegister] = useState<RegisterConfig>({ currency: profile.currency, acceptedCurrencies: profile.acceptedCurrencies, locale: profile.locale, timeZone: profile.timeZone, taxName: profile.taxName, taxRate: profile.taxRate, taxMode: profile.taxMode });
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -112,6 +115,7 @@ export function PosView({
   const [studioOpen, setStudioOpen] = useState(false);
   const { notice, show } = useNotice();
   const draftKey = useMemo(() => posDraftStorageKey(userId), [userId]);
+  const counterStorageKey = useMemo(() => `konkon:counter:${userId}`, [userId]);
   const draftReadyRef = useRef(false);
   const draftIdRef = useRef("");
   const suppressDraftRef = useRef(false);
@@ -155,12 +159,13 @@ export function PosView({
   async function load(showLoading = true) {
     if (showLoading) setLoading(true);
     try {
-      const [productData, memberData, templateData, paymentData, exchangeData] = await Promise.all([
+      const [productData, memberData, templateData, paymentData, exchangeData, counterData] = await Promise.all([
         apiRequest<ProductRecord[]>("/api/products"),
         apiRequest<MemberRecord[]>("/api/members"),
         apiRequest<TemplateConfig>("/api/receipt-templates"),
         apiRequest<PaymentMethodRecord[]>("/api/payment-methods"),
         apiRequest<ExchangeData>("/api/exchange-rates"),
+        apiRequest<CounterRecord[]>("/api/counters"),
       ]);
       setProducts(productData);
       setMembers(memberData);
@@ -168,6 +173,13 @@ export function PosView({
       setRegister(templateData.register);
       setPaymentMethods(paymentData);
       setExchange(exchangeData);
+      setCounters(counterData);
+      setCounterId((current) => {
+        const stored = window.localStorage.getItem(counterStorageKey) || "";
+        const selected = counterData.find((counter) => counter._id === current || counter._id === stored) || counterData[0];
+        if (selected) window.localStorage.setItem(counterStorageKey, selected._id);
+        return selected?._id || "";
+      });
       const defaultMethod = paymentData.find((method) => method.code === "PAYNOW") || paymentData[0];
       setPayment((current) => paymentData.some((method) => method.code === current) ? current : defaultMethod?.code || "");
       setTenderCurrency((current) => exchangeData.acceptedCurrencies.includes(current) ? current : exchangeData.baseCurrency);
@@ -513,6 +525,7 @@ export function PosView({
         method: "POST",
         body: JSON.stringify({
           clientRequestId: draftIdRef.current,
+          counterId,
           memberId: memberId || null,
           paymentMethod: payment,
           paymentReference,
@@ -553,7 +566,7 @@ export function PosView({
     finally { setBusy(false); }
   }
 
-  const checkoutLocked = !cart.length || !selectedTemplateId || !selectedPayment || busy || !exchangeRate
+  const checkoutLocked = !cart.length || !selectedTemplateId || !selectedPayment || !counterId || busy || !exchangeRate
     || (isCashPayment && tenderedAmount < tenderTotal)
     || (verificationMode === "REFERENCE" && !paymentReference.trim())
     || (verificationMode === "STATIC_QR" && (!manualPaymentConfirmed || paymentReference.trim().length < 4 || !staticQrDataUrl || (requiresAmountLockedStaticQr && !staticQrAmountLocked)))
@@ -562,6 +575,7 @@ export function PosView({
   return <div className="page page-enter pos-page">
     <PageHeader eyebrow="COUNTER" title="Point of sale" description="Persistent register with live members, cross-border settlement and verified payment controls." action={<div className="pos-page-actions"><button className="button button-secondary" onClick={() => setHistoryOpen(true)}><History size={17} />Draft history</button><Link className="button button-secondary" href="/receipts"><ReceiptText size={17} />Receipt history</Link>{canManageTemplates ? <button className="button button-secondary" onClick={() => setStudioOpen(true)}><Palette size={17} />Receipt templates</button> : null}</div>} />
     {notice ? <Notice {...notice} /> : null}
+    <div className="pos-counter-status"><Store /><span><small>ACTIVE COUNTER</small><strong>{counters.find((counter) => counter._id === counterId)?.locationName || "Select a counter"}</strong></span><select aria-label="Active counter" value={counterId} onChange={(event) => { setCounterId(event.target.value); window.localStorage.setItem(counterStorageKey, event.target.value); }}>{counters.map((counter) => <option key={counter._id} value={counter._id}>{counter.code} · {counter.name}</option>)}</select><Link href="/counters">Counter network</Link></div>
     <div className="pos-draft-status"><Cloud size={15} /><span>{draftSavedAt ? `Saved in this browser at ${draftSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Browser draft protection is active"}</span><i />Member list refreshes automatically every 3 seconds and whenever this window regains focus.</div>
     <ScannerBridge contextLabel="Point of sale" purpose="POS" enabled={!loading} placeholder={paymentIntent?.status === "PENDING" ? "Scan completed-payment verification code" : "Scan product · member card · coupon"} onScan={handleScan} onFeedback={show} />
     <section className="pos-nfc-reader no-print" aria-label="POS NFC reader"><header><div><span className="eyebrow">POS NFC READER · ALWAYS ON</span><h2>Tap a member card</h2><p>Use the linked phone or this device. Tap to select a member; the reader stays ready for the next card.</p></div><Nfc aria-hidden="true" /></header><NfcControl autoStart alwaysOn onRead={handleScan} onGenericRead={handleScan} disabled={loading} /></section>

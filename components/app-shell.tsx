@@ -6,30 +6,32 @@ import { useState } from "react";
 import {
   BarChart3, BookOpen, Boxes, ChevronLeft, ChevronRight, CircleDollarSign,
   FileText, LayoutDashboard, LogOut, MapPinned, Menu, PackageCheck, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
-  Users, WalletCards, X,
+  Store, Users, WalletCards, X,
 } from "lucide-react";
-import type { SessionUser, UserRole } from "@/lib/types";
+import type { SessionUser } from "@/lib/types";
 import { BusinessProvider } from "@/components/business-context";
 import type { BusinessSettings } from "@/lib/business-settings";
 import { countryProfile } from "@/lib/international";
+import { hasPermission, type Permission } from "@/lib/rbac";
 
-type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; roles?: UserRole[] };
+type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; permission?: Permission };
 
 const nav: NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: "/pos", label: "Point of sale", icon: ShoppingBasket, roles: ["OWNER", "ADMIN", "MANAGER", "CASHIER"] },
-  { href: "/coupons", label: "Coupons", icon: TicketPercent, roles: ["OWNER", "ADMIN", "MANAGER", "CASHIER"] },
-  { href: "/payments", label: "Payment methods", icon: WalletCards, roles: ["OWNER", "ADMIN"] },
-  { href: "/receipts", label: "Receipts", icon: ReceiptText, roles: ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT", "CASHIER"] },
-  { href: "/members", label: "Members", icon: Users },
-  { href: "/inventory", label: "Inventory", icon: Boxes },
-  { href: "/procurement", label: "Purchasing & payables", icon: PackageCheck, roles: ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT"] },
-  { href: "/accounting", label: "Accounting", icon: BookOpen, roles: ["OWNER", "ADMIN", "ACCOUNTANT"] },
-  { href: "/invoices", label: "Invoices", icon: FileText, roles: ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT"] },
-  { href: "/reports", label: "Reports", icon: BarChart3, roles: ["OWNER", "ADMIN", "MANAGER", "ACCOUNTANT"] },
-  { href: "/team", label: "Team & access", icon: Users, roles: ["OWNER", "ADMIN", "MANAGER"] },
-  { href: "/locations", label: "Locations & franchises", icon: MapPinned, roles: ["OWNER", "ADMIN"] },
-  { href: "/settings", label: "Workspace", icon: Settings, roles: ["OWNER", "ADMIN"] },
+  { href: "/pos", label: "Point of sale", icon: ShoppingBasket, permission: "pos.sell" },
+  { href: "/counters", label: "Counters", icon: Store, permission: "counters.read" },
+  { href: "/coupons", label: "Coupons", icon: TicketPercent, permission: "coupons.read" },
+  { href: "/payments", label: "Payment methods", icon: WalletCards, permission: "payments.read" },
+  { href: "/receipts", label: "Receipts", icon: ReceiptText, permission: "receipts.read" },
+  { href: "/members", label: "Members", icon: Users, permission: "members.read" },
+  { href: "/inventory", label: "Inventory", icon: Boxes, permission: "inventory.read" },
+  { href: "/procurement", label: "Purchasing & payables", icon: PackageCheck, permission: "purchasing.read" },
+  { href: "/accounting", label: "Accounting", icon: BookOpen, permission: "accounting.read" },
+  { href: "/invoices", label: "Invoices", icon: FileText, permission: "invoices.read" },
+  { href: "/reports", label: "Reports", icon: BarChart3, permission: "reports.read" },
+  { href: "/team", label: "Team & access", icon: Users, permission: "team.read" },
+  { href: "/locations", label: "Locations & franchises", icon: MapPinned, permission: "settings.read" },
+  { href: "/settings", label: "Workspace", icon: Settings, permission: "settings.read" },
 ];
 
 export function AppShell({ user, business, children }: { user: SessionUser; business: BusinessSettings; children: React.ReactNode }) {
@@ -37,7 +39,7 @@ export function AppShell({ user, business, children }: { user: SessionUser; busi
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const visibleNav = nav.filter((item) => !item.roles || item.roles.includes(user.role));
+  const visibleNav = nav.filter((item) => !item.permission || hasPermission(user.role, item.permission));
   const current = visibleNav.find((item) => path === item.href || path.startsWith(`${item.href}/`))?.label || "Kōn-Kōn Ledger";
 
   async function logout() {

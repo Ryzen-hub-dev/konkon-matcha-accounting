@@ -11,6 +11,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - First-run Owner setup; Owner is the highest role.
 - [Private Owner replacement](docs/owner-recovery.md): operator-issued, 24-hour, single-use registration link; preserves the team and all business records, without reopening public setup.
 - Owner, Admin, Manager, Accountant and Cashier server-enforced permissions.
+- One shared role-policy catalogue drives both API authorization and the visible workspace menu; Team shows the exact Manage/Use/View/Locked matrix for every role.
 - Staff account generation with temporary passwords and mandatory password change.
 - Self-service password change and administrator password reset.
 - Versioned sessions: password, role, disable and archive changes revoke existing sessions.
@@ -21,6 +22,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 
 ### POS, receipts and promotions
 
+- Multi-counter operation with a protected Main counter, custom counters, location attribution and optional Manager bindings. Every new sale, stock movement, journal and receipt snapshots its counter/location; a bound counter rejects other Managers while unbound counters remain shared.
 - Product cart, member selection, administrator-defined payment methods and optional/required payment references.
 - Payment-method routing to an active cash/bank asset account, revalidated by the API and snapshotted on each sale for accurate refunds.
 - Server-calculated prices, coupon discounts, tax, cash received and change due.
@@ -117,7 +119,7 @@ Core endpoints:
 - `/api/receipt-lookup`, `/api/public-receipts`, `/api/member-cards`, `/api/member-cards/lookup`
 - `/api/invoices`, `/api/invoice-templates`, `/api/journals`, `/api/reports`, `/api/e-invoices`
 - `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`
-- `/api/settings`, `/api/settings/history`, `/api/locations`, `/api/maintenance`
+- `/api/settings`, `/api/settings/history`, `/api/locations`, `/api/counters`, `/api/maintenance`
 
 Workspace writes require a same-origin browser request and authenticated role permission. Initial setup, private owner recovery and token-restricted phone scan submission have their own authorization rules. Customer receipt retrieval is a read-only POST requiring the signed receipt token; it never authorizes refunds. Public errors do not include stack traces, secrets or database internals.
 
@@ -141,6 +143,8 @@ npm test
 npm run build
 ```
 
+`scripts/app-bug-crawler.cjs` performs a bounded, read-only authenticated crawl of the workspace and reports route failures, unexpected logouts, page exceptions and same-origin server errors. The disposable full smoke suite runs it after creating its own isolated test data.
+
 The current suite covers authentication errors, origin protection, RBAC, MongoDB namespace isolation, invoice/receipt template validation, currency precision, tax math, coupon bounds, scanner token/routing, provider webhook signatures and exact amounts, local-listener signatures/privacy filtering, POS draft recovery, franchise hierarchy safety, protected identity lookup normalization, procurement validation, smart replenishment, supplier risk scoring, weighted inventory costing, AP foreign-exchange settlement and system write-mode classification.
 
 Invoice acceptance also covers impossible calendar dates, currency-safe line calculations, idempotent draft creation, unpaid-draft editing, template snapshot retention, optimistic version conflicts, immutable sent/paid transitions, payment journal posting and mobile invoice-register controls.
@@ -160,6 +164,20 @@ Deletion/storage regression checks are included in `scripts/receipt-membership-s
 Vercel Hobby is intended for personal, non-commercial projects and pauses service after included usage is exhausted. Use it for development/testing; a live Kōn-Kōn commercial deployment should move to an appropriate paid plan and add production monitoring, backup validation and incident response.
 
 See [docs/deployment-vercel.md](docs/deployment-vercel.md) and [SECURITY.md](SECURITY.md).
+
+## Windows and Android client
+
+`clients/KonkonMatcha.Client` is the shared .NET MAUI client for Windows and Android. It hosts the responsive web workspace rather than duplicating accounting logic, so the website, desktop app and Android app use the same server-enforced permissions and features. On first launch, the user may choose the production service or any compatible self-hosted HTTPS service that returns the documented `/api/setup` contract.
+
+The client stores only the selected service address in the operating system's secure storage. Database credentials and private API keys must stay on the server and are never compiled into the EXE or APK. Android backup and cleartext traffic are disabled; cross-origin pages cannot open inside the accounting WebView. Authentication remains in the platform WebView's protected cookie store.
+
+Windows unpackaged builds are produced with:
+
+```text
+dotnet publish clients/KonkonMatcha.Client/KonkonMatcha.Client.csproj -f net10.0-windows10.0.19041.0 -c Release -p:RuntimeIdentifier=win-x64 -p:WindowsPackageType=None
+```
+
+Android Release distribution requires a private signing keystore supplied at publish time. Windows public distribution should likewise be signed with the business's code-signing identity. Never commit signing keys, passwords or generated packages. Signing verifies publisher/package integrity; it does not make client code impossible to inspect. The authoritative security boundary remains HTTPS plus server-side authentication, permission checks, validation and audit trails.
 
 ## Country tax/reporting boundary
 

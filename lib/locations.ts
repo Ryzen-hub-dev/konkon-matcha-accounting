@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { Db } from "mongodb";
+import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { countryCodeSchema, currencyCodeSchema, localeSchema, timeZoneSchema } from "@/lib/international";
 
 export const LOCATION_TYPES = ["HEADQUARTERS", "BRANCH", "WAREHOUSE", "FRANCHISE"] as const;
@@ -33,6 +35,16 @@ export const locationFields = z.object({
 });
 
 export const locationUpdateSchema = locationFields.partial().extend({ id: z.string().length(24), active: z.boolean().optional() });
+
+export async function ensureHeadquarters(db: Db) {
+  const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
+  const now = new Date();
+  return db.collection("locations").findOneAndUpdate(
+    { systemKey: "HEADQUARTERS" },
+    { $setOnInsert: { code: "HQ", name: `${business.businessName} HQ`, type: "HEADQUARTERS", countryCode: business.countryCode, timeZone: business.timeZone, locale: business.locale, currency: business.currency, address: business.address, active: true, systemKey: "HEADQUARTERS", createdAt: now, updatedAt: now } },
+    { upsert: true, returnDocument: "after" },
+  );
+}
 
 export async function locationParentChainIsValid(
   parentLocationId: string,

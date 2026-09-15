@@ -25,9 +25,8 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await authorize("settings.write", { allowReadOnlyWrite: true });
+  const auth = await authorize("owner.control", { allowReadOnlyWrite: true });
   if (auth.error) return auth.error;
-  if (auth.session.role !== "OWNER") return fail("Only the Owner can change workspace availability.", 403);
   if (!sameOrigin(request)) return fail("This request was blocked.", 403);
   try {
     const input = controlSchema.safeParse(await request.json());

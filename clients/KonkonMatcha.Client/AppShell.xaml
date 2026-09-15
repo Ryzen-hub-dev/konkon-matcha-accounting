@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell
+    x:Class="KonkonMatcha.Client.AppShell"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:local="clr-namespace:KonkonMatcha.Client"
+    Title="Kōn-Kōn Matcha Accounting"
+    Shell.NavBarIsVisible="False"
+    FlyoutBehavior="Disabled">
+
+    <ShellContent
+        Title="Workspace"
+        ContentTemplate="{DataTemplate local:MainPage}"
+        Route="MainPage" />
+
+</Shell>
