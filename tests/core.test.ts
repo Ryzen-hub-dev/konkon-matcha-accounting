@@ -5,7 +5,7 @@ import { ACCESS_AREAS, accessLevel, canManageRole, hasPermission } from "../lib/
 import { POST as login } from "../app/api/auth/login/route";
 import { POST as setup } from "../app/api/setup/route";
 import { publicError } from "../lib/api";
-import { scopedCollectionName } from "../lib/db";
+import { scopedCollectionName, stableOptionalStringIndexOptions } from "../lib/db";
 import {
   DEFAULT_INVOICE_TEMPLATE,
   ensureDefaultInvoiceTemplate,
@@ -576,6 +576,16 @@ test("MongoDB collections use an isolated application namespace", () => {
   assert.equal(scopedCollectionName("users"), "konkon_users");
   assert.equal(scopedCollectionName("sales", "matcha_"), "matcha_sales");
   assert.throws(() => scopedCollectionName("users", "invalid prefix"), /invalid/i);
+});
+
+test("optional unique indexes stay inside MongoDB Stable API V1", () => {
+  const options = stableOptionalStringIndexOptions("systemKey");
+  assert.deepEqual(options, {
+    name: "systemKey_stable_unique_v1",
+    unique: true,
+    partialFilterExpression: { systemKey: { $type: "string" } },
+  });
+  assert.equal("sparse" in options, false);
 });
 
 test("default template seeding never writes the same MongoDB path twice", async () => {

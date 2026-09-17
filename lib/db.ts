@@ -6,6 +6,11 @@ type MongoCache = {
   indexPromise?: Promise<void>;
 };
 
+type ExistingIndex = {
+  name?: string;
+  sparse?: boolean;
+};
+
 const mongoCache = globalThis as typeof globalThis & { __konkonMongo?: MongoCache };
 
 function getConfig() {
@@ -51,6 +56,29 @@ async function ensureMemberCardIndexes(db: Db) {
     collection.createIndex({ tokenHash: 1 }, { unique: true, partialFilterExpression: { tokenHash: { $type: "string" } } }),
     collection.createIndex({ bindingHash: 1 }, { unique: true, partialFilterExpression: { bindingHash: { $type: "string" } } }),
   ]);
+}
+
+export function stableOptionalStringIndexOptions(field: string) {
+  return {
+    name: `${field}_stable_unique_v1`,
+    unique: true,
+    partialFilterExpression: { [field]: { $type: "string" } },
+  };
+}
+
+async function ensureStableOptionalStringUniqueIndex(db: Db, collectionName: string, field: string) {
+  const collection = db.collection(collectionName);
+  await collection.createIndex({ [field]: 1 }, stableOptionalStringIndexOptions(field));
+
+  const indexes = await collection.listIndexes().toArray() as ExistingIndex[];
+  const legacySparseIndex = indexes.find((index) => index.name === `${field}_1` && index.sparse);
+  if (!legacySparseIndex?.name) return;
+
+  try {
+    await collection.dropIndex(legacySparseIndex.name);
+  } catch (error) {
+    if ((error as { code?: number }).code !== 27) throw error;
+  }
 }
 
 export function getMongoClient(): Promise<MongoClient> {
@@ -134,11 +162,11 @@ async function initializeIndexes(db: Db) {
     ),
     db.collection("settingsHistory").createIndex({ key: 1, createdAt: -1 }),
     db.collection("locations").createIndex({ code: 1 }, { unique: true }),
-    db.collection("locations").createIndex({ systemKey: 1 }, { unique: true, sparse: true }),
+    ensureStableOptionalStringUniqueIndex(db, "locations", "systemKey"),
     db.collection("locations").createIndex({ parentLocationId: 1, active: 1 }),
     db.collection("locations").createIndex({ countryCode: 1, type: 1, active: 1 }),
     db.collection("counters").createIndex({ code: 1 }, { unique: true }),
-    db.collection("counters").createIndex({ systemKey: 1 }, { unique: true, sparse: true }),
+    ensureStableOptionalStringUniqueIndex(db, "counters", "systemKey"),
     db.collection("counters").createIndex({ locationId: 1, active: 1 }),
     db.collection("counters").createIndex({ managerIds: 1, active: 1 }),
     db.collection("registerShifts").createIndex({ shiftNo: 1 }, { unique: true }),
@@ -154,7 +182,7 @@ async function initializeIndexes(db: Db) {
     db.collection("registerShifts").createIndex({ counterId: 1, openedAt: -1 }),
     db.collection("registerShifts").createIndex({ status: 1, closedAt: -1 }),
     db.collection("receiptTemplates").createIndex({ nameNormalized: 1 }, { unique: true }),
-    db.collection("receiptTemplates").createIndex({ systemKey: 1 }, { unique: true, sparse: true }),
+    ensureStableOptionalStringUniqueIndex(db, "receiptTemplates", "systemKey"),
     db.collection("receiptTemplates").createIndex({ isDefault: -1, updatedAt: -1 }),
     db.collection("refunds").createIndex({ refundNo: 1 }, { unique: true }),
     db.collection("refunds").createIndex(
@@ -173,7 +201,7 @@ async function initializeIndexes(db: Db) {
     ),
     db.collection("invoices").createIndex({ dueDate: 1, status: 1 }),
     db.collection("invoiceTemplates").createIndex({ nameNormalized: 1 }, { unique: true }),
-    db.collection("invoiceTemplates").createIndex({ systemKey: 1 }, { unique: true, sparse: true }),
+    ensureStableOptionalStringUniqueIndex(db, "invoiceTemplates", "systemKey"),
     db.collection("invoiceTemplates").createIndex({ isDefault: -1, updatedAt: -1 }),
     db.collection("auditLogs").createIndex({ createdAt: -1 }),
     db.collection("auditLogs").createIndex({ actorId: 1, createdAt: -1 }),
@@ -187,7 +215,7 @@ async function initializeIndexes(db: Db) {
     db.collection("couponRedemptions").createIndex({ couponId: 1, memberId: 1, createdAt: -1 }),
     db.collection("couponRedemptions").createIndex({ saleId: 1 }, { unique: true }),
     db.collection("paymentMethods").createIndex({ code: 1 }, { unique: true }),
-    db.collection("paymentMethods").createIndex({ systemKey: 1 }, { unique: true, sparse: true }),
+    ensureStableOptionalStringUniqueIndex(db, "paymentMethods", "systemKey"),
     db.collection("paymentMethods").createIndex({ active: 1, sortOrder: 1 }),
     db.collection("exchangeRates").createIndex({ baseCurrency: 1, quoteCurrency: 1 }, { unique: true }),
     db.collection("exchangeRates").createIndex({ active: 1, updatedAt: -1 }),
