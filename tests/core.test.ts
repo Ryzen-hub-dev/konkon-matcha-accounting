@@ -5,7 +5,13 @@ import { ACCESS_AREAS, accessLevel, canManageRole, hasPermission } from "../lib/
 import { POST as login } from "../app/api/auth/login/route";
 import { POST as setup } from "../app/api/setup/route";
 import { publicError } from "../lib/api";
-import { scopedCollectionName, stableDistinctPipeline, stableOptionalStringIndexOptions } from "../lib/db";
+import {
+  INDEX_SCHEMA_VERSION,
+  indexMigrationIsComplete,
+  scopedCollectionName,
+  stableDistinctPipeline,
+  stableOptionalStringIndexOptions,
+} from "../lib/db";
 import {
   DEFAULT_INVOICE_TEMPLATE,
   ensureDefaultInvoiceTemplate,
@@ -597,6 +603,14 @@ test("distinct field reads use a Stable API aggregation pipeline", () => {
     { $group: { _id: "$productId" } },
   ]);
   assert.throws(() => stableDistinctPipeline("$where"), /invalid/i);
+});
+
+test("completed index migrations can be skipped across serverless cold starts", () => {
+  assert.match(INDEX_SCHEMA_VERSION, /^indexes-\d{4}-\d{2}-\d{2}-v\d+$/);
+  assert.equal(indexMigrationIsComplete(null), false);
+  assert.equal(indexMigrationIsComplete({}), false);
+  assert.equal(indexMigrationIsComplete({ completedAt: new Date("invalid") }), false);
+  assert.equal(indexMigrationIsComplete({ completedAt: new Date("2026-09-18T00:00:00.000Z") }), true);
 });
 
 test("default template seeding never writes the same MongoDB path twice", async () => {

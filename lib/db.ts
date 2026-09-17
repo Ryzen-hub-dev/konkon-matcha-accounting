@@ -11,6 +11,15 @@ type ExistingIndex = {
   sparse?: boolean;
 };
 
+type IndexMigrationRecord = {
+  _id: string;
+  completedAt?: Date;
+};
+
+// Bump this value whenever the index definitions below change. The durable marker
+// prevents every new Vercel function instance from re-checking the full index set.
+export const INDEX_SCHEMA_VERSION = "indexes-2026-09-18-v1";
+
 const mongoCache = globalThis as typeof globalThis & { __konkonMongo?: MongoCache };
 
 function getConfig() {
@@ -74,6 +83,10 @@ export function stableDistinctPipeline(field: string, filter?: Record<string, un
   ];
 }
 
+export function indexMigrationIsComplete(record: Pick<IndexMigrationRecord, "completedAt"> | null | undefined) {
+  return record?.completedAt instanceof Date && !Number.isNaN(record.completedAt.getTime());
+}
+
 async function ensureStableOptionalStringUniqueIndex(db: Db, collectionName: string, field: string) {
   const collection = db.collection(collectionName);
   await collection.createIndex({ [field]: 1 }, stableOptionalStringIndexOptions(field));
@@ -102,13 +115,24 @@ export function getMongoClient(): Promise<MongoClient> {
       serverSelectionTimeoutMS: 7_500,
       serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
     });
-    mongoCache.__konkonMongo.clientPromise = client.connect();
+    mongoCache.__konkonMongo.clientPromise = client.connect().catch(async (error) => {
+      mongoCache.__konkonMongo!.clientPromise = undefined;
+      await client.close().catch(() => undefined);
+      throw error;
+    });
   }
 
   return mongoCache.__konkonMongo.clientPromise;
 }
 
 async function initializeIndexes(db: Db) {
+  const migrations = db.collection<IndexMigrationRecord>("schemaMigrations");
+  const current = await migrations.findOne(
+    { _id: INDEX_SCHEMA_VERSION },
+    { projection: { completedAt: 1 } },
+  );
+  if (indexMigrationIsComplete(current)) return;
+
   await Promise.all([
     ensureMemberCardIndexes(db),
     db.collection("memberCards").createIndex({ clientRequestId: 1 }, { unique: true }),
@@ -277,6 +301,17 @@ async function initializeIndexes(db: Db) {
     db.collection("sensitiveLookupEvents").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     db.collection("sensitiveLookupEvents").createIndex({ actorId: 1, createdAt: -1 }),
   ]);
+
+  await migrations.updateOne(
+    { _id: INDEX_SCHEMA_VERSION },
+    {
+      $set: {
+        completedAt: new Date(),
+        description: "Atlas M0 and Vercel serverless index baseline",
+      },
+    },
+    { upsert: true },
+  );
 }
 
 export async function getDb() {
@@ -284,7 +319,10 @@ export async function getDb() {
   const client = await getMongoClient();
   const db = scopeCollections(client.db(dbName), collectionPrefix);
   mongoCache.__konkonMongo ??= {};
-  mongoCache.__konkonMongo.indexPromise ??= initializeIndexes(db);
+  mongoCache.__konkonMongo.indexPromise ??= initializeIndexes(db).catch((error) => {
+    mongoCache.__konkonMongo!.indexPromise = undefined;
+    throw error;
+  });
   await mongoCache.__konkonMongo.indexPromise;
   return db;
 }

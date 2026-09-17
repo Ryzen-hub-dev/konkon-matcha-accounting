@@ -33,6 +33,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Keep secrets and sensitive member/payment data server-side. Do not expose full private identifiers, raw bearer credentials, webhook secrets, database credentials, or private payment references.
 - The accounting currency is fixed once the ledger exists; changing country/locale/time zone must not relabel historical money.
 - MongoDB runs with Stable API V1 strict mode on Atlas M0-compatible commands. Optional unique fields use partial indexes rather than `sparse`, and distinct-value reads use `$group` aggregation rather than the non-Stable-API `distinct` command; legacy sparse indexes are migrated only after the replacement constraint exists.
+- The database index baseline is guarded by the durable `schemaMigrations` marker in `lib/db.ts`, so a Vercel cold start performs one lightweight version lookup instead of recreating every index. Bump `INDEX_SCHEMA_VERSION` whenever an index definition changes.
 - Never describe a QR display, payer animation, local notification, or prepared e-invoice file as proof of settlement or government submission.
 
 ## Working conventions
@@ -45,4 +46,4 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## Last synchronized baseline
 
 - On 2026-09-17, the repository was on `main` with a clean worktree before this memory update.
-- `npm run typecheck`, `npm test` (127 tests), and the Webpack production build (54 static pages) passed after the register-shift, exception-review, multi-location transfer, batch/expiry, freshness-forecast, inventory-disposal, and MongoDB Atlas M0/Stable API compatibility upgrades. On this Windows host, the successful build used `KONKON_DISABLE_WEBPACK_CACHE=1` after Webpack's optional pack cache hit a filesystem write error.
+- `npm run typecheck`, `npm test` (128 tests), and the Webpack production build (54 static pages) passed after the register-shift, exception-review, multi-location transfer, batch/expiry, freshness-forecast, inventory-disposal, MongoDB Atlas M0/Stable API compatibility, and serverless cold-start performance upgrades. On this Windows host, the successful build used `KONKON_DISABLE_WEBPACK_CACHE=1` after Webpack's optional pack cache hit a filesystem write error.
