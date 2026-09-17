@@ -79,7 +79,7 @@ export function publicError(error: unknown) {
     return fail("The database rejected its credentials.", 503);
   }
   if (code === "323") {
-    return fail("The database rejected an index that is incompatible with its Stable API settings.", 503);
+    return fail("The database rejected a command that is outside its Stable API compatibility settings.", 503);
   }
   if (name === "MongoServerSelectionError" || name === "MongoNetworkError") {
     return fail("The database cluster could not be reached. Check the MongoDB Atlas IP access list.", 503);

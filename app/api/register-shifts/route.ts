@@ -2,7 +2,7 @@ import { ObjectId } from "mongodb";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
-import { getDb, getMongoClient } from "@/lib/db";
+import { getDb, getMongoClient, stableDistinctPipeline } from "@/lib/db";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { hasPermission } from "@/lib/rbac";
 import { paymentCurrencies } from "@/lib/payment-methods";
@@ -57,10 +57,10 @@ export async function GET() {
   if (auth.error) return auth.error;
   try {
     const db = await getDb();
-    const [active, recent, controlledCounterIds, cashConfig] = await Promise.all([
+    const [active, recent, controlledCounterRows, cashConfig] = await Promise.all([
       db.collection("registerShifts").find({ status: { $in: ["OPEN", "PENDING_REVIEW"] } }).sort({ openedAt: -1 }).toArray(),
       db.collection("registerShifts").find({ status: "CLOSED" }).sort({ closedAt: -1 }).limit(50).toArray(),
-      db.collection("registerShifts").distinct("counterId"),
+      db.collection("registerShifts").aggregate<{ _id: ObjectId }>(stableDistinctPipeline("counterId")).toArray(),
       registerCashConfig(db),
     ]);
     const canReview = hasPermission(auth.session.role, "receipts.manage");
@@ -68,7 +68,7 @@ export async function GET() {
       if (shift.status !== "OPEN" || !canReview) return shift;
       return { ...shift, liveSummary: await calculateRegisterShiftSummary(db, shift as { _id: ObjectId; currency: string; openingCash: CashCount[] }) };
     }));
-    return ok(serialise({ shifts, controlledCounterIds: controlledCounterIds.map(String), cashCurrencies: cashConfig.cashCurrencies }));
+    return ok(serialise({ shifts, controlledCounterIds: controlledCounterRows.map((row) => String(row._id)), cashCurrencies: cashConfig.cashCurrencies }));
   } catch (error) {
     return publicError(error);
   }

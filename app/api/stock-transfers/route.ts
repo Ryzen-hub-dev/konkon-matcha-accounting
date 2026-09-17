@@ -1,7 +1,7 @@
 import { ObjectId } from "mongodb";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
-import { getDb, getMongoClient } from "@/lib/db";
+import { getDb, getMongoClient, stableDistinctPipeline } from "@/lib/db";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { allocationTotal, stockTransferActionSchema, stockTransferPostSchema, transferUnitTotal } from "@/lib/inventory-locations";
 import { ensureHeadquarters } from "@/lib/locations";
@@ -125,8 +125,11 @@ export async function POST(request: Request) {
         const productIds = input.data.items.map((item) => new ObjectId(item.productId));
         const products = await db.collection("products").find({ _id: { $in: productIds }, active: { $ne: false } }, { session: mongoSession }).toArray();
         if (products.length !== productIds.length) throw new TransferConflictError("One or more products are archived or unavailable.");
-        const trackedIds = await db.collection("inventoryBalances").distinct("productId", { productId: { $in: productIds } }, { session: mongoSession });
-        if (trackedIds.length !== productIds.length) throw new TransferConflictError("Allocate every selected product to locations before transferring it.");
+        const trackedRows = await db.collection("inventoryBalances").aggregate<{ _id: ObjectId }>(
+          stableDistinctPipeline("productId", { productId: { $in: productIds } }),
+          { session: mongoSession },
+        ).toArray();
+        if (trackedRows.length !== productIds.length) throw new TransferConflictError("Allocate every selected product to locations before transferring it.");
         const productMap = new Map(products.map((product) => [String(product._id), product]));
         const items = input.data.items.map((item) => {
           const product = productMap.get(item.productId)!;

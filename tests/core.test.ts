@@ -5,7 +5,7 @@ import { ACCESS_AREAS, accessLevel, canManageRole, hasPermission } from "../lib/
 import { POST as login } from "../app/api/auth/login/route";
 import { POST as setup } from "../app/api/setup/route";
 import { publicError } from "../lib/api";
-import { scopedCollectionName, stableOptionalStringIndexOptions } from "../lib/db";
+import { scopedCollectionName, stableDistinctPipeline, stableOptionalStringIndexOptions } from "../lib/db";
 import {
   DEFAULT_INVOICE_TEMPLATE,
   ensureDefaultInvoiceTemplate,
@@ -586,6 +586,17 @@ test("optional unique indexes stay inside MongoDB Stable API V1", () => {
     partialFilterExpression: { systemKey: { $type: "string" } },
   });
   assert.equal("sparse" in options, false);
+});
+
+test("distinct field reads use a Stable API aggregation pipeline", () => {
+  assert.deepEqual(stableDistinctPipeline("counterId"), [
+    { $group: { _id: "$counterId" } },
+  ]);
+  assert.deepEqual(stableDistinctPipeline("productId", { active: true }), [
+    { $match: { active: true } },
+    { $group: { _id: "$productId" } },
+  ]);
+  assert.throws(() => stableDistinctPipeline("$where"), /invalid/i);
 });
 
 test("default template seeding never writes the same MongoDB path twice", async () => {

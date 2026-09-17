@@ -66,6 +66,14 @@ export function stableOptionalStringIndexOptions(field: string) {
   };
 }
 
+export function stableDistinctPipeline(field: string, filter?: Record<string, unknown>) {
+  if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(field)) throw new Error("The distinct field path is invalid.");
+  return [
+    ...(filter && Object.keys(filter).length ? [{ $match: filter }] : []),
+    { $group: { _id: `$${field}` } },
+  ];
+}
+
 async function ensureStableOptionalStringUniqueIndex(db: Db, collectionName: string, field: string) {
   const collection = db.collection(collectionName);
   await collection.createIndex({ [field]: 1 }, stableOptionalStringIndexOptions(field));
