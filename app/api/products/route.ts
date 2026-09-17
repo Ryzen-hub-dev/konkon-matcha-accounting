@@ -2,12 +2,16 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
-import { getDb } from "@/lib/db";
+import { getDb, getMongoClient } from "@/lib/db";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { roundCurrency } from "@/lib/international";
 import { serialise } from "@/lib/format";
+import { assessInventoryAdjustment, writeOperationalReview } from "@/lib/operational-reviews";
+import { dateKeyInTimeZone } from "@/lib/dates";
 
 export const runtime = "nodejs";
+
+class InventoryAdjustmentError extends Error {}
 
 const productSchema = z.object({
   sku: z.string().trim().min(2).max(40).regex(/^[A-Za-z0-9._-]+$/),
@@ -23,6 +27,7 @@ const productSchema = z.object({
 
 const adjustmentSchema = z.object({
   id: z.string().length(24),
+  locationId: z.union([z.string().length(24), z.literal("")]).optional(),
   adjustment: z.coerce.number().int().min(-1_000_000).max(1_000_000).refine((v) => v !== 0),
   reason: z.string().trim().min(3).max(160),
 });
@@ -53,11 +58,50 @@ export async function GET(request: Request) {
     const db = await getDb();
     const url = new URL(request.url);
     const barcode = url.searchParams.get("barcode")?.trim() || "";
+    const locationId = url.searchParams.get("locationId")?.trim() || "";
+    const includeBalances = url.searchParams.get("includeBalances") === "1";
+    if (locationId && !ObjectId.isValid(locationId)) return fail("Choose a valid inventory location.", 422);
     const includeArchived = url.searchParams.get("includeArchived") === "1" && ["OWNER", "ADMIN", "MANAGER"].includes(auth.session.role);
     const filter: Record<string, unknown> = includeArchived ? {} : { active: { $ne: false } };
     if (barcode) filter.barcode = normaliseBarcode(barcode);
     const products = await db.collection("products").find(filter).sort({ active: -1, category: 1, name: 1 }).limit(500).toArray();
-    return ok(serialise(products));
+    if (!products.length) return ok([]);
+    if (locationId) {
+      const location = await db.collection("locations").findOne({ _id: new ObjectId(locationId), active: { $ne: false } }, { projection: { _id: 1 } });
+      if (!location) return fail("The selected inventory location is inactive.", 409);
+    }
+    const productIds = products.map((product) => product._id);
+    const [balances, settings] = await Promise.all([
+      db.collection("inventoryBalances").find({ productId: { $in: productIds } }).toArray(),
+      locationId && products.some((product) => product.batchTracked) ? db.collection("settings").findOne({ key: "business" }) : Promise.resolve(null),
+    ]);
+    const sellableBatchStock = new Map<string, number>();
+    if (locationId && products.some((product) => product.batchTracked)) {
+      const business = normaliseBusinessSettings(settings);
+      const rows = await db.collection("inventoryBatches").aggregate([
+        { $match: { productId: { $in: products.filter((product) => product.batchTracked).map((product) => product._id) }, locationId: new ObjectId(locationId), expiryDate: { $gte: dateKeyInTimeZone(new Date(), business.timeZone) }, quantity: { $gt: 0 } } },
+        { $group: { _id: "$productId", quantity: { $sum: "$quantity" } } },
+      ]).toArray();
+      for (const row of rows) sellableBatchStock.set(String(row._id), Number(row.quantity || 0));
+    }
+    const balancesByProduct = new Map<string, typeof balances>();
+    for (const balance of balances) {
+      const key = String(balance.productId);
+      const current = balancesByProduct.get(key) || [];
+      current.push(balance);
+      balancesByProduct.set(key, current);
+    }
+    return ok(serialise(products.map((product) => {
+      const productBalances = balancesByProduct.get(String(product._id)) || [];
+      const locationBalance = locationId ? productBalances.find((balance) => String(balance.locationId) === locationId) : null;
+      return {
+        ...product,
+        globalStock: Number(product.stock || 0),
+        locationTracked: productBalances.length > 0,
+        ...(locationId && productBalances.length ? { stock: product.batchTracked ? Number(sellableBatchStock.get(String(product._id)) || 0) : Number(locationBalance?.quantity || 0), stockLocationId: locationId } : {}),
+        ...(includeBalances ? { locationBalances: productBalances } : {}),
+      };
+    })));
   } catch (error) {
     return publicError(error);
   }
@@ -138,20 +182,66 @@ export async function PATCH(request: Request) {
     if (!ObjectId.isValid(input.data.id)) return fail("Check the stock adjustment.", 422);
     const db = await getDb();
     const _id = new ObjectId(input.data.id);
-    const product = await db.collection("products").findOneAndUpdate(
-      { _id, active: { $ne: false }, $expr: { $gte: [{ $add: ["$stock", input.data.adjustment] }, 0] } },
-      { $inc: { stock: input.data.adjustment }, $set: { updatedAt: new Date() } },
-      { returnDocument: "after" },
-    );
-    if (!product) return fail("Adjustment would make stock negative, or the product no longer exists.", 409);
-    await db.collection("stockMovements").insertOne({
-      productId: _id, sku: product.sku, productName: product.name,
-      quantity: input.data.adjustment, type: "ADJUSTMENT", reason: input.data.reason,
-      createdBy: new ObjectId(auth.session.id), createdAt: new Date(),
-    });
-    await writeAudit(db, auth.session, "inventory.adjust", "product", input.data.id, { quantity: input.data.adjustment, reason: input.data.reason });
+    const client = await getMongoClient();
+    const mongoSession = client.startSession();
+    let product: Record<string, unknown> | null = null;
+    try {
+      await mongoSession.withTransaction(async () => {
+        const current = await db.collection("products").findOne({ _id, active: { $ne: false } }, { session: mongoSession });
+        if (!current) throw new InventoryAdjustmentError("The product is archived or no longer exists.");
+        if (current.batchTracked) throw new InventoryAdjustmentError("Use Batch control to adjust or count this product so its lot and expiry history stays complete.");
+        const tracked = await db.collection("inventoryBalances").findOne({ productId: _id }, { projection: { _id: 1 }, session: mongoSession });
+        let location: Record<string, unknown> | null = null;
+        let stockBefore = Number(current.stock || 0);
+        if (tracked) {
+          if (!input.data.locationId || !ObjectId.isValid(input.data.locationId)) throw new InventoryAdjustmentError("Choose the location for this stock adjustment.");
+          location = await db.collection("locations").findOne({ _id: new ObjectId(input.data.locationId), active: { $ne: false } }, { session: mongoSession });
+          if (!location) throw new InventoryAdjustmentError("The selected inventory location is inactive.");
+          const now = new Date();
+          await db.collection("inventoryBalances").updateOne(
+            { productId: _id, locationId: location._id },
+            { $setOnInsert: { _id: new ObjectId(), sku: current.sku, productName: current.name, locationCode: location.code, locationName: location.name, quantity: 0, createdBy: new ObjectId(auth.session.id), createdAt: now, updatedAt: now } },
+            { upsert: true, session: mongoSession },
+          );
+          const balance = await db.collection("inventoryBalances").findOneAndUpdate(
+            { productId: _id, locationId: location._id, $expr: { $gte: [{ $add: ["$quantity", input.data.adjustment] }, 0] } },
+            { $inc: { quantity: input.data.adjustment }, $set: { updatedAt: now } },
+            { returnDocument: "after", session: mongoSession },
+          );
+          if (!balance) throw new InventoryAdjustmentError("Adjustment would make this location's stock negative.");
+          stockBefore = Number(balance.quantity) - input.data.adjustment;
+        }
+        product = await db.collection("products").findOneAndUpdate(
+          { _id, active: { $ne: false }, $expr: { $gte: [{ $add: ["$stock", input.data.adjustment] }, 0] } },
+          { $inc: { stock: input.data.adjustment }, $set: { updatedAt: new Date() } },
+          { returnDocument: "after", session: mongoSession },
+        );
+        if (!product) throw new InventoryAdjustmentError("Adjustment would make total stock negative, or the product changed.");
+        const movementId = new ObjectId();
+        const movementAt = new Date();
+        await db.collection("stockMovements").insertOne({
+          _id: movementId,
+          productId: _id, sku: product.sku, productName: product.name,
+          quantity: input.data.adjustment, type: "ADJUSTMENT", reason: input.data.reason,
+          ...(location ? { locationId: location._id, locationCode: location.code, locationName: location.name } : {}),
+          createdBy: new ObjectId(auth.session.id), createdAt: movementAt,
+        }, { session: mongoSession });
+        await writeOperationalReview(db, assessInventoryAdjustment({ currentStock: stockBefore, adjustment: input.data.adjustment }), {
+          sourceType: "stockMovement",
+          sourceId: movementId.toHexString(),
+          sourceNo: String(product.sku),
+          sourceHref: "/inventory",
+          occurredAt: movementAt,
+          actor: auth.session,
+        }, mongoSession);
+        await writeAudit(db, auth.session, "inventory.adjust", "product", input.data.id, { quantity: input.data.adjustment, reason: input.data.reason, locationId: input.data.locationId || "" }, mongoSession);
+      });
+    } finally {
+      await mongoSession.endSession();
+    }
     return ok(serialise(product));
   } catch (error) {
+    if (error instanceof InventoryAdjustmentError) return fail(error.message, 409);
     if ((error as { code?: number }).code === 11000) return fail("A product with this SKU or barcode already exists.", 409);
     return publicError(error);
   }

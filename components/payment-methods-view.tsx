@@ -7,7 +7,7 @@ import { LocalPaymentBridgePanel } from "@/components/local-payment-bridge-panel
 import { buildAmountLockedDuitNowQr, inspectDuitNowQr } from "@/lib/duitnow-qr";
 import type { PaymentMethodRecord } from "@/lib/payment-methods";
 import { CURRENCY_OPTIONS } from "@/lib/international";
-import { PAYMENT_PROVIDERS, PAYMENT_VERIFICATION_MODES } from "@/lib/payment-verification";
+import { PAYMENT_PROVIDERS, PAYMENT_VERIFICATION_MODES } from "@/lib/payment-verification-shared";
 
 type AssetAccount = { _id: string; code: string; name: string; type: "ASSET" };
 type ExchangeRate = { _id?: string; baseCurrency: string; quoteCurrency: string; rate: number; source: string; effectiveAt: string };

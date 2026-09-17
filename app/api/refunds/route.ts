@@ -6,14 +6,22 @@ import { getDb, getMongoClient } from "@/lib/db";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { roundCurrency } from "@/lib/international";
 import { calculateTaxTotals, type TaxMode } from "@/lib/tax";
+import { quoteAmount } from "@/lib/exchange-rates";
+import { assessRefund, writeOperationalReview } from "@/lib/operational-reviews";
+import { addInventoryBatchQuantity, BatchInventoryError, sliceBatchAllocations } from "@/lib/inventory-batches";
 
 export const runtime = "nodejs";
 
 const refundSchema = z.object({
   saleId: z.string().length(24),
+  counterId: z.union([z.string().length(24), z.literal("")]).optional(),
+  clientRequestId: z.string().uuid().optional(),
   reason: z.string().trim().min(3).max(240),
   items: z.array(z.object({ productId: z.string().length(24), quantity: z.coerce.number().int().min(1).max(999) })).min(1).max(100),
 });
+
+class ShiftError extends Error {}
+class InventoryLocationError extends Error {}
 
 async function readBody(request: Request) {
   try {
@@ -53,6 +61,10 @@ export async function POST(request: Request) {
 
   try {
     const db = await getDb();
+    if (input.data.clientRequestId) {
+      const existing = await db.collection("refunds").findOne({ clientRequestId: input.data.clientRequestId });
+      if (existing) return ok(serialise(existing));
+    }
     const client = await getMongoClient();
     const mongoSession = client.startSession();
     let refund: Record<string, unknown> | null = null;
@@ -62,6 +74,22 @@ export async function POST(request: Request) {
         const sale = await db.collection("sales").findOne({ _id: saleId }, { session: mongoSession });
         if (!sale || !["COMPLETED", "PARTIALLY_REFUNDED"].includes(String(sale.status))) {
           throw new Error("REFUND_NOT_AVAILABLE");
+        }
+
+        const counterIdValue = input.data.counterId || String(sale.counterId || "");
+        const counterId = ObjectId.isValid(counterIdValue) ? new ObjectId(counterIdValue) : null;
+        const [openShift, shiftControl] = counterId ? await Promise.all([
+          db.collection("registerShifts").findOne({ counterId, status: "OPEN" }, { session: mongoSession }),
+          db.collection("registerShifts").findOne({ counterId }, { projection: { _id: 1 }, session: mongoSession }),
+        ]) : [null, null];
+        if (shiftControl && !openShift) throw new ShiftError("Open a register shift for this counter before posting the refund.");
+        if (openShift) {
+          const activeShift = await db.collection("registerShifts").updateOne(
+            { _id: openShift._id, counterId, status: "OPEN" },
+            { $set: { lastActivityAt: new Date(), lastRefundAt: new Date() } },
+            { session: mongoSession },
+          );
+          if (!activeShift.matchedCount) throw new ShiftError("The register shift closed before the refund was posted.");
         }
 
         const currency = String(sale.businessSnapshot?.currency || "SGD");
@@ -76,6 +104,10 @@ export async function POST(request: Request) {
 
         const refundItems = [...requested.entries()].map(([productId, quantity]) => {
           const item = itemMap.get(productId)!;
+          const batchResult = Array.isArray(item.batchAllocations) && item.batchAllocations.length
+            ? sliceBatchAllocations(item.batchAllocations, Number(item.refundedQuantity || 0), quantity)
+            : { allocations: [], shortage: 0 };
+          if (batchResult.shortage) throw new BatchInventoryError(`${String(item.name)} batch allocation history is incomplete. Review the original receipt before refunding.`);
           return {
             productId: item.productId,
             sku: String(item.sku || ""),
@@ -85,6 +117,7 @@ export async function POST(request: Request) {
             cost: money(item.cost),
             lineSubtotal: money(Number(item.price) * quantity),
             lineCost: money(Number(item.cost) * quantity),
+            batchAllocations: batchResult.allocations,
           };
         });
 
@@ -121,11 +154,17 @@ export async function POST(request: Request) {
         const refundNo = makeDocumentNo("REF");
         const journalNo = makeDocumentNo("JE");
         const now = new Date();
+        const tenderCurrency = String(sale.tenderCurrency || currency);
+        const tenderTotal = quoteAmount(totals.total, Number(sale.exchangeRate || 1), tenderCurrency);
         refund = {
           _id: new ObjectId(),
           refundNo,
+          ...(input.data.clientRequestId ? { clientRequestId: input.data.clientRequestId } : {}),
           saleId,
           receiptNo: sale.receiptNo,
+          ...(counterId ? { counterId } : {}),
+          ...(sale.locationId ? { locationId: sale.locationId } : {}),
+          ...(openShift ? { shiftId: openShift._id, shiftNo: String(openShift.shiftNo) } : {}),
           reason: input.data.reason,
           items: refundItems,
           lineSubtotal,
@@ -139,6 +178,10 @@ export async function POST(request: Request) {
           currency,
           paymentMethod: sale.paymentMethod,
           paymentMethodName: sale.paymentMethodName || sale.paymentMethod,
+          paymentKind: sale.paymentKind === "CASH" ? "CASH" : "NON_CASH",
+          tenderCurrency,
+          tenderTotal,
+          exchangeRate: Number(sale.exchangeRate || 1),
           pointsReversed,
           createdBy: new ObjectId(auth.session.id),
           createdByName: auth.session.fullName,
@@ -146,7 +189,52 @@ export async function POST(request: Request) {
         };
 
         await db.collection("refunds").insertOne(refund, { session: mongoSession });
+        await writeOperationalReview(db, assessRefund({
+          saleTotal: Number(sale.total || 0),
+          refundTotal: totals.total,
+          cumulativeRefundTotal: money(Number(sale.refundedAmount || 0) + totals.total),
+        }), {
+          sourceType: "refund",
+          sourceId: String(refund._id),
+          sourceNo: refundNo,
+          sourceHref: `/receipts/${saleId.toHexString()}`,
+          occurredAt: now,
+          actor: auth.session,
+          currency,
+        }, mongoSession);
         for (const item of refundItems) {
+          const product = await db.collection("products").findOne({ _id: item.productId }, { projection: { batchTracked: 1 }, session: mongoSession });
+          if (product?.batchTracked && item.batchAllocations.reduce((sum, allocation) => sum + Number(allocation.quantity || 0), 0) !== item.quantity) {
+            throw new BatchInventoryError(`${item.name} was sold before batch tracking was enabled. Record the returned lot in Batch control before posting this refund.`);
+          }
+          const locationTracked = await db.collection("inventoryBalances").findOne({ productId: item.productId }, { projection: { _id: 1 }, session: mongoSession });
+          if (locationTracked) {
+            if (!sale.locationId || !ObjectId.isValid(String(sale.locationId))) throw new InventoryLocationError(`${item.name} uses location inventory, but the original sale has no valid location.`);
+            await db.collection("inventoryBalances").updateOne(
+              { productId: item.productId, locationId: sale.locationId },
+              {
+                $inc: { quantity: item.quantity },
+                $set: { sku: item.sku, productName: item.name, locationCode: String(sale.locationCode || ""), locationName: String(sale.locationName || "Sale location"), updatedAt: now },
+                $setOnInsert: { _id: new ObjectId(), createdBy: new ObjectId(auth.session.id), createdAt: now },
+              },
+              { upsert: true, session: mongoSession },
+            );
+          }
+          if (product?.batchTracked) {
+            for (const allocation of item.batchAllocations) {
+              await addInventoryBatchQuantity(db, {
+                productId: item.productId,
+                sku: item.sku,
+                productName: item.name,
+                locationId: sale.locationId as ObjectId,
+                locationCode: String(sale.locationCode || ""),
+                locationName: String(sale.locationName || "Sale location"),
+                allocation,
+                actorId: new ObjectId(auth.session.id),
+                now,
+              }, mongoSession);
+            }
+          }
           await db.collection("products").updateOne({ _id: item.productId }, { $inc: { stock: item.quantity }, $set: { updatedAt: now } }, { session: mongoSession });
           await db.collection("stockMovements").insertOne({
             productId: item.productId,
@@ -156,6 +244,11 @@ export async function POST(request: Request) {
             type: "RETURN",
             reason: refundNo,
             referenceId: refund._id,
+            ...(counterId ? { counterId } : {}),
+            ...(sale.locationId ? { locationId: sale.locationId } : {}),
+            ...(sale.locationCode ? { locationCode: sale.locationCode } : {}),
+            ...(sale.locationName ? { locationName: sale.locationName } : {}),
+            ...(openShift ? { shiftId: openShift._id } : {}),
             createdBy: new ObjectId(auth.session.id),
             createdAt: now,
           }, { session: mongoSession });
@@ -200,6 +293,9 @@ export async function POST(request: Request) {
           memo: `POS refund ${refundNo} for ${sale.receiptNo}`,
           reference: refundNo,
           source: "POS_REFUND",
+          ...(counterId ? { counterId } : {}),
+          ...(sale.locationId ? { locationId: sale.locationId } : {}),
+          ...(openShift ? { shiftId: openShift._id } : {}),
           status: "POSTED",
           lines: [
             { accountCode: "4000", accountName: "Product sales", debit: totals.netSales, credit: 0 },
@@ -213,7 +309,7 @@ export async function POST(request: Request) {
           createdBy: new ObjectId(auth.session.id),
           createdAt: now,
         }, { session: mongoSession });
-        await writeAudit(db, auth.session, "sale.refund", "sale", input.data.saleId, { refundNo, total: totals.total, reason: input.data.reason }, mongoSession);
+        await writeAudit(db, auth.session, "sale.refund", "sale", input.data.saleId, { refundNo, shiftNo: openShift?.shiftNo || "", total: totals.total, reason: input.data.reason }, mongoSession);
       });
     } finally {
       await mongoSession.endSession();
@@ -222,6 +318,13 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof Error && error.message === "REFUND_NOT_AVAILABLE") return fail("This sale is not available for another refund.", 409);
     if (error instanceof Error && error.message === "REFUND_QUANTITY_INVALID") return fail("A refund quantity exceeds the number still returnable.", 422);
+    if (error instanceof ShiftError) return fail(error.message, 409);
+    if (error instanceof InventoryLocationError || error instanceof BatchInventoryError) return fail(error.message, 409);
+    if ((error as { code?: number }).code === 11000 && input.data.clientRequestId) {
+      const db = await getDb();
+      const existing = await db.collection("refunds").findOne({ clientRequestId: input.data.clientRequestId });
+      if (existing) return ok(serialise(existing));
+    }
     if ((error as { code?: number }).code === 11000) return fail("The refund number collided. Try the refund again.", 409);
     return publicError(error);
   }

@@ -4,6 +4,7 @@ import { writeAudit } from "@/lib/audit";
 import { getDb, getMongoClient } from "@/lib/db";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { stocktakeDifference, stocktakeInputSchema } from "@/lib/stocktake";
+import { assessStocktakeShrinkage, writeOperationalReview } from "@/lib/operational-reviews";
 
 export const runtime = "nodejs";
 
@@ -34,11 +35,21 @@ export async function POST(request: Request) {
           { session: mongoSession },
         ).toArray();
         if (products.length !== ids.length) throw new StocktakeConflictError("One or more products are archived or no longer available.");
+        if (products.some((product) => product.batchTracked)) throw new StocktakeConflictError("Count batch-tracked products in Batch control so every lot remains reconciled.");
 
         const productMap = new Map(products.map((product) => [product._id.toHexString(), product]));
+        const location = input.data.locationId
+          ? await db.collection("locations").findOne({ _id: new ObjectId(input.data.locationId), active: { $ne: false } }, { session: mongoSession })
+          : null;
+        if (input.data.locationId && !location) throw new StocktakeConflictError("The selected stocktake location is inactive.");
+        const allBalances = await db.collection("inventoryBalances").find({ productId: { $in: ids } }, { session: mongoSession }).toArray();
+        const trackedIds = new Set(allBalances.map((balance) => String(balance.productId)));
+        if (location && products.some((product) => !trackedIds.has(String(product._id)))) throw new StocktakeConflictError("Allocate every selected product to locations before counting it at a location.");
+        if (!location && products.some((product) => trackedIds.has(String(product._id)))) throw new StocktakeConflictError("Choose a location when counting products that use location inventory.");
+        const locationBalances = new Map(allBalances.filter((balance) => location && String(balance.locationId) === String(location._id)).map((balance) => [String(balance.productId), balance]));
         const lines = input.data.lines.map((line) => {
           const product = productMap.get(line.productId)!;
-          const bookStock = Number(product.stock || 0);
+          const bookStock = location ? Number(locationBalances.get(line.productId)?.quantity || 0) : Number(product.stock || 0);
           const difference = stocktakeDifference(bookStock, line.countedStock);
           return {
             productId: product._id,
@@ -54,12 +65,32 @@ export async function POST(request: Request) {
 
         for (const line of lines) {
           if (!line.difference) continue;
-          const result = await db.collection("products").updateOne(
-            { _id: line.productId, active: { $ne: false }, stock: line.bookStock },
-            { $set: { stock: line.countedStock, updatedAt: now } },
-            { session: mongoSession },
-          );
-          if (!result.modifiedCount) throw new StocktakeConflictError(`${line.productName} changed while the count was being posted. Reload and count it again.`);
+          if (location) {
+            await db.collection("inventoryBalances").updateOne(
+              { productId: line.productId, locationId: location._id },
+              { $setOnInsert: { _id: new ObjectId(), sku: line.sku, productName: line.productName, locationCode: location.code, locationName: location.name, quantity: 0, createdBy: new ObjectId(auth.session.id), createdAt: now, updatedAt: now } },
+              { upsert: true, session: mongoSession },
+            );
+            const localResult = await db.collection("inventoryBalances").updateOne(
+              { productId: line.productId, locationId: location._id, quantity: line.bookStock },
+              { $set: { quantity: line.countedStock, updatedAt: now } },
+              { session: mongoSession },
+            );
+            if (!localResult.modifiedCount) throw new StocktakeConflictError(`${line.productName} changed at ${location.name} while the count was being posted. Reload and count it again.`);
+            const totalResult = await db.collection("products").updateOne(
+              { _id: line.productId, active: { $ne: false }, $expr: { $gte: [{ $add: ["$stock", line.difference] }, 0] } },
+              { $inc: { stock: line.difference }, $set: { updatedAt: now } },
+              { session: mongoSession },
+            );
+            if (!totalResult.modifiedCount) throw new StocktakeConflictError(`${line.productName} total stock changed while the location count was being posted.`);
+          } else {
+            const result = await db.collection("products").updateOne(
+              { _id: line.productId, active: { $ne: false }, stock: line.bookStock },
+              { $set: { stock: line.countedStock, updatedAt: now } },
+              { session: mongoSession },
+            );
+            if (!result.modifiedCount) throw new StocktakeConflictError(`${line.productName} changed while the count was being posted. Reload and count it again.`);
+          }
         }
 
         const adjustedLines = lines.filter((line) => line.difference !== 0);
@@ -75,6 +106,7 @@ export async function POST(request: Request) {
             referenceNo: stocktakeNo,
             bookStock: line.bookStock,
             countedStock: line.countedStock,
+            ...(location ? { locationId: location._id, locationCode: location.code, locationName: location.name } : {}),
             createdBy: new ObjectId(auth.session.id),
             createdAt: now,
           })), { session: mongoSession });
@@ -89,15 +121,25 @@ export async function POST(request: Request) {
           lineCount: lines.length,
           adjustedLineCount: adjustedLines.length,
           absoluteVariance: adjustedLines.reduce((sum, line) => sum + Math.abs(line.difference), 0),
+          ...(location ? { locationId: location._id, locationCode: location.code, locationName: location.name } : {}),
           createdBy: new ObjectId(auth.session.id),
           createdByName: auth.session.fullName,
           createdAt: now,
         };
         await db.collection("stocktakes").insertOne(stocktake, { session: mongoSession });
+        await writeOperationalReview(db, assessStocktakeShrinkage(lines), {
+          sourceType: "stocktake",
+          sourceId: stocktakeId.toHexString(),
+          sourceNo: stocktakeNo,
+          sourceHref: "/inventory",
+          occurredAt: now,
+          actor: auth.session,
+        }, mongoSession);
         await writeAudit(db, auth.session, "inventory.stocktake", "stocktake", stocktakeId.toHexString(), {
           stocktakeNo,
           lineCount: lines.length,
           adjustedLineCount: adjustedLines.length,
+          locationId: location ? String(location._id) : "",
         }, mongoSession);
       });
     } finally {

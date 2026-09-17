@@ -19,10 +19,12 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Owner-only 24-hour ownership-transfer cooling period with cancel/complete steps.
 - Open, read-only and closed workspace modes with an optional automatic reopen time.
 - Audit records for security, ownership, inventory, member, sale and configuration changes.
+- Central exception-review queue for unusual manual discounts, high cumulative refunds, material inventory shrinkage, register variances and repeated failed sign-ins. Manager acknowledgement, resolution and reopening use optimistic versions and append-only review history; a rule match is evidence for review, not an automatic accusation.
 
 ### POS, receipts and promotions
 
 - Multi-counter operation with a protected Main counter, custom counters, location attribution and optional Manager bindings. Every new sale, stock movement, journal and receipt snapshots its counter/location; a bound counter rejects other Managers while unbound counters remain shared.
+- Controlled register shifts with multi-currency opening floats, operator ownership, blind closing counts, Manager-reviewed cash variances, live X reports and immutable Z reports. Shift control activates per counter on its first opening so existing deployments can migrate without an abrupt sales lock.
 - Product cart, member selection, administrator-defined payment methods and optional/required payment references.
 - Payment-method routing to an active cash/bank asset account, revalidated by the API and snapshotted on each sale for accurate refunds.
 - Server-calculated prices, coupon discounts, tax, cash received and change due.
@@ -77,6 +79,9 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Product create/edit, optional barcode, SKU, category, unit, retail price, cost and reorder level.
 - Stock adjustment journal with mandatory reason.
 - Physical stocktake with typed or scan-to-count quantities, variance posting and auditable stock movements.
+- Gradual multi-location inventory activation: existing company stock is allocated once across active locations, then sales, refunds, purchase receipts, adjustments and physical counts maintain both the location balance and company total. Controlled transfers separate dispatch, in-transit, destination receipt and cancellation without creating a false purchase or accounting journal.
+- Gradual [batch and expiry control](docs/inventory-batches.md): opening lots reconcile to location stock, purchase receipts capture supplier provenance, POS consumes unexpired lots by FEFO, receipts retain exact allocations, and refunds/transfers restore or move those same lots. Expired stock stays visible for controlled count or disposal but is excluded from sale.
+- Freshness action queue using 30-day net location demand: FEFO sell-through forecasts identify units at risk before expiry, suggest higher-demand transfer destinations without moving stock automatically, and post authorised expiry/damage/recall disposal to Inventory write-off with immutable lot evidence.
 - Product archive/restore preserving stock and transaction history.
 - Manual balanced journals and a seeded chart of accounts.
 - Searchable main-country settings for 249 countries/regions, editable date/number format and time zone, and explicit country selection during Owner setup.
@@ -113,13 +118,13 @@ Core endpoints:
 
 - `/api/setup`, `/api/auth/login`, `/api/auth/logout`, `/api/profile`
 - `/api/users`, `/api/system-control`, `/api/ownership-transfer`
-- `/api/products`, `/api/stocktakes`, `/api/members`, `/api/coupons`, `/api/payment-methods`, `/api/exchange-rates`
+- `/api/products`, `/api/stocktakes`, `/api/inventory-batches`, `/api/stock-transfers`, `/api/members`, `/api/coupons`, `/api/payment-methods`, `/api/exchange-rates`
 - `/api/scanner-sessions`, `/api/mobile-scans`, `/api/payment-display-sessions`, `/api/payment-display`
 - `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`, `/api/local-payment-events`
 - `/api/receipt-lookup`, `/api/public-receipts`, `/api/member-cards`, `/api/member-cards/lookup`
 - `/api/invoices`, `/api/invoice-templates`, `/api/journals`, `/api/reports`, `/api/e-invoices`
 - `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`
-- `/api/settings`, `/api/settings/history`, `/api/locations`, `/api/counters`, `/api/maintenance`
+- `/api/settings`, `/api/settings/history`, `/api/locations`, `/api/counters`, `/api/register-shifts`, `/api/maintenance`
 
 Workspace writes require a same-origin browser request and authenticated role permission. Initial setup, private owner recovery and token-restricted phone scan submission have their own authorization rules. Customer receipt retrieval is a read-only POST requiring the signed receipt token; it never authorizes refunds. Public errors do not include stack traces, secrets or database internals.
 

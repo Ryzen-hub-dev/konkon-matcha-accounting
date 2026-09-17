@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { currencyCodeSchema } from "@/lib/international";
-import { PAYMENT_PROVIDERS } from "@/lib/payment-verification";
+import { PAYMENT_PROVIDERS } from "@/lib/payment-verification-shared";
 
 export const LOCAL_PAYMENT_EVENT_SOURCE = "LOCAL_USB_SMS" as const;
 

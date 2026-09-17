@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
-  BarChart3, BookOpen, Boxes, ChevronLeft, ChevronRight, CircleDollarSign,
-  FileText, LayoutDashboard, LogOut, MapPinned, Menu, PackageCheck, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
+  ArrowLeftRight, BarChart3, BookOpen, Boxes, ChevronLeft, ChevronRight, CircleDollarSign,
+  CalendarClock, FileSearch2, FileText, LayoutDashboard, LogOut, MapPinned, Menu, PackageCheck, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
   Store, Users, WalletCards, X,
 } from "lucide-react";
 import type { SessionUser } from "@/lib/types";
@@ -25,10 +25,13 @@ const nav: NavItem[] = [
   { href: "/receipts", label: "Receipts", icon: ReceiptText, permission: "receipts.read" },
   { href: "/members", label: "Members", icon: Users, permission: "members.read" },
   { href: "/inventory", label: "Inventory", icon: Boxes, permission: "inventory.read" },
+  { href: "/batches", label: "Batch & expiry", icon: CalendarClock, permission: "inventory.read" },
+  { href: "/transfers", label: "Stock transfers", icon: ArrowLeftRight, permission: "inventory.read" },
   { href: "/procurement", label: "Purchasing & payables", icon: PackageCheck, permission: "purchasing.read" },
   { href: "/accounting", label: "Accounting", icon: BookOpen, permission: "accounting.read" },
   { href: "/invoices", label: "Invoices", icon: FileText, permission: "invoices.read" },
   { href: "/reports", label: "Reports", icon: BarChart3, permission: "reports.read" },
+  { href: "/reviews", label: "Exception reviews", icon: FileSearch2, permission: "reviews.read" },
   { href: "/team", label: "Team & access", icon: Users, permission: "team.read" },
   { href: "/locations", label: "Locations & franchises", icon: MapPinned, permission: "settings.read" },
   { href: "/settings", label: "Workspace", icon: Settings, permission: "settings.read" },

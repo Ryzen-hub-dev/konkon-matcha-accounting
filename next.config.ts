@@ -3,6 +3,12 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  webpack: (config) => {
+    // Some Windows filesystems intermittently reject Webpack pack-cache writes.
+    // Keep normal caching by default and expose a build-only recovery switch.
+    if (process.env.KONKON_DISABLE_WEBPACK_CACHE === "1") config.cache = false;
+    return config;
+  },
   experimental: {
     // Bound build-time page workers on developer machines and small deployments.
     cpus: 2,

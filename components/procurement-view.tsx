@@ -73,6 +73,7 @@ type Product = {
   cost: number;
   stock: number;
   reorderLevel: number;
+  batchTracked?: boolean;
 };
 type Location = { _id: string; code: string; name: string; type: string };
 type OrderLine = {
@@ -242,6 +243,7 @@ export function ProcurementView({
   const [receiveCounts, setReceiveCounts] = useState<Record<string, string>>(
     {},
   );
+  const [receiveLots, setReceiveLots] = useState<Record<string, { lotNo: string; expiryDate: string }>>({});
   const { notice, show } = useNotice();
 
   async function load(showLoading = true) {
@@ -599,16 +601,21 @@ export function ProcurementView({
   function beginReceive(order: PurchaseOrder) {
     setReceiveOrder(order);
     setReceiveCounts({});
+    setReceiveLots({});
   }
 
   async function receive(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!receiveOrder) return;
     const lines = receiveOrder.items
-      .map((line) => ({
-        productId: line.productId,
-        quantity: Number(receiveCounts[line.productId] || 0),
-      }))
+      .map((line) => {
+        const batchTracked = purchase.products.find((product) => product._id === line.productId)?.batchTracked;
+        return {
+          productId: line.productId,
+          quantity: Number(receiveCounts[line.productId] || 0),
+          ...(batchTracked ? { lotNo: receiveLots[line.productId]?.lotNo || "", expiryDate: receiveLots[line.productId]?.expiryDate || "" } : {}),
+        };
+      })
       .filter((line) => line.quantity > 0);
     if (!lines.length)
       return show("Enter at least one received quantity.", "error");
@@ -1591,10 +1598,13 @@ export function ProcurementView({
               <span>Ordered</span>
               <span>Already received</span>
               <span>Receive now</span>
+              <span>Supplier lot</span>
+              <span>Expiry</span>
             </header>
             {receiveOrder?.items.map((line) => {
               const outstanding =
                 line.quantity - Number(line.receivedQuantity || 0);
+              const batchTracked = purchase.products.find((product) => product._id === line.productId)?.batchTracked === true;
               return (
                 <label key={line.productId}>
                   <span>
@@ -1623,6 +1633,23 @@ export function ProcurementView({
                     placeholder={`0 / ${outstanding}`}
                     disabled={!outstanding}
                   />
+                  {batchTracked ? <input
+                    aria-label={`${line.productName} supplier lot`}
+                    value={receiveLots[line.productId]?.lotNo || ""}
+                    onChange={(event) => setReceiveLots((current) => ({ ...current, [line.productId]: { lotNo: event.target.value, expiryDate: current[line.productId]?.expiryDate || "" } }))}
+                    placeholder="Lot / batch no."
+                    required={Number(receiveCounts[line.productId] || 0) > 0}
+                    disabled={!outstanding}
+                  /> : <small>Not tracked</small>}
+                  {batchTracked ? <input
+                    aria-label={`${line.productName} expiry date`}
+                    type="date"
+                    min={isoDate(profile.timeZone, 1)}
+                    value={receiveLots[line.productId]?.expiryDate || ""}
+                    onChange={(event) => setReceiveLots((current) => ({ ...current, [line.productId]: { lotNo: current[line.productId]?.lotNo || "", expiryDate: event.target.value } }))}
+                    required={Number(receiveCounts[line.productId] || 0) > 0}
+                    disabled={!outstanding}
+                  /> : <small>—</small>}
                 </label>
               );
             })}

@@ -6,9 +6,14 @@ This document prevents planned AutoCount-style modules from being confused with 
 
 - Owner setup, RBAC, team lifecycle, forced password change and session revocation
 - Owner transfer cooling period and workspace open/read-only/closed controls
+- Multi-currency register opening/closing, operator accountability, X/Z reports and reviewed cash variances
+- Explainable exception review for unusual discounts, high refunds, inventory shrinkage, register variances and repeated sign-in failures, with assignment and immutable resolution history
 - Members, protected identity lookup, renewable printable member cards and points
 - Products, barcode/SKU scanning, stock movements, archive/restore and low-stock indicators
 - Physical stocktake with scan-to-count, typed final counts, transactional variance posting and audit history
+- Multi-location inventory activation and balances, location-aware sales/refunds/receipts/adjustments/stocktakes, and idempotent dispatch/in-transit/receipt/cancellation transfers
+- Product-level batch/lot/expiry activation, supplier-lot receipt provenance, FEFO sales, exact refund/transfer lot restoration, expiry quarantine and optimistic batch counts
+- Thirty-day location demand forecasting for FEFO lots, at-risk freshness queues, advisory transfer suggestions, and controlled expiry/damage/recall disposal with inventory write-off journals
 - POS, tenders, trusted coupons/manual discounts, tax calculation and transactional posting
 - Custom invoice and receipt templates, print/reprint, refund and historical snapshots
 - Invoice register search/status filters, copy-as-new-draft, idempotent draft creation, unpaid-draft editing with optimistic version checks, explicit payment/void confirmation and immutable issued/paid documents
@@ -65,7 +70,7 @@ This count is a delivery benchmark, not a claim of AutoCount parity. Accounting,
 - Bank import/feed, reconciliation and cash-flow forecast
 - Fixed-asset register, depreciation and disposal journals
 - Expense claims, approvals, attachments and payment runs
-- Multi-location stock transfer, batch/lot/expiry and serial-number tracking
+- Serial-number tracking
 - Multi-company consolidation, intercompany journals and elimination entries
 - Payroll, leave, statutory contribution and employee self-service
 - Budgeting, dimensions/cost centres, projects and variance reporting
@@ -80,8 +85,5 @@ Until that lifecycle exists, the UI must call outputs “management reports,” 
 
 ## Independent features planned
 
-- Matcha batch provenance from supplier lot to receipt line
-- Ceremonial-grade freshness/expiry forecast tied to demand and wastage
 - Brew recipe costing and margin simulation
 - Member taste profile and consent-controlled recommendations
-- Anomaly review queue for unusual discounts, refunds, inventory shrinkage and login behaviour

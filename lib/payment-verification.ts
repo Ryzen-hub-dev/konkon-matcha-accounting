@@ -1,10 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { currencyMinorUnits } from "@/lib/international";
-
-export const PAYMENT_VERIFICATION_MODES = ["NONE", "REFERENCE", "STATIC_QR", "PROVIDER"] as const;
-export const PAYMENT_PROVIDERS = ["GENERIC", "PAYNOW", "DUITNOW", "TNG", "GRABPAY", "ALIPAY", "WECHATPAY", "UNIONPAY"] as const;
-export type PaymentVerificationMode = (typeof PAYMENT_VERIFICATION_MODES)[number];
-export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
+export { PAYMENT_PROVIDERS, PAYMENT_VERIFICATION_MODES } from "@/lib/payment-verification-shared";
+export type { PaymentProvider, PaymentVerificationMode } from "@/lib/payment-verification-shared";
 
 export function normaliseVerificationCode(value: string) {
   const code = value.normalize("NFKC").trim().toUpperCase();

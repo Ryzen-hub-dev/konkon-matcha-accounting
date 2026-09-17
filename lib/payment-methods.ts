@@ -1,7 +1,7 @@
 import type { ClientSession, Db } from "mongodb";
 import { z } from "zod";
 import { currencyCodeSchema } from "@/lib/international";
-import { PAYMENT_PROVIDERS, PAYMENT_VERIFICATION_MODES, type PaymentProvider, type PaymentVerificationMode } from "@/lib/payment-verification";
+import { PAYMENT_PROVIDERS, PAYMENT_VERIFICATION_MODES, type PaymentProvider, type PaymentVerificationMode } from "@/lib/payment-verification-shared";
 
 export const PAYMENT_KINDS = ["CASH", "NON_CASH"] as const;
 export type PaymentKind = (typeof PAYMENT_KINDS)[number];

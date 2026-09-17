@@ -1,6 +1,7 @@
 import type { ClientSession, Db } from "mongodb";
 import { z } from "zod";
 import { countryCodeSchema, currencyCodeSchema, currencyMinorUnits, roundCurrency } from "@/lib/international";
+import { inventoryDateKeySchema, inventoryLotNoSchema } from "@/lib/inventory-batches";
 
 const supplierFields = z.object({
   code: z.string().trim().toUpperCase().min(2).max(32).regex(/^[A-Z0-9_-]+$/),
@@ -57,7 +58,12 @@ export const purchaseOrderActionSchema = z.discriminatedUnion("action", [
     invoiceDate: z.coerce.date(),
     receivedAt: z.coerce.date().default(() => new Date()),
     notes: z.string().trim().max(300).default(""),
-    lines: z.array(z.object({ productId: z.string().length(24), quantity: z.coerce.number().int().min(1).max(1_000_000) })).min(1).max(100),
+    lines: z.array(z.object({
+      productId: z.string().length(24),
+      quantity: z.coerce.number().int().min(1).max(1_000_000),
+      lotNo: z.union([inventoryLotNoSchema, z.literal("")]).default(""),
+      expiryDate: z.union([inventoryDateKeySchema, z.literal("")]).default(""),
+    })).min(1).max(100),
   }).superRefine((value, context) => {
     const ids = value.lines.map((line) => line.productId);
     if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", path: ["lines"], message: "Each received product can appear only once." });

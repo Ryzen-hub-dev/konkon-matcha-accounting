@@ -88,6 +88,12 @@ export async function PATCH(request: Request) {
     if (changes.active === false && await db.collection("counters").countDocuments({ locationId: current._id, active: { $ne: false } })) {
       return fail("Reassign or archive active counters before deactivating this location.", 409);
     }
+    if (changes.active === false && await db.collection("inventoryBalances").countDocuments({ locationId: current._id, quantity: { $gt: 0 } })) {
+      return fail("Transfer or adjust this location's remaining stock before deactivating it.", 409);
+    }
+    if (changes.active === false && await db.collection("stockTransfers").countDocuments({ status: "IN_TRANSIT", $or: [{ sourceLocationId: current._id }, { destinationLocationId: current._id }] })) {
+      return fail("Receive or cancel in-transit stock linked to this location before deactivating it.", 409);
+    }
     const parent = parentLocationId === undefined ? null : await parentDetails(db, parentLocationId, id);
     if (changes.active === true && parentLocationId === undefined && current.parentLocationId) {
       const activeParent = await db.collection("locations").findOne({ _id: current.parentLocationId, active: { $ne: false } });
@@ -118,6 +124,8 @@ export async function DELETE(request: Request) {
     if (current.systemKey === "HEADQUARTERS") return fail("The primary headquarters cannot be archived.", 409);
     if (await db.collection("locations").countDocuments({ parentLocationId: id, active: { $ne: false } })) return fail("Move or archive child locations before archiving this parent.", 409);
     if (await db.collection("counters").countDocuments({ locationId: id, active: { $ne: false } })) return fail("Reassign or archive active counters before archiving this location.", 409);
+    if (await db.collection("inventoryBalances").countDocuments({ locationId: id, quantity: { $gt: 0 } })) return fail("Transfer or adjust this location's remaining stock before archiving it.", 409);
+    if (await db.collection("stockTransfers").countDocuments({ status: "IN_TRANSIT", $or: [{ sourceLocationId: id }, { destinationLocationId: id }] })) return fail("Receive or cancel in-transit stock linked to this location before archiving it.", 409);
     const now = new Date();
     await db.collection("locations").updateOne({ _id: id }, { $set: { active: false, archivedAt: now, archivedBy: new ObjectId(auth.session.id), updatedAt: now } });
     await writeAudit(db, auth.session, "location.archive", "location", input.data.id, { code: current.code });

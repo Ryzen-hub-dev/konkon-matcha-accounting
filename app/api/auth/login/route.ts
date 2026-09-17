@@ -6,6 +6,7 @@ import { isAuthConfigured, normalizeIdentity, setSession, verifyPassword } from 
 import { getDb } from "@/lib/db";
 import { writeAudit } from "@/lib/audit";
 import type { UserRole } from "@/lib/types";
+import { repeatedLoginFailureReview, writeOperationalReview } from "@/lib/operational-reviews";
 
 export const runtime = "nodejs";
 
@@ -63,6 +64,19 @@ export async function POST(request: Request) {
         } },
         { upsert: true },
       );
+      if (count === 5) {
+        const incidentId = createHash("sha256").update(`${key}|${windowStartedAt.toISOString()}`).digest("hex");
+        try {
+          await writeOperationalReview(db, repeatedLoginFailureReview(count), {
+            sourceType: "authentication",
+            sourceId: incidentId,
+            sourceNo: `AUTH-${incidentId.slice(0, 8).toUpperCase()}`,
+            occurredAt: now,
+          });
+        } catch (reviewError) {
+          console.error("[security-review-error]", reviewError instanceof Error ? reviewError.name : "unknown");
+        }
+      }
       return fail("The username or password is incorrect.", 401);
     }
 

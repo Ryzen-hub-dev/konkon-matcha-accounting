@@ -16,6 +16,9 @@ import { paymentAmountsMatch, staticQrPaymentIsConfirmed } from "@/lib/payment-v
 import { receiptAccessUrl } from "@/lib/receipt-access";
 import { ensureDefaultCounter } from "@/lib/counters";
 import { hasPermission } from "@/lib/rbac";
+import { assessManualDiscount, writeOperationalReview } from "@/lib/operational-reviews";
+import { dateKeyInTimeZone } from "@/lib/dates";
+import { BatchInventoryError, consumeInventoryBatches, type InventoryBatchAllocation } from "@/lib/inventory-batches";
 
 export const runtime = "nodejs";
 
@@ -42,6 +45,7 @@ const saleSchema = z.object({
 
 class StockError extends Error {}
 class PaymentError extends Error {}
+class ShiftError extends Error {}
 
 function saleResponse(sale: import("mongodb").Document, request: Request) {
   return serialise({ ...sale, publicReceiptUrl: sale.receiptAccessRevoked ? undefined : receiptAccessUrl(sale, process.env.NEXT_PUBLIC_APP_URL || request.url) });
@@ -120,6 +124,11 @@ export async function POST(request: Request) {
     const money = (value: unknown) => roundCurrency(value, business.currency);
     const existingSale = await db.collection("sales").findOne({ clientRequestId, createdBy: new ObjectId(auth.session.id) });
     if (existingSale) return ok(saleResponse(existingSale, request));
+    const [openShift, shiftControl] = await Promise.all([
+      db.collection("registerShifts").findOne({ counterId: counter._id, status: "OPEN" }),
+      db.collection("registerShifts").findOne({ counterId: counter._id }, { projection: { _id: 1 } }),
+    ]);
+    if (shiftControl && !openShift) throw new ShiftError("Open a register shift for this counter before completing a sale.");
     await ensureDefaultReceiptTemplate(db, new ObjectId(auth.session.id));
     await ensureDefaultPaymentMethods(db, new ObjectId(auth.session.id));
     const selectedPayment = await db.collection("paymentMethods").findOne({ code: input.data.paymentMethod, active: { $ne: false } });
@@ -147,6 +156,7 @@ export async function POST(request: Request) {
         cost,
         lineTotal: money(price * quantity),
         lineCost: money(cost * quantity),
+        batchAllocations: [] as InventoryBatchAllocation[],
       };
     });
     const subtotal = money(items.reduce((sum, item) => sum + item.lineTotal, 0));
@@ -216,7 +226,9 @@ export async function POST(request: Request) {
       counterCode: String(counter.code),
       counterName: String(counter.name),
       locationId: counterLocation._id,
+      locationCode: String(counterLocation.code),
       locationName: String(counterLocation.name),
+      ...(openShift ? { shiftId: openShift._id, shiftNo: String(openShift.shiftNo) } : {}),
       memberId: member?._id || null,
       memberName: member?.name || "Walk-in guest",
       memberNo: member?.memberNo || "",
@@ -286,6 +298,14 @@ export async function POST(request: Request) {
     const mongoSession = client.startSession();
     try {
       await mongoSession.withTransaction(async () => {
+        if (openShift) {
+          const activeShift = await db.collection("registerShifts").updateOne(
+            { _id: openShift._id, counterId: counter._id, status: "OPEN" },
+            { $set: { lastActivityAt: now, lastSaleAt: now } },
+            { session: mongoSession },
+          );
+          if (!activeShift.matchedCount) throw new ShiftError("The register shift closed before checkout. Open a new shift and try again.");
+        }
         const paymentStillActive = await db.collection("paymentMethods").findOne({ _id: selectedPayment._id, active: { $ne: false }, updatedAt: selectedPayment.updatedAt }, { session: mongoSession });
         if (!paymentStillActive) throw new PaymentError("The payment method became unavailable before checkout. Choose another method.");
         if (verificationMode === "PROVIDER") {
@@ -334,6 +354,26 @@ export async function POST(request: Request) {
           }, { session: mongoSession });
         }
         for (const item of items) {
+          const product = productMap.get(String(item.productId))!;
+          if (product.batchTracked) {
+            item.batchAllocations = await consumeInventoryBatches(db, {
+              productId: item.productId,
+              locationId: counterLocation._id,
+              quantity: item.quantity,
+              today: dateKeyInTimeZone(now, business.timeZone),
+              productName: item.name,
+              now,
+            }, mongoSession);
+          }
+          const locationTracked = await db.collection("inventoryBalances").findOne({ productId: item.productId }, { projection: { _id: 1 }, session: mongoSession });
+          if (locationTracked) {
+            const localStock = await db.collection("inventoryBalances").updateOne(
+              { productId: item.productId, locationId: counterLocation._id, quantity: { $gte: item.quantity } },
+              { $inc: { quantity: -item.quantity }, $set: { updatedAt: now } },
+              { session: mongoSession },
+            );
+            if (!localStock.modifiedCount) throw new StockError(`${item.name} does not have enough stock at ${counterLocation.name}.`);
+          }
           const updated = await db.collection("products").findOneAndUpdate(
             { _id: item.productId, active: { $ne: false }, stock: { $gte: item.quantity } },
             { $inc: { stock: -item.quantity }, $set: { updatedAt: now } },
@@ -350,11 +390,23 @@ export async function POST(request: Request) {
             referenceId: saleId,
             counterId: counter._id,
             locationId: counterLocation._id,
+            locationCode: counterLocation.code,
+            locationName: counterLocation.name,
+            ...(openShift ? { shiftId: openShift._id } : {}),
             createdBy: new ObjectId(auth.session.id),
             createdAt: now,
           }, { session: mongoSession });
         }
         await db.collection("sales").insertOne(sale, { session: mongoSession });
+        await writeOperationalReview(db, assessManualDiscount({ subtotal, manualDiscount }), {
+          sourceType: "sale",
+          sourceId: saleId.toHexString(),
+          sourceNo: receiptNo,
+          sourceHref: `/receipts/${saleId.toHexString()}`,
+          occurredAt: now,
+          actor: auth.session,
+          currency: business.currency,
+        }, mongoSession);
         if (member) {
           await db.collection("members").updateOne(
             { _id: member._id },
@@ -375,6 +427,7 @@ export async function POST(request: Request) {
           source: "POS",
           counterId: counter._id,
           locationId: counterLocation._id,
+          ...(openShift ? { shiftId: openShift._id } : {}),
           status: "POSTED",
           lines: [
             { accountCode: paymentAccount[0], accountName: paymentAccount[1], debit: total, credit: 0 },
@@ -387,14 +440,14 @@ export async function POST(request: Request) {
           createdBy: new ObjectId(auth.session.id),
           createdAt: now,
         }, { session: mongoSession });
-        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, counterCode: counter.code, locationId: counterLocation._id.toHexString(), total, currency: business.currency, tenderCurrency, tenderTotal, exchangeRate: exchange.rate, verificationMode, manualPaymentConfirmed: verificationMode === "STATIC_QR", itemCount: items.length, couponCode: couponResult?.coupon.code || "", manualDiscount }, mongoSession);
+        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, counterCode: counter.code, locationId: counterLocation._id.toHexString(), shiftNo: openShift?.shiftNo || "", total, currency: business.currency, tenderCurrency, tenderTotal, exchangeRate: exchange.rate, verificationMode, manualPaymentConfirmed: verificationMode === "STATIC_QR", itemCount: items.length, couponCode: couponResult?.coupon.code || "", manualDiscount }, mongoSession);
       });
     } finally {
       await mongoSession.endSession();
     }
     return created(saleResponse(sale, request));
   } catch (error) {
-    if (error instanceof StockError || error instanceof CouponError || error instanceof PaymentError) return fail(error.message, 409);
+    if (error instanceof StockError || error instanceof CouponError || error instanceof PaymentError || error instanceof ShiftError || error instanceof BatchInventoryError) return fail(error.message, 409);
     if ((error as { code?: number; keyPattern?: Record<string, number> }).code === 11000 && (error as { keyPattern?: Record<string, number> }).keyPattern?.paymentReferenceNormalized) return fail("This static QR transaction reference was already used. Verify the receiving account and enter the reference for this payment.", 409);
     if ((error as { code?: number }).code === 11000 && clientRequestId) {
       const db = await getDb();

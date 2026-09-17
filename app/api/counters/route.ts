@@ -73,6 +73,9 @@ export async function PATCH(request: Request) {
     if (!current) return fail("This counter could not be found.", 404);
     const { id, managerIds, locationId, ...plainChanges } = input.data;
     if (current.systemKey === "PRIMARY" && (plainChanges.active === false || (plainChanges.code && plainChanges.code !== current.code))) return fail("The primary counter code and active status are protected.", 409);
+    if (plainChanges.active === false && await db.collection("registerShifts").findOne({ counterId: current._id, status: { $in: ["OPEN", "PENDING_REVIEW"] } }, { projection: { _id: 1 } })) {
+      return fail("Close or review this counter's register shift before archiving it.", 409);
+    }
     const nextLocationId = locationId ?? String(current.locationId);
     const nextManagerIds = managerIds ?? (current.managerIds || []).map(String);
     const links = await relatedRecords(db, nextLocationId, nextManagerIds);
@@ -98,6 +101,9 @@ export async function DELETE(request: Request) {
     const counter = await db.collection("counters").findOne({ _id: new ObjectId(input.data.id), active: { $ne: false } });
     if (!counter) return fail("This counter is already inactive.", 404);
     if (counter.systemKey === "PRIMARY") return fail("The primary counter cannot be archived.", 409);
+    if (await db.collection("registerShifts").findOne({ counterId: counter._id, status: { $in: ["OPEN", "PENDING_REVIEW"] } }, { projection: { _id: 1 } })) {
+      return fail("Close or review this counter's register shift before archiving it.", 409);
+    }
     const now = new Date();
     await db.collection("counters").updateOne({ _id: counter._id, active: { $ne: false } }, { $set: { active: false, archivedAt: now, archivedBy: new ObjectId(auth.session.id), updatedAt: now } });
     await writeAudit(db, auth.session, "counter.archive", "counter", input.data.id, { code: counter.code });

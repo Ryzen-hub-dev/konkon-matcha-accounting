@@ -21,7 +21,7 @@ const chartOfAccounts = [
   ["2100", "Tax payable", "LIABILITY"],
   ["3000", "Owner's equity", "EQUITY"], ["4000", "Product sales", "REVENUE"],
   ["4100", "Foreign exchange gain", "REVENUE"],
-  ["5000", "Cost of goods sold", "EXPENSE"], ["6100", "Operating expenses", "EXPENSE"],
+  ["5000", "Cost of goods sold", "EXPENSE"], ["5100", "Inventory write-off", "EXPENSE"], ["6100", "Operating expenses", "EXPENSE"],
   ["6200", "Foreign exchange loss", "EXPENSE"],
 ];
 

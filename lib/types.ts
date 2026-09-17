@@ -29,6 +29,12 @@ export type ProductRecord = {
   price: number;
   cost: number;
   stock: number;
+  globalStock?: number;
+  locationTracked?: boolean;
+  batchTracked?: boolean;
+  expiryWarningDays?: number;
+  stockLocationId?: string;
+  locationBalances?: Array<{ productId: string; sku: string; productName: string; locationId: string; locationCode: string; locationName: string; quantity: number }>;
   reorderLevel: number;
   active: boolean;
   createdAt: string;

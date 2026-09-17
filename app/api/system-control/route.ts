@@ -32,6 +32,9 @@ export async function PATCH(request: Request) {
     const input = controlSchema.safeParse(await request.json());
     if (!input.success) return fail("Check the system control details.", 422, input.error.flatten().fieldErrors);
     const db = await getDb();
+    if (input.data.mode === "CLOSED" && await db.collection("registerShifts").findOne({ status: { $in: ["OPEN", "PENDING_REVIEW"] } }, { projection: { _id: 1 } })) {
+      return fail("Close and review every register shift before closing the workspace.", 409);
+    }
     const now = new Date();
     const reopenAt = input.data.mode === "OPEN" || input.data.reopenInMinutes === 0
       ? null

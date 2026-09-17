@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const stocktakeInputSchema = z.object({
+  locationId: z.union([z.string().regex(/^[a-f\d]{24}$/i), z.literal("")]).default(""),
   note: z.string().trim().max(300).default(""),
   lines: z.array(z.object({
     productId: z.string().regex(/^[a-f\d]{24}$/i),

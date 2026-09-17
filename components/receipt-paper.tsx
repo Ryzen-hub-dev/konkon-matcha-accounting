@@ -19,7 +19,7 @@ export type ReceiptPaperDocument = {
   memberNo?: string;
   pointsEarned?: number;
   pointsBalance?: number;
-  items: Array<{ sku?: string; name: string; quantity: number; price: number; lineTotal: number }>;
+  items: Array<{ sku?: string; name: string; quantity: number; price: number; lineTotal: number; batchAllocations?: Array<{ lotNo: string; expiryDate: string; quantity: number }> }>;
   subtotal: number;
   discount: number;
   taxRate: number;
@@ -97,7 +97,7 @@ export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, co
 
     <div className="receipt-paper-items">
       {document.items.map((item, index) => <div className="receipt-paper-item" key={`${item.name}-${index}`}>
-        <div><strong>{item.name}</strong>{template.showSku && item.sku ? <small>{item.sku}</small> : null}</div>
+        <div><strong>{item.name}</strong>{template.showSku && item.sku ? <small>{item.sku}</small> : null}{item.batchAllocations?.length ? <small>{item.batchAllocations.map((batch) => `LOT ${batch.lotNo} · EXP ${batch.expiryDate}${item.batchAllocations!.length > 1 ? ` · ${batch.quantity}` : ""}`).join(" / ")}</small> : null}</div>
         <span>{item.quantity} × {money.format(item.price)}</span>
         <b>{money.format(item.lineTotal)}</b>
       </div>)}

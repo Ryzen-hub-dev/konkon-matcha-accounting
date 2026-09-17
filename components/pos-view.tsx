@@ -28,6 +28,7 @@ import type { ReceiptTemplateRecord } from "@/lib/receipt-templates";
 import { calculateTaxTotals } from "@/lib/tax";
 import type { MemberRecord, ProductRecord } from "@/lib/types";
 import type { CounterRecord } from "@/lib/counters";
+import type { RegisterShiftRecord } from "@/lib/register-shifts";
 
 type CartLine = ProductRecord & { quantity: number };
 type RegisterConfig = {
@@ -43,6 +44,7 @@ type TemplateConfig = { templates: ReceiptTemplateRecord[]; register: RegisterCo
 type SaleReceipt = ReceiptPaperDocument & { _id: string; templateName?: string; templateSnapshot?: ReceiptTemplateRecord };
 type ExchangeRate = { baseCurrency: string; quoteCurrency: string; rate: number; source: string; effectiveAt: string };
 type ExchangeData = { baseCurrency: string; acceptedCurrencies: string[]; rates: ExchangeRate[] };
+type ShiftData = { shifts: RegisterShiftRecord[]; controlledCounterIds: string[]; cashCurrencies: string[] };
 type PaymentIntent = {
   _id: string;
   intentNo: string;
@@ -77,6 +79,8 @@ export function PosView({
   const [templates, setTemplates] = useState<ReceiptTemplateRecord[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodRecord[]>([]);
   const [counters, setCounters] = useState<CounterRecord[]>([]);
+  const [registerShifts, setRegisterShifts] = useState<RegisterShiftRecord[]>([]);
+  const [controlledCounterIds, setControlledCounterIds] = useState<string[]>([]);
   const [counterId, setCounterId] = useState("");
   const [exchange, setExchange] = useState<ExchangeData>({ baseCurrency: profile.currency, acceptedCurrencies: profile.acceptedCurrencies, rates: [] });
   const [register, setRegister] = useState<RegisterConfig>({ currency: profile.currency, acceptedCurrencies: profile.acceptedCurrencies, locale: profile.locale, timeZone: profile.timeZone, taxName: profile.taxName, taxRate: profile.taxRate, taxMode: profile.taxMode });
@@ -159,14 +163,17 @@ export function PosView({
   async function load(showLoading = true) {
     if (showLoading) setLoading(true);
     try {
-      const [productData, memberData, templateData, paymentData, exchangeData, counterData] = await Promise.all([
-        apiRequest<ProductRecord[]>("/api/products"),
+      const [memberData, templateData, paymentData, exchangeData, counterData, shiftData] = await Promise.all([
         apiRequest<MemberRecord[]>("/api/members"),
         apiRequest<TemplateConfig>("/api/receipt-templates"),
         apiRequest<PaymentMethodRecord[]>("/api/payment-methods"),
         apiRequest<ExchangeData>("/api/exchange-rates"),
         apiRequest<CounterRecord[]>("/api/counters"),
+        apiRequest<ShiftData>("/api/register-shifts"),
       ]);
+      const storedCounterId = window.localStorage.getItem(counterStorageKey) || "";
+      const selectedCounter = counterData.find((counter) => counter._id === counterId || counter._id === storedCounterId) || counterData[0];
+      const productData = await apiRequest<ProductRecord[]>(`/api/products${selectedCounter?.locationId ? `?locationId=${encodeURIComponent(selectedCounter.locationId)}` : ""}`);
       setProducts(productData);
       setMembers(memberData);
       setTemplates(templateData.templates);
@@ -174,12 +181,10 @@ export function PosView({
       setPaymentMethods(paymentData);
       setExchange(exchangeData);
       setCounters(counterData);
-      setCounterId((current) => {
-        const stored = window.localStorage.getItem(counterStorageKey) || "";
-        const selected = counterData.find((counter) => counter._id === current || counter._id === stored) || counterData[0];
-        if (selected) window.localStorage.setItem(counterStorageKey, selected._id);
-        return selected?._id || "";
-      });
+      setRegisterShifts(shiftData.shifts);
+      setControlledCounterIds(shiftData.controlledCounterIds);
+      if (selectedCounter) window.localStorage.setItem(counterStorageKey, selectedCounter._id);
+      setCounterId(selectedCounter?._id || "");
       const defaultMethod = paymentData.find((method) => method.code === "PAYNOW") || paymentData[0];
       setPayment((current) => paymentData.some((method) => method.code === current) ? current : defaultMethod?.code || "");
       setTenderCurrency((current) => exchangeData.acceptedCurrencies.includes(current) ? current : exchangeData.baseCurrency);
@@ -196,6 +201,39 @@ export function PosView({
   }
 
   useEffect(() => { void load(); }, []);
+
+  useEffect(() => {
+    const counter = counters.find((item) => item._id === counterId);
+    if (!counter?.locationId || loading) return;
+    let cancelled = false;
+    void apiRequest<ProductRecord[]>(`/api/products?locationId=${encodeURIComponent(counter.locationId)}`).then((nextProducts) => {
+      if (cancelled) return;
+      setProducts(nextProducts);
+      const nextMap = new Map(nextProducts.map((product) => [product._id, product]));
+      setCart((current) => current.map((line) => {
+        const product = nextMap.get(line._id);
+        return product && product.stock > 0 ? { ...product, quantity: Math.min(line.quantity, product.stock) } : null;
+      }).filter((line): line is CartLine => Boolean(line)));
+    }).catch(() => { /* checkout performs the authoritative location-stock check */ });
+    return () => { cancelled = true; };
+  }, [counterId, counters, loading]);
+
+  const refreshShiftState = useCallback(async () => {
+    if (document.visibilityState === "hidden") return;
+    try {
+      const shiftData = await apiRequest<ShiftData>("/api/register-shifts");
+      setRegisterShifts(shiftData.shifts);
+      setControlledCounterIds(shiftData.controlledCounterIds);
+    } catch { /* checkout remains protected by the server if shift state changed */ }
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => { void refreshShiftState(); }, 5_000);
+    const refresh = () => { if (document.visibilityState === "visible") void refreshShiftState(); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.clearInterval(interval); window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, [refreshShiftState]);
 
   const refreshMembers = useCallback(async (force = false) => {
     if (document.visibilityState === "hidden" && !force) return;
@@ -225,6 +263,10 @@ export function PosView({
   const discount = Math.min(subtotalBase, roundCurrency(manualDiscount + couponDiscount, register.currency));
   const { subtotal, tax, total } = calculateTaxTotals(subtotalBase, discount, register.taxRate, register.taxMode, register.currency);
   const selectedPayment = paymentMethods.find((method) => method.code === payment);
+  const selectedCounter = counters.find((counter) => counter._id === counterId);
+  const openShift = registerShifts.find((shift) => shift.counterId === counterId && shift.status === "OPEN");
+  const shiftControlled = controlledCounterIds.includes(counterId);
+  const shiftReady = !shiftControlled || Boolean(openShift);
   const verificationMode = selectedPayment?.verificationMode || "NONE";
   const requiresAmountLockedStaticQr = verificationMode === "STATIC_QR"
     && (selectedPayment?.providerCode === "TNG" || selectedPayment?.code === "TNG");
@@ -513,6 +555,7 @@ export function PosView({
 
   async function checkout() {
     if (!cart.length || busy || !selectedTemplateId || !selectedPayment) return;
+    if (!shiftReady) return show("Open a register shift for this counter before completing the sale.", "error");
     if (!exchangeRate || !tenderTotal) return show("Configure an active exchange rate before checkout.", "error");
     if (isCashPayment && tenderedAmount < tenderTotal) return show("Enter enough cash to cover the amount due.", "error");
     if (verificationMode === "REFERENCE" && !paymentReference.trim()) return show(`Enter the ${selectedPayment.name} reference before checkout.`, "error");
@@ -566,7 +609,7 @@ export function PosView({
     finally { setBusy(false); }
   }
 
-  const checkoutLocked = !cart.length || !selectedTemplateId || !selectedPayment || !counterId || busy || !exchangeRate
+  const checkoutLocked = !cart.length || !selectedTemplateId || !selectedPayment || !counterId || !shiftReady || busy || !exchangeRate
     || (isCashPayment && tenderedAmount < tenderTotal)
     || (verificationMode === "REFERENCE" && !paymentReference.trim())
     || (verificationMode === "STATIC_QR" && (!manualPaymentConfirmed || paymentReference.trim().length < 4 || !staticQrDataUrl || (requiresAmountLockedStaticQr && !staticQrAmountLocked)))
@@ -575,7 +618,7 @@ export function PosView({
   return <div className="page page-enter pos-page">
     <PageHeader eyebrow="COUNTER" title="Point of sale" description="Persistent register with live members, cross-border settlement and verified payment controls." action={<div className="pos-page-actions"><button className="button button-secondary" onClick={() => setHistoryOpen(true)}><History size={17} />Draft history</button><Link className="button button-secondary" href="/receipts"><ReceiptText size={17} />Receipt history</Link>{canManageTemplates ? <button className="button button-secondary" onClick={() => setStudioOpen(true)}><Palette size={17} />Receipt templates</button> : null}</div>} />
     {notice ? <Notice {...notice} /> : null}
-    <div className="pos-counter-status"><Store /><span><small>ACTIVE COUNTER</small><strong>{counters.find((counter) => counter._id === counterId)?.locationName || "Select a counter"}</strong></span><select aria-label="Active counter" value={counterId} onChange={(event) => { setCounterId(event.target.value); window.localStorage.setItem(counterStorageKey, event.target.value); }}>{counters.map((counter) => <option key={counter._id} value={counter._id}>{counter.code} · {counter.name}</option>)}</select><Link href="/counters">Counter network</Link></div>
+    <div className={`pos-counter-status ${shiftControlled && !openShift ? "shift-locked" : ""}`}><Store /><span><small>{openShift ? `OPEN SHIFT · ${openShift.shiftNo}` : shiftControlled ? "SHIFT CLOSED · SALES LOCKED" : "SHIFT CONTROL NOT STARTED"}</small><strong>{selectedCounter?.locationName || "Select a counter"}</strong></span><select aria-label="Active counter" value={counterId} onChange={(event) => { setCounterId(event.target.value); window.localStorage.setItem(counterStorageKey, event.target.value); }}>{counters.map((counter) => <option key={counter._id} value={counter._id}>{counter.code} · {counter.name}</option>)}</select><Link href="/counters">{shiftControlled && !openShift ? "Open shift" : "Counter network"}</Link></div>
     <div className="pos-draft-status"><Cloud size={15} /><span>{draftSavedAt ? `Saved in this browser at ${draftSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Browser draft protection is active"}</span><i />Member list refreshes automatically every 3 seconds and whenever this window regains focus.</div>
     <ScannerBridge contextLabel="Point of sale" purpose="POS" enabled={!loading} placeholder={paymentIntent?.status === "PENDING" ? "Scan completed-payment verification code" : "Scan product · member card · coupon"} onScan={handleScan} onFeedback={show} />
     <section className="pos-nfc-reader no-print" aria-label="POS NFC reader"><header><div><span className="eyebrow">POS NFC READER · ALWAYS ON</span><h2>Tap a member card</h2><p>Use the linked phone or this device. Tap to select a member; the reader stays ready for the next card.</p></div><Nfc aria-hidden="true" /></header><NfcControl autoStart alwaysOn onRead={handleScan} onGenericRead={handleScan} disabled={loading} /></section>
@@ -591,7 +634,7 @@ export function PosView({
         <label className="register-reference"><span>Settlement currency</span><select value={tenderCurrency} onChange={(event) => { setTenderCurrency(event.target.value); setPaymentIntent(null); }}>{availableCurrencies.map((currency) => <option key={currency}>{currency}</option>)}</select></label>
         {isCashPayment ? <div className="cash-tender"><label><span>Cash received · {tenderCurrency}</span><input type="number" min={tenderTotal} step={10 ** -currencyFractionDigits(tenderCurrency)} value={tenderedAmount || ""} onChange={(event) => setTenderedAmount(Math.max(0, Number(event.target.value)))} placeholder={tenderTotal.toFixed(currencyFractionDigits(tenderCurrency))} /></label><div>{cashOptions.map((value) => <button type="button" key={value} onClick={() => setTenderedAmount(value)}>{tenderMoney.format(value)}</button>)}</div><p><span>Change due</span><strong>{tenderMoney.format(Math.max(0, roundCurrency(tenderedAmount - tenderTotal, tenderCurrency)))}</strong></p></div> : verificationMode === "PROVIDER" ? <div className={`verified-payment ${paymentIntent?.status.toLowerCase() || "idle"}`}><div><ShieldCheck /><span><strong>{paymentIntent?.status === "VERIFIED" ? "Provider payment verified" : paymentIntent?.status === "PENDING" ? "Waiting for confirmed-payment code" : "Strict verification required"}</strong><small>{paymentIntent ? `${paymentIntent.intentNo} · ${paymentIntent.provider} · ${tenderMoney.format(paymentIntent.tenderAmount)}` : "A scanned image or static QR alone never unlocks checkout."}</small></span></div>{paymentIntent?.status === "VERIFIED" ? <CheckCircle2 /> : <button type="button" className="button button-primary" onClick={() => void beginProviderVerification()} disabled={!cart.length || !exchangeRate}>{paymentIntent ? "Restart verification" : "Start secure verification"}</button>}</div> : verificationMode === "STATIC_QR" ? <div className="static-qr-payment"><div className="static-qr-code">{staticQrDataUrl ? <img src={staticQrDataUrl} alt={`${selectedPayment?.name || "Payment"} ${staticQrAmountLocked ? "fixed amount" : "recipient"} QR`} /> : <QrCode />}</div><div className="static-qr-instructions"><span>SCAN TO PAY · {staticQrAmountLocked ? "POS AMOUNT LOCKED" : "STATIC RECIPIENT QR"}</span><strong>{tenderMoney.format(tenderTotal)}</strong><small>{staticQrAmountLocked ? "The QR includes the exact POS amount. Confirm the recipient in the payer app before authorising." : "Customer scans this recipient QR and enters the exact amount shown."} This screen alone is not proof of payment.</small>{staticQrError ? <p className="static-qr-error"><AlertTriangle />{staticQrError}</p> : null}<div className="static-qr-customer-action"><button type="button" className="button button-primary" onClick={showCustomerQr} disabled={!currentCustomerQrSignature || (requiresAmountLockedStaticQr && !staticQrAmountLocked)}><QrCode />{customerQrRequested ? "Show QR again" : "Show customer QR"}</button>{customerQrRequested ? <button type="button" className="button button-secondary" onClick={hideCustomerQr}>Hide QR</button> : null}<small>{customerQrRequested ? "The current amount is live on linked customer screens." : "Opens a large scan-ready code and updates the linked phone."}</small></div><label><span>Transaction reference</span><input value={paymentReference} maxLength={80} required onChange={(event) => setPaymentReference(event.target.value)} placeholder="Reference shown in receiver app" /></label><label className="static-payment-confirm"><input type="checkbox" checked={manualPaymentConfirmed} onChange={(event) => setManualPaymentConfirmed(event.target.checked)} /><span><b>I saw the successful credit in the receiving bank or wallet app.</b><small>Do not tick from a customer screenshot, pending page or payment animation.</small></span></label><p><AlertTriangle />Without a bank or wallet API, only this manual receiving-side check can unlock checkout.</p></div></div> : <label className="register-reference"><span>{selectedPayment?.name || "Payment"} reference · required</span><input value={paymentReference} maxLength={80} required onChange={(event) => setPaymentReference(event.target.value)} placeholder="Transaction or approval number" /></label>}
         <div className="register-paper"><label><span>Receipt template</span><select value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}>{templates.map((template) => <option key={template._id} value={template._id}>{template.name}{template.isDefault ? " · default" : ""}</option>)}</select></label><label><span>Order note · optional</span><input value={saleNote} maxLength={300} onChange={(event) => setSaleNote(event.target.value)} placeholder="Collection or customer note" /></label></div>
-        <button className="checkout-button" disabled={checkoutLocked} onClick={checkout}><span>{busy ? "Posting sale…" : verificationMode === "PROVIDER" && paymentIntent?.status !== "VERIFIED" ? "Awaiting verified payment" : verificationMode === "STATIC_QR" && !manualPaymentConfirmed ? "Confirm receiving-side credit" : "Complete sale"}</span><strong>{tenderCurrency === register.currency ? money.format(total) : tenderMoney.format(tenderTotal)}</strong><ChevronRight size={20} /></button>
+        <button className="checkout-button" disabled={checkoutLocked} onClick={checkout}><span>{busy ? "Posting sale…" : !shiftReady ? "Open register shift first" : verificationMode === "PROVIDER" && paymentIntent?.status !== "VERIFIED" ? "Awaiting verified payment" : verificationMode === "STATIC_QR" && !manualPaymentConfirmed ? "Confirm receiving-side credit" : "Complete sale"}</span><strong>{tenderCurrency === register.currency ? money.format(total) : tenderMoney.format(tenderTotal)}</strong><ChevronRight size={20} /></button>
       </aside>
     </div>}
     <Modal open={Boolean(orphanCard)} onClose={() => { if (!busy) setOrphanCard(null); }} title="Orphaned NFC registration" kicker="MEMBER CARD CLEANUP">{orphanCard ? <div className="orphan-nfc-modal"><div className="orphan-nfc-modal-icon"><CreditCard size={23} /></div><div><span className="eyebrow">SAFE TO CLEAR</span><h3>{orphanCard.card.label || "Existing NFC card"}</h3><p>{orphanCard.member?.name || "Member record missing"}{orphanCard.member?.memberNo ? ` · ${orphanCard.member.memberNo}` : ""}</p><small>{orphanCard.card.source === "NFC_SERIAL" ? "Hardware serial fingerprint" : "NDEF fingerprint"}{orphanCard.card.last4 ? ` · ending ${orphanCard.card.last4}` : ""}</small></div><div className="orphan-nfc-warning"><ShieldCheck size={16} /><span>The member is archived or removed. Clearing this registration does not change sales, refunds or points. The physical card can then be bound to another member.</span></div><footer><button type="button" className="button button-secondary" onClick={() => setOrphanCard(null)} disabled={busy}>Keep registration</button><button type="button" className="button button-primary" onClick={() => void clearOrphanBinding()} disabled={busy}><Trash2 size={15} />{busy ? "Clearing…" : "Clear NFC registration"}</button></footer></div> : null}</Modal>

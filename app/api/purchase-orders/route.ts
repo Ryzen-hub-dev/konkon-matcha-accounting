@@ -9,6 +9,7 @@ import { makeDocumentNo, serialise } from "@/lib/format";
 import { currencyMinorUnits, roundCurrency } from "@/lib/international";
 import { approvalRequiresDifferentMaker, ensureProcurementAccounts, purchaseOrderActionSchema, purchaseOrderInputSchema, suggestedReorderAfterInbound, weightedAverageInventoryCost } from "@/lib/procurement";
 import { calculateTaxTotals } from "@/lib/tax";
+import { addInventoryBatchQuantity, lotKey, normaliseLotNo } from "@/lib/inventory-batches";
 
 export const runtime = "nodejs";
 
@@ -245,11 +246,11 @@ export async function PATCH(request: Request) {
         const today = dateKeyInTimeZone(new Date(), orderTimeZone);
         if (receivedDay < orderDay || receivedDay > today) throw new PurchaseConflictError("Received date cannot precede the purchase order or be in the future.");
         if (invoiceDay < orderDay || invoiceDay > receivedDay) throw new PurchaseConflictError("Supplier invoice date must be between the purchase order and received dates.");
-        const requested = new Map(receiveInput.lines.map((line) => [line.productId, line.quantity]));
+        const requested = new Map(receiveInput.lines.map((line) => [line.productId, line]));
         const selectedLines = order.items.filter((line: Record<string, unknown>) => requested.has(String(line.productId)));
         if (selectedLines.length !== requested.size) throw new PurchaseConflictError("A received product is not on this purchase order.");
         for (const line of selectedLines) {
-          const quantity = requested.get(String(line.productId))!;
+          const quantity = requested.get(String(line.productId))!.quantity;
           const outstanding = Number(line.quantity) - Number(line.receivedQuantity || 0);
           if (quantity > outstanding) throw new PurchaseConflictError(`${line.productName} has only ${outstanding} outstanding on this order.`);
         }
@@ -257,13 +258,29 @@ export async function PATCH(request: Request) {
         const products = await db.collection("products").find({ _id: { $in: productIds }, active: { $ne: false } }, { session: mongoSession }).toArray();
         if (products.length !== productIds.length) throw new PurchaseConflictError("A product was archived before receiving. Restore it before posting the delivery.");
         const productMap = new Map(products.map((product) => [product._id.toHexString(), product]));
+        for (const line of selectedLines) {
+          const product = productMap.get(String(line.productId))!;
+          const receivedLine = requested.get(String(line.productId))!;
+          if (product.batchTracked && (!receivedLine.lotNo || !receivedLine.expiryDate)) {
+            throw new PurchaseConflictError(`${String(line.productName)} requires a supplier lot number and expiry date.`);
+          }
+          if (product.batchTracked && receivedLine.expiryDate <= receivedDay) {
+            throw new PurchaseConflictError(`${String(line.productName)} must have an expiry date after the received date.`);
+          }
+        }
         const taxFactor = Number(order.taxRate || 0) / 100;
         let receiptLines = selectedLines.map((line: Record<string, unknown>) => {
-          const quantity = requested.get(String(line.productId))!;
+          const receivedLine = requested.get(String(line.productId))!;
+          const quantity = receivedLine.quantity;
           const lineTotal = roundCurrency(Number(line.unitCost) * quantity, String(order.currency));
           const netLineTotal = order.taxMode === "INCLUSIVE" && taxFactor > 0 ? roundCurrency(lineTotal / (1 + taxFactor), String(order.currency)) : lineTotal;
           const baseInventoryValue = roundCurrency(netLineTotal / Number(order.exchangeRate), String(order.baseCurrency));
-          return { ...line, orderedQuantity: Number(line.quantity), previouslyReceivedQuantity: Number(line.receivedQuantity || 0), quantity, lineTotal, netLineTotal, baseInventoryValue, baseUnitCost: roundCurrency(baseInventoryValue / quantity, String(order.baseCurrency)) };
+          const product = productMap.get(String(line.productId))!;
+          return {
+            ...line, orderedQuantity: Number(line.quantity), previouslyReceivedQuantity: Number(line.receivedQuantity || 0), quantity,
+            lineTotal, netLineTotal, baseInventoryValue, baseUnitCost: roundCurrency(baseInventoryValue / quantity, String(order.baseCurrency)),
+            ...(product.batchTracked ? { lotNo: normaliseLotNo(receivedLine.lotNo), lotKey: lotKey(receivedLine.lotNo), expiryDate: receivedLine.expiryDate } : {}),
+          };
         });
         const receiptSubtotal = roundCurrency(receiptLines.reduce((sum: number, line: Record<string, unknown>) => sum + Number(line.lineTotal), 0), String(order.currency));
         const totals = calculateTaxTotals(receiptSubtotal, 0, Number(order.taxRate || 0), order.taxMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE", String(order.currency));
@@ -290,14 +307,38 @@ export async function PATCH(request: Request) {
             { session: mongoSession },
           );
           if (!updated.modifiedCount) throw new PurchaseConflictError(`${line.productName} stock changed during receiving. Reload and post the delivery again.`);
+          const locationTracked = await db.collection("inventoryBalances").findOne({ productId: product._id }, { projection: { _id: 1 }, session: mongoSession });
+          if (locationTracked) {
+            await db.collection("inventoryBalances").updateOne(
+              { productId: product._id, locationId: order.locationId },
+              {
+                $inc: { quantity: Number(line.quantity) },
+                $set: { sku: line.sku, productName: line.productName, locationCode: order.locationCode, locationName: order.locationName, updatedAt: postedAt },
+                $setOnInsert: { _id: new ObjectId(), createdBy: new ObjectId(auth.session.id), createdAt: postedAt },
+              },
+              { upsert: true, session: mongoSession },
+            );
+          }
+          if (product.batchTracked) {
+            await addInventoryBatchQuantity(db, {
+              productId: product._id, sku: String(line.sku), productName: String(line.productName),
+              locationId: order.locationId, locationCode: String(order.locationCode), locationName: String(order.locationName),
+              allocation: {
+                lotNo: String(line.lotNo), lotKey: lotKey(line.lotNo), expiryDate: String(line.expiryDate), quantity: Number(line.quantity),
+                supplierId: order.supplierId, supplierName: String(order.supplierName), goodsReceiptId: receiptId, goodsReceiptNo: receiptNo,
+              },
+              actorId: new ObjectId(auth.session.id), now: postedAt, receivedAt: transactionDate,
+            }, mongoSession);
+          }
           await db.collection("stockMovements").insertOne({
             productId: product._id, sku: line.sku, productName: line.productName, quantity: line.quantity,
             type: "PURCHASE_RECEIPT", reason: receiptNo, referenceId: receiptId, referenceNo: receiptNo,
             purchaseOrderId: order._id, purchaseOrderNo: order.purchaseOrderNo, supplierId: order.supplierId, supplierName: order.supplierName,
-            unitCost: line.baseUnitCost, createdBy: new ObjectId(auth.session.id), movementDate: transactionDate, createdAt: postedAt,
+            unitCost: line.baseUnitCost, locationId: order.locationId, locationCode: order.locationCode, locationName: order.locationName,
+            createdBy: new ObjectId(auth.session.id), movementDate: transactionDate, createdAt: postedAt,
           }, { session: mongoSession });
         }
-        const newItems = order.items.map((line: Record<string, unknown>) => ({ ...line, receivedQuantity: Number(line.receivedQuantity || 0) + (requested.get(String(line.productId)) || 0) }));
+        const newItems = order.items.map((line: Record<string, unknown>) => ({ ...line, receivedQuantity: Number(line.receivedQuantity || 0) + (requested.get(String(line.productId))?.quantity || 0) }));
         const fullyReceived = newItems.every((line: Record<string, unknown>) => Number(line.receivedQuantity) >= Number(line.quantity));
         const updatedOrder = await db.collection("purchaseOrders").findOneAndUpdate(
           { _id: order._id, status: order.status, updatedAt: order.updatedAt },

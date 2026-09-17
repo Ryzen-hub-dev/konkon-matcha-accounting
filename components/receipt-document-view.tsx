@@ -14,6 +14,7 @@ import { EInvoiceGenerator } from "./e-invoice-generator";
 type RefundableItem = ReceiptPaperDocument["items"][number] & { productId: string; refundedQuantity?: number };
 type SaleReceipt = Omit<ReceiptPaperDocument, "items"> & {
   _id: string;
+  counterId?: string;
   items: RefundableItem[];
   templateName?: string;
   templateSnapshot?: ReceiptTemplateInput;
@@ -37,6 +38,7 @@ export function ReceiptDocumentView({ id, canRefund = false, canSell = false }: 
   const [refundBusy, setRefundBusy] = useState(false);
   const [refundQuantities, setRefundQuantities] = useState<Record<string, number>>({});
   const [reason, setReason] = useState("");
+  const [refundRequestId, setRefundRequestId] = useState("");
   const { notice, show } = useNotice();
 
   const load = useCallback(async () => {
@@ -62,6 +64,7 @@ export function ReceiptDocumentView({ id, canRefund = false, canSell = false }: 
   function beginRefund() {
     setRefundQuantities(Object.fromEntries(remainingItems.map((item) => [item.productId, 0])));
     setReason("");
+    setRefundRequestId(crypto.randomUUID());
     setRefundOpen(true);
   }
 
@@ -75,7 +78,7 @@ export function ReceiptDocumentView({ id, canRefund = false, canSell = false }: 
     if (!items.length) return show("Choose at least one item to refund.", "error");
     setRefundBusy(true);
     try {
-      await apiRequest("/api/refunds", { method: "POST", body: JSON.stringify({ saleId: id, reason, items }) });
+      await apiRequest("/api/refunds", { method: "POST", body: JSON.stringify({ saleId: id, counterId: receipt?.counterId || "", clientRequestId: refundRequestId || crypto.randomUUID(), reason, items }) });
       setRefundOpen(false);
       show("Refund posted. Stock, tax, ledger and member points were reversed.");
       await load();

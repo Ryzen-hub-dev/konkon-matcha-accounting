@@ -8,5 +8,9 @@ export const metadata = { title: "Counters" };
 export default async function CountersPage() {
   const session = await readSession();
   if (!session || !hasPermission(session.role, "counters.read")) redirect("/dashboard");
-  return <CountersView canManage={hasPermission(session.role, "counters.manage")} />;
+  return <CountersView
+    canManage={hasPermission(session.role, "counters.manage")}
+    canReviewShifts={hasPermission(session.role, "receipts.manage")}
+    userId={session.id}
+  />;
 }
