@@ -67,4 +67,12 @@ A sale never trusts product prices from the browser. The API reloads products, c
 
 Goods receipt, stock costing, AP bill creation and the receipt journal share one MongoDB transaction. Supplier payment, bill balance and its settlement journal share another. Stable client request IDs and unique supplier invoice numbers make retries idempotent.
 
+## Customer credit and statements
+
+An invoice can optionally retain a member ObjectId and member-number snapshot as its customer-account link. A draft does not consume credit. When a linked draft is marked `SENT`, the server reloads the active member, totals every other open invoice in the immutable ledger currency, enforces any configured limit or hold, and saves the reviewed exposure and control values on the invoice. The same transaction touches the shared member record so concurrent sends for one customer create a write conflict and retry the full exposure calculation instead of both passing on stale totals.
+
+Credit-control changes require invoice-write permission, a same-origin request, an optimistic member version and a reason recorded in audit evidence. A blank limit means no configured ceiling; zero prevents new account-credit invoices. Holds block new sent credit but do not rewrite issued documents or prevent recording an immediate full payment.
+
+Customer statements are derived from issued and paid invoice snapshots. Drafts and void invoices do not affect the balance, and a recorded payment appears as its own chronological line. Statements are management records; they do not independently prove bank settlement.
+
 This is an operational accounting/POS foundation, not a claim of parity with every AutoCount edition. Payroll, bank feeds, Singapore InvoiceNow/Peppol submission, advanced purchasing documents, serial-number tracking, year-end closing and statutory tax filing require dedicated later modules and compliance review.

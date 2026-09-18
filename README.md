@@ -90,6 +90,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Country report desk for all 249 selectable countries/regions: financial-statement CSV/JSON exports, tax-ledger evidence and explicit working-paper adapters for SG/MY/AU/GB. No automatic conversion or certified filing claims.
 - E-invoice preparation from invoices and receipts: UBL 2.1 XML, accounting JSON and limited domestic MYR MyInvois 1.0 JSON. Encrypted immutable download history, checksum verification, request idempotency and source reconciliation. **Generated is not submitted or tax-authority validated.** See [country documents and remote NFC guide](docs/country-documents.md) for supported workflows and exclusions.
 - Invoice register search and status filters, explicit sent/paid/void confirmations, safe copy-as-new-draft, and optimistic-concurrency editing for unpaid drafts. Retried creates carry an idempotency key; issued and paid documents remain immutable.
+- Customer-account credit limits, default terms and explicit credit holds. Invoices can be linked to a member account; the server rechecks live exposure when the draft is sent, serialises concurrent sends for the same customer, snapshots the decision and produces a chronological customer statement from issued invoices and recorded payments.
 - Sales, margin, tender, inventory-value and receivable reports.
 
 ### Purchasing and accounts payable
@@ -122,7 +123,7 @@ Core endpoints:
 - `/api/scanner-sessions`, `/api/mobile-scans`, `/api/payment-display-sessions`, `/api/payment-display`
 - `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`, `/api/local-payment-events`
 - `/api/receipt-lookup`, `/api/public-receipts`, `/api/member-cards`, `/api/member-cards/lookup`
-- `/api/invoices`, `/api/invoice-templates`, `/api/journals`, `/api/reports`, `/api/e-invoices`
+- `/api/invoices`, `/api/invoice-templates`, `/api/customer-accounts`, `/api/journals`, `/api/reports`, `/api/e-invoices`
 - `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`
 - `/api/settings`, `/api/settings/history`, `/api/locations`, `/api/counters`, `/api/register-shifts`, `/api/maintenance`
 

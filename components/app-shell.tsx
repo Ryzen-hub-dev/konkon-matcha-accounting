@@ -30,6 +30,7 @@ const nav: NavItem[] = [
   { href: "/procurement", label: "Purchasing & payables", icon: PackageCheck, permission: "purchasing.read" },
   { href: "/accounting", label: "Accounting", icon: BookOpen, permission: "accounting.read" },
   { href: "/invoices", label: "Invoices", icon: FileText, permission: "invoices.read" },
+  { href: "/customers", label: "Customer accounts", icon: CircleDollarSign, permission: "invoices.read" },
   { href: "/reports", label: "Reports", icon: BarChart3, permission: "reports.read" },
   { href: "/reviews", label: "Exception reviews", icon: FileSearch2, permission: "reviews.read" },
   { href: "/team", label: "Team & access", icon: Users, permission: "team.read" },

@@ -5,6 +5,7 @@ import { getDb, getMongoClient } from "@/lib/db";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { DEFAULT_INVOICE_TEMPLATE, normaliseInvoiceTemplate } from "@/lib/invoice-templates";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
+import { evaluateCustomerCredit } from "@/lib/customer-accounts";
 import { roundCurrency } from "@/lib/international";
 import {
   assertInvoiceDraftEditable, assertInvoiceStatusTransition, assertInvoiceVersion,
@@ -56,6 +57,10 @@ export async function POST(request: Request) {
         }
         const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }, { session: mongoSession }));
         const amounts = calculateInvoiceAmounts(input.data.items, business.currency, business.taxRate, business.taxMode);
+        const member = input.data.memberId
+          ? await db.collection("members").findOne({ _id: new ObjectId(input.data.memberId), active: { $ne: false } }, { session: mongoSession })
+          : null;
+        if (input.data.memberId && !member) throw new InvoiceWorkflowError("Choose an active customer account.", 422);
         const requestedTemplate = input.data.templateId
           ? await db.collection("invoiceTemplates").findOne({ _id: new ObjectId(input.data.templateId), active: { $ne: false } }, { session: mongoSession })
           : null;
@@ -67,6 +72,7 @@ export async function POST(request: Request) {
           _id: new ObjectId(),
           invoiceNo: makeDocumentNo("INV"),
           ...(input.data.clientRequestId ? { clientRequestId: input.data.clientRequestId } : {}),
+          ...(member ? { memberId: member._id, memberNo: member.memberNo } : {}),
           customerName: input.data.customerName,
           customerEmail: input.data.customerEmail,
           customerPhone: input.data.customerPhone,
@@ -90,7 +96,7 @@ export async function POST(request: Request) {
           createdBy: new ObjectId(auth.session.id), createdAt: now, updatedAt: now,
         };
         await db.collection("invoices").insertOne(document, { session: mongoSession });
-        await writeAudit(db, auth.session, "invoice.create", "invoice", document._id.toHexString(), { invoiceNo: document.invoiceNo, total: document.total }, mongoSession);
+        await writeAudit(db, auth.session, "invoice.create", "invoice", document._id.toHexString(), { invoiceNo: document.invoiceNo, total: document.total, memberNo: member?.memberNo || null }, mongoSession);
         return { invoice: document, isNew: true };
       });
       return result.isNew ? created(serialise(result.invoice)) : ok(serialise(result.invoice));
@@ -136,12 +142,20 @@ export async function PATCH(request: Request) {
         if ("action" in input) {
           assertInvoiceDraftEditable({ status: current.status, paidAmount: current.paidAmount });
           const amounts = calculateInvoiceAmounts(input.items, currency, Number(current.taxRate || 0), current.taxMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE");
+          const member = input.memberId
+            ? await db.collection("members").findOne({ _id: new ObjectId(input.memberId), active: { $ne: false } }, { session: mongoSession })
+            : null;
+          if (input.memberId && !member) throw new InvoiceWorkflowError("Choose an active customer account.", 422);
           const changes: Record<string, unknown> = {
             customerName: input.customerName, customerEmail: input.customerEmail,
             customerPhone: input.customerPhone, customerAddress: input.customerAddress,
             customerReference: input.customerReference, dueDate: input.dueDate, notes: input.notes,
             ...amounts, updatedAt,
           };
+          if (input.memberId !== undefined) {
+            changes.memberId = member?._id || null;
+            changes.memberNo = member?.memberNo || null;
+          }
           if (input.templateId !== String(current.templateId || "")) {
             const template = await db.collection("invoiceTemplates").findOne(
               input.templateId ? { _id: new ObjectId(input.templateId), active: { $ne: false } } : { isDefault: true, active: { $ne: false } },
@@ -165,8 +179,47 @@ export async function PATCH(request: Request) {
         assertInvoiceStatusTransition({ status: current.status, paidAmount: current.paidAmount }, input.status);
         if (input.status === current.status) return current;
         const paymentFields = input.status === "PAID" ? { paidAmount: current.total, paidAt: updatedAt } : {};
+        let creditFields: Record<string, unknown> = {};
+        if (input.status === "SENT") {
+          creditFields = { sentAt: updatedAt };
+          if (current.memberId) {
+            const memberId = current.memberId instanceof ObjectId ? current.memberId : new ObjectId(String(current.memberId));
+            const member = await db.collection("members").findOne({ _id: memberId, active: { $ne: false } }, { session: mongoSession });
+            if (!member) throw new InvoiceWorkflowError("This linked customer account is no longer active. Reopen the draft and choose an active account.", 409);
+            const exposure = await db.collection("invoices").aggregate([
+              { $match: {
+                _id: { $ne: _id }, memberId, status: "SENT",
+                $or: [{ "businessSnapshot.currency": currency }, { "businessSnapshot.currency": { $exists: false } }],
+              } },
+              { $group: { _id: null, outstanding: { $sum: { $subtract: ["$total", { $ifNull: ["$paidAmount", 0] }] } } } },
+            ], { session: mongoSession }).next();
+            const outstandingBefore = roundCurrency(Number(exposure?.outstanding || 0), currency);
+            const creditLimit = member.creditLimit === null || member.creditLimit === undefined ? null : Number(member.creditLimit);
+            const decision = evaluateCustomerCredit({
+              creditHold: member.creditHold === true,
+              creditLimit,
+              outstanding: outstandingBefore,
+              newCharge: Number(current.total),
+              currency,
+            });
+            if (!decision.allowed) throw new InvoiceWorkflowError(decision.reason || "This invoice is outside the customer's credit controls.", 409);
+            // Touch the shared account inside this transaction. Concurrent sends for
+            // the same customer then conflict and withTransaction retries the full
+            // exposure calculation instead of allowing a credit-limit write skew.
+            await db.collection("members").updateOne(
+              { _id: memberId, active: { $ne: false } },
+              { $set: { creditExposureCheckedAt: updatedAt } },
+              { session: mongoSession },
+            );
+            creditFields.creditAccountSnapshot = {
+              memberId, memberNo: member.memberNo, name: member.name,
+              creditLimit, creditTermsDays: Number(member.creditTermsDays ?? 14),
+              outstandingBefore, projectedOutstanding: decision.projectedOutstanding, checkedAt: updatedAt,
+            };
+          }
+        }
         const updated = await db.collection("invoices").findOneAndUpdate(
-          versionFilter, { $set: { status: input.status, ...paymentFields, updatedAt } },
+          versionFilter, { $set: { status: input.status, ...paymentFields, ...creditFields, updatedAt } },
           { returnDocument: "after", session: mongoSession },
         );
         if (!updated) throw new InvoiceWorkflowError("This invoice changed. Refresh it before trying again.");
@@ -185,7 +238,11 @@ export async function PATCH(request: Request) {
           }, { session: mongoSession });
           await writeAudit(db, auth.session, "invoice.paid", "invoice", input.id, { invoiceNo: current.invoiceNo, total: current.total }, mongoSession);
         } else {
-          await writeAudit(db, auth.session, "invoice.status", "invoice", input.id, { previousStatus: current.status, status: input.status }, mongoSession);
+          await writeAudit(db, auth.session, "invoice.status", "invoice", input.id, {
+            previousStatus: current.status,
+            status: input.status,
+            creditCheck: creditFields.creditAccountSnapshot || null,
+          }, mongoSession);
         }
         return updated;
       });

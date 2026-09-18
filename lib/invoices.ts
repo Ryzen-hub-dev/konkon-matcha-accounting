@@ -13,6 +13,7 @@ export const invoiceDueDateSchema = z.string().trim().refine(value =>
 export const invoiceVersionSchema = z.string().datetime({ offset: true }).refine(value => isValidDateKey(value.slice(0, 10)), "Refresh the invoice before saving.");
 
 const invoiceFieldsSchema = z.object({
+  memberId: z.union([objectIdSchema, z.literal("")]).optional(),
   customerName: z.string().trim().min(2).max(120),
   customerEmail: z.union([z.string().trim().email(), z.literal("")]),
   customerPhone: z.string().trim().max(40),
@@ -29,6 +30,7 @@ const invoiceFieldsSchema = z.object({
 });
 
 export const invoiceInputSchema = invoiceFieldsSchema.extend({
+  memberId: invoiceFieldsSchema.shape.memberId.default(""),
   customerEmail: invoiceFieldsSchema.shape.customerEmail.default(""),
   customerPhone: invoiceFieldsSchema.shape.customerPhone.default(""),
   customerAddress: invoiceFieldsSchema.shape.customerAddress.default(""),

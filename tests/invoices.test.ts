@@ -53,7 +53,10 @@ test("draft editing requires a complete form and an expected version", () => {
 
 test("invoice object references are validated and canonicalized", () => {
   assert.equal(invoiceInputSchema.parse({ ...fields, templateId: id.toUpperCase() }).templateId, id);
+  assert.equal(invoiceInputSchema.parse({ ...fields, memberId: id.toUpperCase() }).memberId, id);
+  assert.equal(invoiceInputSchema.parse(fields).memberId, "");
   assert.equal(invoiceInputSchema.safeParse({ ...fields, templateId: "z".repeat(24) }).success, false);
+  assert.equal(invoiceInputSchema.safeParse({ ...fields, memberId: "z".repeat(24) }).success, false);
   assert.equal(invoiceEditSchema.safeParse({ ...fields, action: "EDIT_DRAFT", id: "z".repeat(24), expectedUpdatedAt: version }).success, false);
 });
 

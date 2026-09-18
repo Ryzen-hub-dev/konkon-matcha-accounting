@@ -171,6 +171,6 @@ export function AddButton({ children, onClick }: { children: ReactNode; onClick:
 }
 
 export function StatusPill({ value }: { value: string }) {
-  const tone = ["PAID", "POSTED", "COMPLETED", "ACTIVE", "APPROVED", "RECEIVED", "STABLE", "OPEN"].includes(value) ? "good" : ["VOID", "DISABLED", "OVERDUE", "REFUNDED", "CANCELLED", "AT_RISK", "PENDING_REVIEW", "HIGH", "CRITICAL"].includes(value) ? "bad" : "neutral";
+  const tone = ["PAID", "POSTED", "COMPLETED", "ACTIVE", "APPROVED", "RECEIVED", "STABLE", "OPEN"].includes(value) ? "good" : ["VOID", "DISABLED", "OVERDUE", "REFUNDED", "CANCELLED", "AT_RISK", "PENDING_REVIEW", "ON_HOLD", "OVER_LIMIT", "HIGH", "CRITICAL"].includes(value) ? "bad" : "neutral";
   return <span className={`status-pill status-${tone}`}>{value.replaceAll("_", " ")}</span>;
 }
