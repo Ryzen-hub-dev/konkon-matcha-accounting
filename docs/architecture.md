@@ -75,4 +75,10 @@ Credit-control changes require invoice-write permission, a same-origin request, 
 
 Customer statements are derived from issued and paid invoice snapshots. Drafts and void invoices do not affect the balance, and a recorded payment appears as its own chronological line. Statements are management records; they do not independently prove bank settlement.
 
+## Customer quotation lifecycle
+
+Quotation drafts use the same server-side amount, currency precision and tax calculator as invoices, but retain their own business/customer/item snapshot and validity date. Only a draft can be edited. Recording `SENT` locks the commercial snapshot; subsequent actions move forward to `ACCEPTED`, `REJECTED`, `VOID` or a derived `EXPIRED` display state. Acceptance and rejection require an operator note. These states are internal evidence of what staff recorded and are not an email-delivery receipt, electronic signature or independent proof of customer consent.
+
+Only an accepted quotation can convert. Conversion runs in a MongoDB transaction, creates one invoice draft with the quoted currency/tax/line snapshots and default paper template, stores the source quotation reference on that invoice, and marks the quotation `CONVERTED`. A unique source-quotation index plus retry handling prevents duplicate invoices. Conversion does not post accounting or consume credit; the normal invoice credit check still runs when the resulting draft is marked `SENT`.
+
 This is an operational accounting/POS foundation, not a claim of parity with every AutoCount edition. Payroll, bank feeds, Singapore InvoiceNow/Peppol submission, advanced purchasing documents, serial-number tracking, year-end closing and statutory tax filing require dedicated later modules and compliance review.
