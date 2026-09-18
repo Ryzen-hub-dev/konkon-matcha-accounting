@@ -84,6 +84,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Freshness action queue using 30-day net location demand: FEFO sell-through forecasts identify units at risk before expiry, suggest higher-demand transfer destinations without moving stock automatically, and post authorised expiry/damage/recall disposal to Inventory write-off with immutable lot evidence.
 - Product archive/restore preserving stock and transaction history.
 - Manual balanced journals and a seeded chart of accounts.
+- Controlled bank reconciliation from local CSV statements: strict statement arithmetic, exact-amount/date suggestions that require staff confirmation, one-use ledger matches, prior/current uncleared-item working papers, zero-difference completion and immutable reviewed snapshots. This is not a live bank feed.
 - Searchable main-country settings for 249 countries/regions, editable date/number format and time zone, and explicit country selection during Owner setup.
 - Local-day/month dashboard statistics, calendar-safe invoice due dates and manual journals, and currency-specific precision for product prices, coupons, POS and refunds.
 - Draft/sent/paid/void invoices with custom uploadable JSON templates and printable documents.
@@ -125,7 +126,7 @@ Core endpoints:
 - `/api/scanner-sessions`, `/api/mobile-scans`, `/api/payment-display-sessions`, `/api/payment-display`
 - `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`, `/api/local-payment-events`
 - `/api/receipt-lookup`, `/api/public-receipts`, `/api/member-cards`, `/api/member-cards/lookup`
-- `/api/invoices`, `/api/invoice-templates`, `/api/customer-accounts`, `/api/quotations`, `/api/delivery-orders`, `/api/journals`, `/api/reports`, `/api/e-invoices`
+- `/api/invoices`, `/api/invoice-templates`, `/api/customer-accounts`, `/api/quotations`, `/api/delivery-orders`, `/api/journals`, `/api/bank-reconciliations`, `/api/reports`, `/api/e-invoices`
 - `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`
 - `/api/settings`, `/api/settings/history`, `/api/locations`, `/api/counters`, `/api/register-shifts`, `/api/maintenance`
 

@@ -19,9 +19,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Current functional boundary
 
-- Shipped areas include Owner/team security and RBAC, multi-counter POS, receipts/refunds, products, stocktakes, multi-location transfers, batch/lot/expiry control, freshness forecasting and inventory disposal/write-off, members/QR/NFC credentials, coupons, configurable payments and currencies, quotations, customer delivery orders, invoices, customer credit controls/statements, journals/reports, suppliers/purchase orders/accounts payable, scanner/payment display passes, regional settings, audit, and retention controls.
+- Shipped areas include Owner/team security and RBAC, multi-counter POS, receipts/refunds, products, stocktakes, multi-location transfers, batch/lot/expiry control, freshness forecasting and inventory disposal/write-off, members/QR/NFC credentials, coupons, configurable payments and currencies, quotations, customer delivery orders, invoices, customer credit controls/statements, journals/reports, CSV bank reconciliation, suppliers/purchase orders/accounts payable, scanner/payment display passes, regional settings, audit, and retention controls.
 - Electronic-invoice work currently prepares, encrypts, and retains UBL/accounting/MyInvois files. It does not submit to a tax authority, provide a digital signature, or prove authority acceptance.
-- Country reports are management reports and working papers, not certified returns. Payroll, bank feeds/reconciliation, fixed assets, consolidation, complete statutory filing, and several advanced purchasing/stock workflows remain future work.
+- Country reports are management reports and working papers, not certified returns. Payroll, live bank feeds/rules, fixed assets, consolidation, complete statutory filing, and several advanced purchasing/stock workflows remain future work.
 - `README.md` is the product overview, `docs/architecture.md` defines the runtime and accounting policy, and `docs/feature-coverage.md` is the source of truth for shipped-versus-planned scope.
 
 ## Architecture and invariants
@@ -37,6 +37,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Customer credit is enforced only when a linked draft becomes `SENT`. The check, invoice status change, decision snapshot and shared-member write stay in one transaction so concurrent sends cannot exceed a limit through write skew. Statements exclude drafts and voids and do not prove external settlement.
 - Quotation states are forward-only internal evidence, not email-delivery or electronic-signature proof. Only an accepted quotation can convert, and the transaction plus unique `sourceQuoteId` index creates at most one invoice draft while preserving quoted money/tax snapshots.
 - Customer delivery orders are quote-linked, forward-only operational evidence. One full delivery order is allowed per quotation; dispatch/delivery does not move stock, post accounting, record payment or independently prove carrier/customer receipt.
+- Bank reconciliation imports local CSV statements only. Suggestions never auto-confirm; unique match records prevent reusing statement or ledger lines, completion requires a zero difference, and the locked working paper snapshots prior/current uncleared evidence without claiming a live bank connection or settlement proof.
 - Never describe a QR display, payer animation, local notification, or prepared e-invoice file as proof of settlement or government submission.
 
 ## Working conventions
@@ -49,4 +50,4 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## Last synchronized baseline
 
 - On 2026-09-18, the repository was on `main` with a clean worktree before this memory update.
-- `npm run typecheck`, `npm test` (141 tests), and the Webpack production build (57 generated pages) passed after the register-shift, exception-review, multi-location transfer, batch/expiry, freshness-forecast, inventory-disposal, MongoDB Atlas M0/Stable API compatibility, serverless cold-start performance, customer-account credit controls, quotation-to-invoice, and quote-linked delivery-order upgrades. On this Windows host, the successful build used `KONKON_DISABLE_WEBPACK_CACHE=1` after Webpack's optional pack cache hit a filesystem write error.
+- `npm run typecheck`, `npm test` (149 tests), and the Webpack production build (58 generated pages) passed after the register-shift, exception-review, multi-location transfer, batch/expiry, freshness-forecast, inventory-disposal, MongoDB Atlas M0/Stable API compatibility, serverless cold-start performance, customer-account credit controls, quotation-to-invoice, quote-linked delivery-order, and controlled CSV bank-reconciliation upgrades. On this Windows host, the successful build used `KONKON_DISABLE_WEBPACK_CACHE=1` after Webpack's optional pack cache hit a filesystem write error.

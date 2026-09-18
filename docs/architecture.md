@@ -67,6 +67,14 @@ A sale never trusts product prices from the browser. The API reloads products, c
 
 Goods receipt, stock costing, AP bill creation and the receipt journal share one MongoDB transaction. Supplier payment, bill balance and its settlement journal share another. Stable client request IDs and unique supplier invoice numbers make retries idempotent.
 
+## Bank reconciliation controls
+
+Bank reconciliation imports a local CSV working copy; it does not connect to a bank or prove settlement. The server validates an unambiguous statement period, base-currency precision, and that opening balance plus imported movements equals the stated closing balance. Only active cash-equivalent asset accounts are eligible, and one open draft plus non-overlapping statement periods are enforced per account.
+
+Matching is server-controlled and transactional. Exact amount/date proximity can preselect a suggestion, but a staff member must confirm it. Unique match records prevent either a statement row or posted journal line from being reused, and optimistic versions prevent two browser sessions from overwriting each other. Ledger entries remain append-only.
+
+Completion requires every imported row to be matched and the adjusted statement balance to equal the ledger closing balance. The completed record snapshots the opening difference, prior items cleared, current-period uncleared entries, reviewer note and zero difference. It is then immutable and remains readable without recalculating against later ledger activity. Live bank feeds, provider credentials, bank rules, automatic voucher creation and cash-flow forecasting are later phases.
+
 ## Customer credit and statements
 
 An invoice can optionally retain a member ObjectId and member-number snapshot as its customer-account link. A draft does not consume credit. When a linked draft is marked `SENT`, the server reloads the active member, totals every other open invoice in the immutable ledger currency, enforces any configured limit or hold, and saves the reviewed exposure and control values on the invoice. The same transaction touches the shared member record so concurrent sends for one customer create a write conflict and retry the full exposure calculation instead of both passing on stale totals.
@@ -87,4 +95,4 @@ An `ACCEPTED` or `CONVERTED` quotation can create one full delivery-order draft.
 
 Delivery states move forward from `DRAFT` to `DISPATCHED` and `DELIVERED`, or from an open state to `CANCELLED`. Every transition requires an optimistic version and an operator note; delivery completion also records who the operator says received it. A linked open delivery order prevents its accepted source quotation from being voided. These records do not allocate batches, deduct stock, post accounting, record payment, send carrier instructions or independently prove dispatch or customer receipt. Partial deliveries, stock-affecting fulfilment and attachment-based proof remain later workflows.
 
-This is an operational accounting/POS foundation, not a claim of parity with every AutoCount edition. Payroll, bank feeds, Singapore InvoiceNow/Peppol submission, advanced purchasing documents, serial-number tracking, year-end closing and statutory tax filing require dedicated later modules and compliance review.
+This is an operational accounting/POS foundation, not a claim of parity with every AutoCount edition. Payroll, live bank feeds, Singapore InvoiceNow/Peppol submission, advanced purchasing documents, serial-number tracking, year-end closing and statutory tax filing require dedicated later modules and compliance review.

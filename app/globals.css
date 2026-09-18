@@ -977,3 +977,77 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .delivery-order-address { min-width: 0; }.delivery-order-address strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.delivery-order-editor > fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: grid; gap: 15px; }
 .delivery-order-document-meta { margin: 0; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }.delivery-order-document-meta > div { min-width: 0; padding: 10px 12px; border-radius: 8px; display: grid; gap: 4px; background: #eef2e9; }.delivery-order-document-meta dt { color: var(--muted); font-family: var(--utility); font-size: 7px; letter-spacing: .08em; text-transform: uppercase; }.delivery-order-document-meta dd { margin: 0; overflow-wrap: anywhere; font-size: 9px; font-weight: 800; }
 @media (max-width: 700px) { .delivery-order-document-meta { grid-template-columns: 1fr; } }
+
+/* Controlled bank statement reconciliation */
+.bank-reconciliation-policy { margin-bottom: 17px; padding: 15px 18px; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; color: #4d613f; background: linear-gradient(115deg,#e9f3e6,#faf8ee); }
+.bank-reconciliation-policy > svg { width: 23px; }
+.bank-reconciliation-policy > div { display: grid; gap: 4px; }
+.bank-reconciliation-policy strong { font-size: 10px; }
+.bank-reconciliation-policy p { margin: 0; color: var(--muted); font-size: 8px; line-height: 1.55; }
+.bank-reconciliation-register { overflow: hidden; }
+.bank-reconciliation-list { min-width: 1180px; }
+.bank-reconciliation-list .data-list-head, .bank-reconciliation-list .data-row { grid-template-columns: minmax(145px,.8fr) minmax(190px,1.1fr) minmax(200px,1.2fr) .75fr .6fr 90px auto; }
+.bank-reconciliation-list .data-row > .status-pill { justify-self: start; }
+.bank-reconciliation-list .row-actions { justify-content: flex-end; }
+.modal-card:has(.bank-import-form) { width: min(880px,100%); }
+.bank-import-form > fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: grid; gap: 13px; }
+.bank-csv-tools { padding: 12px; border: 1px dashed #becbb9; border-radius: 9px; display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 12px; background: #f5f7f0; }
+.bank-csv-tools > div { display: flex; flex-wrap: wrap; gap: 7px; }
+.bank-csv-tools p { margin: 0; color: var(--muted); font-size: 8px; line-height: 1.55; }
+.bank-import-form textarea { min-height: 132px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 8px; line-height: 1.55; }
+.bank-import-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; }
+.bank-import-summary > span { padding: 10px 12px; border-radius: 8px; display: grid; gap: 4px; color: #ecf3e8; background: var(--koicha); }
+.bank-import-summary small { color: #bfcfba; font-family: var(--utility); font-size: 7px; letter-spacing: .08em; text-transform: uppercase; }
+.bank-import-summary strong { font-family: var(--display); font-size: 19px; font-weight: 500; }
+.modal-card:has(.bank-reconciliation-desk) { width: min(1200px,100%); }
+.bank-reconciliation-desk { padding: 18px; display: grid; gap: 14px; }
+.bank-reconciliation-summary { display: grid; grid-template-columns: 1.4fr repeat(4,minmax(0,.8fr)); gap: 7px; }
+.bank-reconciliation-summary > span { min-width: 0; padding: 10px 11px; border-radius: 8px; display: grid; align-content: center; gap: 4px; color: #eef4e9; background: var(--koicha); }
+.bank-reconciliation-summary small { color: #bacdb5; font-family: var(--utility); font-size: 7px; letter-spacing: .07em; text-transform: uppercase; }
+.bank-reconciliation-summary strong { overflow-wrap: anywhere; font-size: 9px; }
+.bank-match-help { margin: 0; padding: 9px 11px; border-left: 3px solid var(--midori); display: flex; align-items: center; gap: 8px; color: #4b6250; background: #edf3e9; font-size: 8px; line-height: 1.5; }
+.bank-match-help svg { width: 15px; flex: 0 0 auto; }
+.bank-match-table { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; }
+.bank-match-head, .bank-match-row { display: grid; grid-template-columns: minmax(190px,1.25fr) minmax(105px,.55fr) minmax(260px,1.45fr) 100px; align-items: center; gap: 12px; }
+.bank-match-head { min-height: 37px; padding: 7px 11px; color: var(--midori); background: #e9eee6; font-family: var(--utility); font-size: 7px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.bank-match-row { min-height: 64px; padding: 9px 11px; border-top: 1px solid var(--line); background: var(--paper); }
+.bank-match-row.is-matched { box-shadow: inset 3px 0 0 #709269; background: #f6f9f3; }
+.bank-match-row > div { min-width: 0; display: grid; gap: 3px; }
+.bank-match-row strong { overflow-wrap: anywhere; font-size: 9px; }
+.bank-match-row small { color: var(--muted); font-size: 7px; line-height: 1.45; }
+.bank-match-row select { width: 100%; min-height: 36px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: #fff; font-family: inherit; font-size: 8px; }
+.bank-match-row .positive { color: #386b47; }
+.bank-match-row .negative { color: #93414d; }
+.bank-reconciliation-actions { padding: 12px; border: 1px solid #d8dfd4; border-radius: 10px; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 12px; background: #f7f8f3; }
+.bank-reconciliation-actions .field { margin: 0; }
+.bank-reconciliation-actions > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.bank-reconciliation-desk > footer { display: flex; justify-content: flex-end; }
+.bank-completed-report { padding: 14px; border: 1px solid #bfd1bb; border-radius: 10px; display: grid; gap: 13px; background: #f2f7ef; }
+.bank-completed-report > header { display: flex; align-items: center; gap: 10px; }
+.bank-completed-report > header svg { width: 22px; color: #4d7957; }
+.bank-completed-report > header div { display: grid; gap: 3px; }
+.bank-completed-report > header strong { font-family: var(--display); font-size: 19px; }
+.bank-completed-report > header span { color: var(--muted); font-size: 8px; }
+.bank-completed-report dl { margin: 0; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 7px; }
+.bank-completed-report dl div { padding: 9px; border-radius: 7px; display: grid; gap: 3px; background: #e7eee3; }
+.bank-completed-report dt { color: var(--muted); font-size: 7px; }
+.bank-completed-report dd { margin: 0; font-size: 9px; font-weight: 900; }
+.bank-completed-report dl .is-zero { color: #eef5e9; background: var(--koicha); }
+.bank-completed-report dl .is-zero dt { color: #bfd0b9; }
+.bank-completed-report > div { display: grid; gap: 5px; }
+.bank-completed-report h3 { margin: 0 0 4px; font-size: 10px; }
+.bank-completed-report > div p { margin: 0; padding: 7px 9px; border-radius: 6px; display: flex; justify-content: space-between; gap: 12px; background: #fff; font-size: 8px; }
+.bank-all-cleared { margin: 0; color: #477052; font-size: 8px; }
+@media (max-width: 800px) {
+  .bank-csv-tools, .bank-reconciliation-actions { grid-template-columns: 1fr; }
+  .bank-reconciliation-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .bank-reconciliation-summary > span:first-child { grid-column: 1 / -1; }
+  .bank-match-table { overflow-x: auto; }
+  .bank-match-head, .bank-match-row { min-width: 780px; }
+  .bank-completed-report dl { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 560px) {
+  .bank-import-summary, .bank-completed-report dl { grid-template-columns: 1fr; }
+  .bank-reconciliation-actions > div { justify-content: stretch; }
+  .bank-reconciliation-actions .button { flex: 1; }
+}
