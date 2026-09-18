@@ -1,6 +1,8 @@
 import { ObjectId } from "mongodb";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
+import { AccountingPeriodClosedError } from "@/lib/accounting-periods";
+import { assertAccountingPeriodOpen } from "@/lib/accounting-period-lock";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { dateKeyInTimeZone } from "@/lib/dates";
 import { getDb, getMongoClient } from "@/lib/db";
@@ -250,6 +252,7 @@ export async function POST(request: Request) {
         }
 
         if (input.data.action === "DISPOSE") {
+          await assertAccountingPeriodOpen(db, today, mongoSession);
           const batchId = new ObjectId(input.data.batchId);
           const batch = await db.collection("inventoryBatches").findOne({ _id: batchId, version: input.data.version, quantity: { $gte: input.data.quantity } }, { session: mongoSession });
           if (!batch) throw new BatchInventoryError("This batch changed or no longer has enough units to dispose. Refresh and try again.");
@@ -293,7 +296,7 @@ export async function POST(request: Request) {
             await ensureInventoryDispositionAccount(db, actorId, mongoSession);
             const entryNo = makeDocumentNo("JE");
             await db.collection("journalEntries").insertOne({
-              entryNo, date: now, memo: `Inventory write-off ${eventNo} · ${String(batch.productName)} lot ${String(batch.lotNo)}`,
+              entryNo, date: now, businessDate: today, timeZone: business.timeZone, memo: `Inventory write-off ${eventNo} · ${String(batch.productName)} lot ${String(batch.lotNo)}`,
               reference: eventNo, source: "INVENTORY_DISPOSAL", status: "POSTED",
               locationId: batch.locationId,
               lines: [
@@ -365,6 +368,7 @@ export async function POST(request: Request) {
     }
     return created(serialise(result));
   } catch (error) {
+    if (error instanceof AccountingPeriodClosedError) return fail(error.message, error.status);
     if (error instanceof BatchInventoryError) return fail(error.message, 409);
     if ((error as { code?: number }).code === 11000) return fail("This batch request was already posted or conflicts with an existing lot. Refresh and try again.", 409);
     return publicError(error);

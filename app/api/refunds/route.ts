@@ -2,6 +2,8 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
+import { AccountingPeriodClosedError } from "@/lib/accounting-periods";
+import { assertAccountingPeriodOpen } from "@/lib/accounting-period-lock";
 import { getDb, getMongoClient } from "@/lib/db";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { roundCurrency } from "@/lib/international";
@@ -9,6 +11,7 @@ import { calculateTaxTotals, type TaxMode } from "@/lib/tax";
 import { quoteAmount } from "@/lib/exchange-rates";
 import { assessRefund, writeOperationalReview } from "@/lib/operational-reviews";
 import { addInventoryBatchQuantity, BatchInventoryError, sliceBatchAllocations } from "@/lib/inventory-batches";
+import { dateKeyInTimeZone } from "@/lib/dates";
 
 export const runtime = "nodejs";
 
@@ -75,6 +78,9 @@ export async function POST(request: Request) {
         if (!sale || !["COMPLETED", "PARTIALLY_REFUNDED"].includes(String(sale.status))) {
           throw new Error("REFUND_NOT_AVAILABLE");
         }
+        const postingTimeZone = String(sale.businessSnapshot?.timeZone || "UTC");
+        const postingDateKey = dateKeyInTimeZone(new Date(), postingTimeZone);
+        await assertAccountingPeriodOpen(db, postingDateKey, mongoSession);
 
         const counterIdValue = input.data.counterId || String(sale.counterId || "");
         const counterId = ObjectId.isValid(counterIdValue) ? new ObjectId(counterIdValue) : null;
@@ -290,6 +296,8 @@ export async function POST(request: Request) {
         await db.collection("journalEntries").insertOne({
           entryNo: journalNo,
           date: now,
+          businessDate: postingDateKey,
+          timeZone: postingTimeZone,
           memo: `POS refund ${refundNo} for ${sale.receiptNo}`,
           reference: refundNo,
           source: "POS_REFUND",
@@ -316,6 +324,7 @@ export async function POST(request: Request) {
     }
     return created(serialise(refund));
   } catch (error) {
+    if (error instanceof AccountingPeriodClosedError) return fail(error.message, error.status);
     if (error instanceof Error && error.message === "REFUND_NOT_AVAILABLE") return fail("This sale is not available for another refund.", 409);
     if (error instanceof Error && error.message === "REFUND_QUANTITY_INVALID") return fail("A refund quantity exceeds the number still returnable.", 422);
     if (error instanceof ShiftError) return fail(error.message, 409);

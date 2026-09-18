@@ -2,6 +2,8 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
+import { AccountingPeriodClosedError } from "@/lib/accounting-periods";
+import { assertAccountingPeriodOpen } from "@/lib/accounting-period-lock";
 import { getDb, getMongoClient } from "@/lib/db";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
@@ -75,12 +77,14 @@ export async function POST(request: Request) {
     const session = (await getMongoClient()).startSession();
     try {
       await session.withTransaction(async () => {
+        await assertAccountingPeriodOpen(db, input.data.date, session);
         await db.collection("journalEntries").insertOne({ _id, ...document }, { session });
         await writeAudit(db, auth.session, "journal.post", "journalEntry", _id.toHexString(), { entryNo: document.entryNo, totalDebit }, session);
       });
     } finally { await session.endSession(); }
     return created(serialise({ _id, ...document }));
   } catch (error) {
+    if (error instanceof AccountingPeriodClosedError) return fail(error.message, error.status);
     return publicError(error);
   }
 }

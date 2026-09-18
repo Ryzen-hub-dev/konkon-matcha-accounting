@@ -19,6 +19,7 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Invoice register search/status filters, copy-as-new-draft, idempotent draft creation, unpaid-draft editing with optimistic version checks, explicit payment/void confirmation and immutable issued/paid documents
 - Manual journals, chart of accounts and core management reports
 - Local CSV bank-statement import, confirmed matching to posted ledger lines, zero-difference completion and immutable prior/current uncleared-item working papers
+- Month-end integrity/bank checklist, immutable close evidence, direct-ledger drift warning and transactional back-date locks across every journal-posting workflow
 - 24-hour token-restricted phone scanner passes compatible with Vercel serverless
 - Low-latency auto-connected POS/Inventory scanner bridge with native + ZXing camera decoding
 - QR/link-based phone connection and active POS/Inventory routing, including new-product barcode capture
@@ -78,6 +79,7 @@ This count is a delivery benchmark, not a claim of AutoCount parity. Accounting,
 - Multi-company consolidation, intercompany journals and elimination entries
 - Payroll, leave, statutory contribution and employee self-service
 - Budgeting, dimensions/cost centres, projects and variance reporting
+- Year-end adjustment workflow, retained-earnings transfer and accountant close pack
 
 ## Country packs
 

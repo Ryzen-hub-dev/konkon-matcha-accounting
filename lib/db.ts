@@ -18,7 +18,7 @@ type IndexMigrationRecord = {
 
 // Bump this value whenever the index definitions below change. The durable marker
 // prevents every new Vercel function instance from re-checking the full index set.
-export const INDEX_SCHEMA_VERSION = "indexes-2026-09-18-v5";
+export const INDEX_SCHEMA_VERSION = "indexes-2026-09-18-v6";
 
 const mongoCache = globalThis as typeof globalThis & { __konkonMongo?: MongoCache };
 
@@ -227,6 +227,8 @@ async function initializeIndexes(db: Db) {
     db.collection("journalEntries").createIndex({ entryNo: 1 }, { unique: true }),
     db.collection("journalEntries").createIndex({ status: 1, date: 1 }),
     db.collection("journalEntries").createIndex({ "lines.accountCode": 1, status: 1, date: 1 }),
+    db.collection("accountingPeriods").createIndex({ periodKey: 1 }, { unique: true }),
+    db.collection("accountingPeriods").createIndex({ status: 1, periodKey: -1 }),
     db.collection("bankReconciliations").createIndex({ reconciliationNo: 1 }, { unique: true }),
     ensureStableOptionalStringUniqueIndex(db, "bankReconciliations", "clientRequestId"),
     db.collection("bankReconciliations").createIndex({ accountCode: 1, statementDate: -1, status: 1 }),

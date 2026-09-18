@@ -3,6 +3,8 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
+import { AccountingPeriodClosedError } from "@/lib/accounting-periods";
+import { assertAccountingPeriodOpen } from "@/lib/accounting-period-lock";
 import { getDb, getMongoClient } from "@/lib/db";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { DEFAULT_RECEIPT_TEMPLATE, ensureDefaultReceiptTemplate, normaliseReceiptTemplate } from "@/lib/receipt-templates";
@@ -214,6 +216,7 @@ export async function POST(request: Request) {
     const receiptNo = makeDocumentNo("KKM");
     const journalNo = makeDocumentNo("JE");
     const now = new Date();
+    const businessDate = dateKeyInTimeZone(now, business.timeZone);
     const pointsEarned = member ? Math.max(0, Math.floor(total * Number(business?.pointsPerDollar || 1))) : 0;
 
     const saleId = new ObjectId();
@@ -298,6 +301,7 @@ export async function POST(request: Request) {
     const mongoSession = client.startSession();
     try {
       await mongoSession.withTransaction(async () => {
+        await assertAccountingPeriodOpen(db, businessDate, mongoSession);
         if (openShift) {
           const activeShift = await db.collection("registerShifts").updateOne(
             { _id: openShift._id, counterId: counter._id, status: "OPEN" },
@@ -422,6 +426,8 @@ export async function POST(request: Request) {
         await db.collection("journalEntries").insertOne({
           entryNo: journalNo,
           date: now,
+          businessDate,
+          timeZone: business.timeZone,
           memo: `POS sale ${receiptNo}`,
           reference: receiptNo,
           source: "POS",
@@ -447,6 +453,7 @@ export async function POST(request: Request) {
     }
     return created(saleResponse(sale, request));
   } catch (error) {
+    if (error instanceof AccountingPeriodClosedError) return fail(error.message, error.status);
     if (error instanceof StockError || error instanceof CouponError || error instanceof PaymentError || error instanceof ShiftError || error instanceof BatchInventoryError) return fail(error.message, 409);
     if ((error as { code?: number; keyPattern?: Record<string, number> }).code === 11000 && (error as { keyPattern?: Record<string, number> }).keyPattern?.paymentReferenceNormalized) return fail("This static QR transaction reference was already used. Verify the receiving account and enter the reference for this payment.", 409);
     if ((error as { code?: number }).code === 11000 && clientRequestId) {

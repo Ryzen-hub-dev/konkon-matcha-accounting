@@ -1,12 +1,15 @@
 import { ObjectId } from "mongodb";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
+import { AccountingPeriodClosedError } from "@/lib/accounting-periods";
+import { assertAccountingPeriodOpen } from "@/lib/accounting-period-lock";
 import { getDb, getMongoClient } from "@/lib/db";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { DEFAULT_INVOICE_TEMPLATE, normaliseInvoiceTemplate } from "@/lib/invoice-templates";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { evaluateCustomerCredit } from "@/lib/customer-accounts";
 import { roundCurrency } from "@/lib/international";
+import { dateKeyInTimeZone } from "@/lib/dates";
 import {
   assertInvoiceDraftEditable, assertInvoiceStatusTransition, assertInvoiceVersion,
   calculateInvoiceAmounts, invoiceEditSchema, invoiceInputSchema, invoiceStatusSchema,
@@ -218,6 +221,9 @@ export async function PATCH(request: Request) {
             };
           }
         }
+        const postingTimeZone = String(current.businessSnapshot?.timeZone || "UTC");
+        const postingDateKey = dateKeyInTimeZone(updatedAt, postingTimeZone);
+        if (input.status === "PAID") await assertAccountingPeriodOpen(db, postingDateKey, mongoSession);
         const updated = await db.collection("invoices").findOneAndUpdate(
           versionFilter, { $set: { status: input.status, ...paymentFields, ...creditFields, updatedAt } },
           { returnDocument: "after", session: mongoSession },
@@ -226,7 +232,7 @@ export async function PATCH(request: Request) {
         if (input.status === "PAID") {
           const tax = Number(current.tax || 0);
           await db.collection("journalEntries").insertOne({
-            entryNo: makeDocumentNo("JE"), date: updatedAt, memo: "Invoice payment " + current.invoiceNo,
+            entryNo: makeDocumentNo("JE"), date: updatedAt, businessDate: postingDateKey, timeZone: postingTimeZone, memo: "Invoice payment " + current.invoiceNo,
             reference: current.invoiceNo, source: "INVOICE", status: "POSTED",
             lines: [
               { accountCode: "1010", accountName: "Bank", debit: current.total, credit: 0 },
@@ -249,6 +255,7 @@ export async function PATCH(request: Request) {
       return ok(serialise(invoice));
     } finally { await mongoSession.endSession(); }
   } catch (error) {
+    if (error instanceof AccountingPeriodClosedError) return fail(error.message, error.status);
     if (error instanceof InvoiceWorkflowError) return fail(error.message, error.status);
     return publicError(error);
   }

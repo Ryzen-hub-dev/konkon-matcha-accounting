@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   ArrowLeftRight, BarChart3, BookOpen, Boxes, ChevronLeft, ChevronRight, CircleDollarSign,
-  CalendarClock, ClipboardList, FileSearch2, FileText, Landmark, LayoutDashboard, LogOut, MapPinned, Menu, PackageCheck, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
+  CalendarClock, ClipboardList, FileSearch2, FileText, Landmark, LayoutDashboard, LockKeyhole, LogOut, MapPinned, Menu, PackageCheck, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
   Store, Truck, Users, WalletCards, X,
 } from "lucide-react";
 import type { SessionUser } from "@/lib/types";
@@ -30,6 +30,7 @@ const nav: NavItem[] = [
   { href: "/procurement", label: "Purchasing & payables", icon: PackageCheck, permission: "purchasing.read" },
   { href: "/accounting", label: "Accounting", icon: BookOpen, permission: "accounting.read" },
   { href: "/bank-reconciliation", label: "Bank reconciliation", icon: Landmark, permission: "accounting.read" },
+  { href: "/period-close", label: "Month-end close", icon: LockKeyhole, permission: "accounting.read" },
   { href: "/quotations", label: "Quotations", icon: ClipboardList, permission: "invoices.read" },
   { href: "/delivery-orders", label: "Delivery orders", icon: Truck, permission: "invoices.read" },
   { href: "/invoices", label: "Invoices", icon: FileText, permission: "invoices.read" },

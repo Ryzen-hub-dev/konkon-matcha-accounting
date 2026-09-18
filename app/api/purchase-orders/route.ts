@@ -1,6 +1,8 @@
 import { ObjectId } from "mongodb";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
+import { AccountingPeriodClosedError } from "@/lib/accounting-periods";
+import { assertAccountingPeriodOpen } from "@/lib/accounting-period-lock";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { dateKeyInTimeZone } from "@/lib/dates";
 import { getDb, getMongoClient } from "@/lib/db";
@@ -246,6 +248,7 @@ export async function PATCH(request: Request) {
         const today = dateKeyInTimeZone(new Date(), orderTimeZone);
         if (receivedDay < orderDay || receivedDay > today) throw new PurchaseConflictError("Received date cannot precede the purchase order or be in the future.");
         if (invoiceDay < orderDay || invoiceDay > receivedDay) throw new PurchaseConflictError("Supplier invoice date must be between the purchase order and received dates.");
+        await assertAccountingPeriodOpen(db, receivedDay, mongoSession);
         const requested = new Map(receiveInput.lines.map((line) => [line.productId, line]));
         const selectedLines = order.items.filter((line: Record<string, unknown>) => requested.has(String(line.productId)));
         if (selectedLines.length !== requested.size) throw new PurchaseConflictError("A received product is not on this purchase order.");
@@ -374,7 +377,7 @@ export async function PATCH(request: Request) {
           { accountCode: "2000", accountName: "Accounts payable", debit: 0, credit: baseTotal },
         ];
         await db.collection("journalEntries").insertOne({
-          entryNo: journalNo, date: transactionDate, memo: `Goods receipt ${receiptNo} · ${order.supplierName}`, reference: receiveInput.supplierInvoiceNo,
+          entryNo: journalNo, date: transactionDate, businessDate: receivedDay, timeZone: orderTimeZone, memo: `Goods receipt ${receiptNo} · ${order.supplierName}`, reference: receiveInput.supplierInvoiceNo,
           source: "PURCHASE_RECEIPT", sourceId: receiptId, status: "POSTED", lines: journalLines,
           totalDebit: baseTotal, totalCredit: baseTotal, createdBy: new ObjectId(auth.session.id), createdAt: postedAt,
         }, { session: mongoSession });
@@ -390,6 +393,7 @@ export async function PATCH(request: Request) {
     } finally { await mongoSession.endSession(); }
     return ok(serialise(result));
   } catch (error) {
+    if (error instanceof AccountingPeriodClosedError) return fail(error.message, error.status);
     if (error instanceof PurchaseConflictError) return fail(error.message, 409);
     if ((error as { code?: number }).code === 11000) return fail("This delivery or supplier invoice was already posted. Refresh before trying again.", 409);
     return publicError(error);

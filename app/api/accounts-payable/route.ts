@@ -1,6 +1,8 @@
 import { ObjectId } from "mongodb";
 import { authorize, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
+import { AccountingPeriodClosedError } from "@/lib/accounting-periods";
+import { assertAccountingPeriodOpen } from "@/lib/accounting-period-lock";
 import { getDb, getMongoClient } from "@/lib/db";
 import { dateKeyInTimeZone } from "@/lib/dates";
 import { readExchangeRate } from "@/lib/exchange-rates";
@@ -61,6 +63,7 @@ export async function PATCH(request: Request) {
         const invoiceDay = new Date(bill.invoiceDate).toISOString().slice(0, 10);
         const today = dateKeyInTimeZone(new Date(), billTimeZone);
         if (paidDay < invoiceDay || paidDay > today) throw new PayableConflictError("Payment date cannot precede the supplier invoice or be in the future.");
+        await assertAccountingPeriodOpen(db, paidDay, mongoSession);
         const amount = roundCurrency(input.data.amount, String(bill.currency));
         if (currencyMinorUnits(amount, String(bill.currency)) <= 0 || currencyMinorUnits(amount, String(bill.currency)) > currencyMinorUnits(Number(bill.balance), String(bill.currency))) throw new PayableConflictError("Payment must be positive and cannot exceed the supplier bill balance.");
         const account = await db.collection("chartOfAccounts").findOne({ code: input.data.paymentAccountCode, type: "ASSET", active: { $ne: false }, $or: [{ cashEquivalent: true }, { code: { $in: ["1000", "1010"] } }] }, { session: mongoSession });
@@ -104,7 +107,7 @@ export async function PATCH(request: Request) {
         ];
         const total = roundCurrency(carryingBaseAmount + exchangeLoss, String(bill.baseCurrency));
         await db.collection("journalEntries").insertOne({
-          entryNo: journalNo, date: input.data.paidAt, memo: `Supplier payment ${paymentNo} · ${bill.supplierName}`,
+          entryNo: journalNo, date: input.data.paidAt, businessDate: paidDay, timeZone: billTimeZone, memo: `Supplier payment ${paymentNo} · ${bill.supplierName}`,
           reference: input.data.reference, source: "SUPPLIER_PAYMENT", sourceId: paymentId, status: "POSTED", lines: journalLines,
           totalDebit: total, totalCredit: total, createdBy: new ObjectId(auth.session.id), createdAt: postedAt,
         }, { session: mongoSession });
@@ -114,6 +117,7 @@ export async function PATCH(request: Request) {
     } finally { await mongoSession.endSession(); }
     return ok(serialise(result));
   } catch (error) {
+    if (error instanceof AccountingPeriodClosedError) return fail(error.message, error.status);
     if (error instanceof PayableConflictError) return fail(error.message, 409);
     if ((error as { code?: number }).code === 11000) return fail("This supplier payment request or bank reference was already posted. Refresh the bill before trying again.", 409);
     return publicError(error);

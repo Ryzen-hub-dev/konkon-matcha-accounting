@@ -75,6 +75,12 @@ Matching is server-controlled and transactional. Exact amount/date proximity can
 
 Completion requires every imported row to be matched and the adjusted statement balance to equal the ledger closing balance. The completed record snapshots the opening difference, prior items cleared, current-period uncleared entries, reviewer note and zero difference. It is then immutable and remains readable without recalculating against later ledger activity. Live bank feeds, provider credentials, bank rules, automatic voucher creation and cash-flow forecasting are later phases.
 
+## Month-end close and posting lock
+
+Only a completed calendar month can close. The close transaction rechecks posted-journal balance integrity and requires a completed bank reconciliation covering every non-cash bank account used during that month; overlapping bank-reconciliation drafts remain blockers. The locked record snapshots journal counts and totals, bank coverage, reviewer identity, note and time. Read views compare that snapshot with the live ledger and flag out-of-band database or legacy writes.
+
+The lock is not a UI convention. Manual journals, POS sales and refunds, invoice payments, purchase receipts, supplier payments and inventory-disposal journals all touch the same accounting-period record inside their existing MongoDB transaction before changing business data. Closing and posting therefore create a write conflict; transaction retry sees the new closed state and rejects a late back-dated post instead of allowing check/write skew. Only the Owner can reopen, a reason is audited, and later closed periods must be reopened first. Reopening does not erase the earlier close snapshot or action history.
+
 ## Customer credit and statements
 
 An invoice can optionally retain a member ObjectId and member-number snapshot as its customer-account link. A draft does not consume credit. When a linked draft is marked `SENT`, the server reloads the active member, totals every other open invoice in the immutable ledger currency, enforces any configured limit or hold, and saves the reviewed exposure and control values on the invoice. The same transaction touches the shared member record so concurrent sends for one customer create a write conflict and retry the full exposure calculation instead of both passing on stale totals.
@@ -95,4 +101,4 @@ An `ACCEPTED` or `CONVERTED` quotation can create one full delivery-order draft.
 
 Delivery states move forward from `DRAFT` to `DISPATCHED` and `DELIVERED`, or from an open state to `CANCELLED`. Every transition requires an optimistic version and an operator note; delivery completion also records who the operator says received it. A linked open delivery order prevents its accepted source quotation from being voided. These records do not allocate batches, deduct stock, post accounting, record payment, send carrier instructions or independently prove dispatch or customer receipt. Partial deliveries, stock-affecting fulfilment and attachment-based proof remain later workflows.
 
-This is an operational accounting/POS foundation, not a claim of parity with every AutoCount edition. Payroll, live bank feeds, Singapore InvoiceNow/Peppol submission, advanced purchasing documents, serial-number tracking, year-end closing and statutory tax filing require dedicated later modules and compliance review.
+This is an operational accounting/POS foundation, not a claim of parity with every AutoCount edition. Payroll, live bank feeds, Singapore InvoiceNow/Peppol submission, advanced purchasing documents, serial-number tracking, year-end retained-earnings processing and statutory tax filing require dedicated later modules and compliance review.
