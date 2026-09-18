@@ -13,6 +13,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Owner, Admin, Manager, Accountant and Cashier server-enforced permissions.
 - One shared role-policy catalogue drives both API authorization and the visible workspace menu; Team shows the exact Manage/Use/View/Locked matrix for every role.
 - Staff account generation with temporary passwords and mandatory password change.
+- Renewable staff lookup credentials for reusable fuzzy-search pickers. QR/NFC lookup selects an eligible account but is never accepted as login or authorization.
 - Self-service password change and administrator password reset.
 - Versioned sessions: password, role, disable and archive changes revoke existing sessions.
 - Reversible account disable, plus transactional deletion that removes login/contact details and revokes linked devices. Deleted staff disappear from Team; usernames/emails can be reused while stable IDs preserve historical evidence.
@@ -72,6 +73,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Phone-based NDEF reading/writing on supported Android Chrome devices, with QR fallback elsewhere. Static tags are copyable identification credentials, not payment authorization or clone-resistant smart cards. See [receipt and NFC guide](docs/receipts-and-nfc.md).
 - The linked-phone pass keeps barcode camera/USB/Bluetooth scanning in its own lane and exposes NFC as a separate reader. NFC attempts to start automatically when the pass opens (one browser permission gesture may still be required), then stays live while the page is foregrounded.
 - POS and Members also mount the same NFC reader directly: tap an issued or bound card to select/lookup the member without opening the barcode scanner. A linked phone follows the active counter page without reopening its pass. Normal reading stays active after each tap, suppresses duplicate/in-flight events and permits retries after failed delivery. Web NFC suspends in the background and resumes the same subscription in the foreground; supported phones request a screen wake lock. First use may require one permission tap, and the phone must remain unlocked. Pass expiry, revocation and the one-card binding confirmation step still apply.
+- Staff selectors use one shared fuzzy-search component across counter responsibility and Owner transfer. Owner/Admin can renew a non-authenticating staff lookup credential and write it to NDEF NFC; the server resolves only its SHA-256 hash and rechecks active status and selection eligibility.
 - Active NFC is displayed as a live status, not a disabled button. Leaving an unfinished shared binding releases its reservation; the next POS/Members screen reconnects after release, without restarting the phone reader. Shared dialogs use the browser's top layer, with visible form-error notices, focus containment, Escape/close support and background scroll locking. The isolated acceptance suite exercises actual touch/mouse interactions at 390, 768, 1024 and 1360 pixels, including a simulated save failure that must remain visible above the dialog.
 
 ### Inventory and accounting
@@ -108,6 +110,14 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Smart Replenishment combines reorder thresholds, trailing 30-day unit demand and supplier lead time, then deducts quantities already inbound on open purchase orders.
 - Supply Pulse scores suppliers from actual on-time receipts, average lateness and overdue commitments.
 
+### Staff expenses and protected evidence
+
+- Every role can create its own expense draft and submit it only after at least one receipt or supporting document is stored. Managers review submitted claims; Accountants post approved payments; Owner/Admin retain the combined authority. Non-Owners cannot review their own claim; the sole Owner retains the same explicitly audited override used by purchasing so a one-person company is not deadlocked.
+- Approved payment atomically changes the claim, records the reimbursement, enforces the accounting-period lock, posts Expense/Input tax against the chosen cash or bank account, and writes audit evidence. A payment request key prevents duplicate posting.
+- The Owner alone configures a dedicated private GitHub repository and fine-grained token. The token is AES-256-GCM encrypted in MongoDB, never returned to the browser, and the server rejects public repositories or tokens without write access.
+- Evidence is adaptively compressed with maximum-quality Brotli only when that saves space, then encrypted and checksummed before the GitHub upload. JPEG/PNG/PDF bytes are never resized or recompressed; downloads verify and reproduce the exact original bytes. Already-compressed content is encrypted without artificial expansion from a second codec.
+- Repository paths and GitHub download links remain server-side. Claimants can read their own evidence; authorised reviewers and payers can read evidence in their queue. Files are append-only through the expense workflow and are not silently deleted when a claim changes state.
+
 ## API contract
 
 Every application endpoint returns JSON in one of these forms:
@@ -123,13 +133,13 @@ Every application endpoint returns JSON in one of these forms:
 Core endpoints:
 
 - `/api/setup`, `/api/auth/login`, `/api/auth/logout`, `/api/profile`
-- `/api/users`, `/api/system-control`, `/api/ownership-transfer`
+- `/api/users`, `/api/staff-lookup`, `/api/system-control`, `/api/ownership-transfer`, `/api/attachment-storage`
 - `/api/products`, `/api/stocktakes`, `/api/inventory-batches`, `/api/stock-transfers`, `/api/members`, `/api/coupons`, `/api/payment-methods`, `/api/exchange-rates`
 - `/api/scanner-sessions`, `/api/mobile-scans`, `/api/payment-display-sessions`, `/api/payment-display`
 - `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`, `/api/local-payment-events`
 - `/api/receipt-lookup`, `/api/public-receipts`, `/api/member-cards`, `/api/member-cards/lookup`
 - `/api/invoices`, `/api/invoice-templates`, `/api/customer-accounts`, `/api/quotations`, `/api/delivery-orders`, `/api/journals`, `/api/bank-reconciliations`, `/api/accounting-periods`, `/api/fixed-assets`, `/api/reports`, `/api/e-invoices`
-- `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`
+- `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`, `/api/expense-claims`, `/api/expense-attachments`
 - `/api/settings`, `/api/settings/history`, `/api/locations`, `/api/counters`, `/api/register-shifts`, `/api/maintenance`
 
 Workspace writes require a same-origin browser request and authenticated role permission. Initial setup, private owner recovery and token-restricted phone scan submission have their own authorization rules. Customer receipt retrieval is a read-only POST requiring the signed receipt token; it never authorizes refunds. Public errors do not include stack traces, secrets or database internals.

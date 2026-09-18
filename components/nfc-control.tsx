@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Nfc } from "lucide-react";
-import { memberBindingScanToken, memberScanToken } from "@/lib/scan-codes";
+import { memberBindingScanToken, memberScanToken, staffScanToken } from "@/lib/scan-codes";
 
 type NdefRecord = { recordType: string; data?: DataView; encoding?: string; mediaType?: string };
 type Ndef = { scan(options: { signal: AbortSignal }): Promise<void>; write(message: { records: Array<{ recordType: string; data: string }> }, options: { signal: AbortSignal }): Promise<void>; onreading: ((event: { message: { records: NdefRecord[] } }) => void) | null; onreadingerror: (() => void) | null };
@@ -21,7 +21,7 @@ async function bindingCode(event: { serialNumber?: string; message: { records: N
   return `KKNT1-${serial ? "S" : "N"}-${fingerprint}`;
 }
 
-export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, writeToken, disabled = false, autoStart = false, alwaysOn = false }: { onRead?: (code: string) => void | Promise<void>; onGenericRead?: (code: string) => void | Promise<void>; stopAfterGeneric?: boolean; writeToken?: string; disabled?: boolean; autoStart?: boolean; alwaysOn?: boolean }) {
+export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, writeToken, credentialKind = "MEMBER", disabled = false, autoStart = false, alwaysOn = false }: { onRead?: (code: string) => void | Promise<void>; onGenericRead?: (code: string) => void | Promise<void>; stopAfterGeneric?: boolean; writeToken?: string; credentialKind?: "MEMBER" | "STAFF" | "ANY"; disabled?: boolean; autoStart?: boolean; alwaysOn?: boolean }) {
   const [supported, setSupported] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -41,7 +41,7 @@ export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, wr
       controller.current = null;
       listeningRef.current = false;
     };
-  }, [disabled, writeToken]);
+  }, [credentialKind, disabled, writeToken]);
   useEffect(() => {
     setSupported(window.isSecureContext && "NDEFReader" in window);
     // Web NFC suspends in the background and resumes the same subscription
@@ -79,14 +79,16 @@ export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, wr
     const Reader = (window as unknown as { NDEFReader?: NdefConstructor }).NDEFReader;
     if (!Reader) return;
     controller.current?.abort(); const abort = new AbortController(); controller.current = abort;
-    setListening(true); setMessage(writeToken ? "Hold the NFC card against the phone to write it." : "Hold the member card against the phone.");
+    const credentialLabel = credentialKind === "STAFF" ? "staff lookup card" : "member card";
+    setListening(true); setMessage(writeToken ? "Hold the NFC card against the phone to write it." : `Hold the ${credentialLabel} against the phone.`);
     try {
       const reader = new Reader();
       if (writeToken) {
-        const code = memberScanToken(writeToken); if (!code) throw new Error("The member card code is invalid.");
+        const code = credentialKind === "STAFF" ? staffScanToken(writeToken) : credentialKind === "ANY" ? (memberScanToken(writeToken) || staffScanToken(writeToken)) : memberScanToken(writeToken);
+        if (!code) throw new Error("The credential code is invalid.");
         await reader.write({ records: [{ recordType: "text", data: code }] }, { signal: abort.signal });
         if (abort.signal.aborted) return;
-        setMessage("Member card written. Test it at the counter before handing it over."); setListening(false);
+        setMessage(`${credentialKind === "STAFF" ? "Staff lookup" : "Member"} card written. Test it before handing it over.`); setListening(false);
       } else {
         let lastCode = ""; let lastAt = 0; let processing = false;
         reader.onreading = async event => {
@@ -96,17 +98,18 @@ export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, wr
           for (const record of event.message.records) {
             if (!["text", "url"].includes(record.recordType) || !record.data || record.data.byteLength > 2048) continue;
             try {
-              const token = memberScanToken(new TextDecoder(record.encoding || "utf-8").decode(record.data));
+              const raw = new TextDecoder(record.encoding || "utf-8").decode(record.data);
+              const token = credentialKind === "STAFF" ? staffScanToken(raw) : credentialKind === "ANY" ? (memberScanToken(raw) || staffScanToken(raw)) : memberScanToken(raw);
               if (!token) continue;
-              if (!readRef.current) { setMessage("This is an issued member credential. Use it for lookup; it cannot be rebound as an existing card."); return; }
+              if (!readRef.current) { setMessage("This is an issued lookup credential. Use it for lookup; it cannot be rebound as an existing card."); return; }
               if (lastCode === token && Date.now() - lastAt < 2000) return;
               processing = true;
-              setMessage("Member card read. Checking at the counter…");
+              setMessage(`${credentialKind === "STAFF" ? "Staff" : "Member"} card read. Checking securely…`);
               try {
                 await readRef.current(token);
                 if (abort.signal.aborted) return;
                 lastCode = token; lastAt = Date.now();
-                setMessage("Member card sent. Ready for the next card.");
+                setMessage("Credential matched. Ready for the next card.");
               } catch { if (!abort.signal.aborted) setMessage("The card could not be sent. Tap it again to retry."); }
               finally { processing = false; }
               return;
@@ -128,7 +131,7 @@ export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, wr
             } catch { if (!abort.signal.aborted) setMessage("The card could not be sent. Tap it again to retry."); } finally { processing = false; }
             return;
           }
-          setMessage("No Kōn-Kōn member credential found. Use a card issued by this store.");
+          setMessage(`No Kōn-Kōn ${credentialKind === "STAFF" ? "staff lookup" : "member"} credential found.`);
         };
         reader.onreadingerror = () => { if (!abort.signal.aborted) setMessage("Card could not be read. Hold it steady and try again."); };
         await reader.scan({ signal: abort.signal });
@@ -145,15 +148,16 @@ export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, wr
     const timer = window.setTimeout(() => { autoStartAttempted.current = true; beginRef.current(); }, 0);
     return () => window.clearTimeout(timer);
   }, [autoStart, busy, disabled, pageHidden, supported, writeToken]);
+  const credentialLabel = credentialKind === "STAFF" ? "staff lookup" : "member";
   const defaultMessage = supported
-    ? writeToken ? "Writing replaces this tag’s NFC records. Use a dedicated member card."
+    ? writeToken ? `Writing replaces this tag’s NFC records. Use a dedicated ${credentialLabel} card.`
       : autoStart ? "Keep this page visible and the phone unlocked. Allow NFC once, then tap cards without pressing a button each time."
         : onGenericRead ? "Tap an issued or readable NFC card. Other cards are fingerprinted without writing to them."
-          : "Tap an issued NDEF member card to identify its holder."
+          : `Tap an issued NDEF ${credentialLabel} card to identify its holder.`
     : "Web NFC requires a compatible Android phone, Chrome, HTTPS and an NDEF card. Use QR on other devices.";
   return <section className={`nfc-control no-print ${busy && !pageHidden ? "nfc-listening" : ""}`} data-nfc-auto-start={autoStart ? "true" : "false"} data-nfc-always-on={alwaysOn ? "true" : "false"}>
-    <div className="nfc-control-heading"><span className="nfc-signal" aria-hidden="true"><Nfc size={18} /></span><div><strong>{writeToken ? "Write NFC member card" : "NFC reader"}</strong><small>{busy ? pageHidden ? "RESUMES WHEN THIS PAGE IS VISIBLE" : "LISTENING LIVE · HOLD A CARD NEAR THE PHONE" : autoStart ? "AUTO-READY · SEPARATE FROM BARCODE SCANNER" : "SEPARATE CARD READER"}</small></div></div>
-    {busy && alwaysOn ? <span className="nfc-status-pill" role="status" aria-label="NFC reader listening"><Nfc size={18} />{pageHidden ? "Resumes on return" : "NFC listening"}</span> : supported ? <button type="button" className="button button-secondary" disabled={disabled} onClick={() => void begin()} aria-label={busy ? "Stop NFC reader" : writeToken ? "Write member card" : "Start NFC reader"}><Nfc size={18} />{busy ? "Stop NFC reader" : writeToken ? "Write member card" : "Start NFC reader"}</button> : <span className="nfc-device-unavailable">Use a compatible NFC phone</span>}
+    <div className="nfc-control-heading"><span className="nfc-signal" aria-hidden="true"><Nfc size={18} /></span><div><strong>{writeToken ? `Write NFC ${credentialLabel} card` : "NFC reader"}</strong><small>{busy ? pageHidden ? "RESUMES WHEN THIS PAGE IS VISIBLE" : "LISTENING LIVE · HOLD A CARD NEAR THE PHONE" : autoStart ? "AUTO-READY · SEPARATE FROM BARCODE SCANNER" : "SEPARATE CARD READER"}</small></div></div>
+    {busy && alwaysOn ? <span className="nfc-status-pill" role="status" aria-label="NFC reader listening"><Nfc size={18} />{pageHidden ? "Resumes on return" : "NFC listening"}</span> : supported ? <button type="button" className="button button-secondary" disabled={disabled} onClick={() => void begin()} aria-label={busy ? "Stop NFC reader" : writeToken ? `Write ${credentialLabel} card` : "Start NFC reader"}><Nfc size={18} />{busy ? "Stop NFC reader" : writeToken ? `Write ${credentialLabel} card` : "Start NFC reader"}</button> : <span className="nfc-device-unavailable">Use a compatible NFC phone</span>}
     <p aria-live="polite">{message || defaultMessage}</p>
   </section>;
 }

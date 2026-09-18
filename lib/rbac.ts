@@ -18,6 +18,10 @@ export const PERMISSIONS = [
   "purchasing.approve",
   "payables.read",
   "payables.write",
+  "expenses.read",
+  "expenses.submit",
+  "expenses.approve",
+  "expenses.pay",
   "accounting.read",
   "accounting.write",
   "invoices.read",
@@ -44,14 +48,14 @@ const rolePermissions: Record<UserRole, ReadonlySet<Permission>> = {
     "inventory.write", "invoices.read", "invoices.write", "reports.read", "team.read",
     "receipts.read", "receipts.manage", "coupons.read", "coupons.manage", "payments.read",
     "purchasing.read", "purchasing.write", "purchasing.approve", "payables.read", "counters.read",
-    "reviews.read", "reviews.manage",
+    "reviews.read", "reviews.manage", "expenses.read", "expenses.submit", "expenses.approve",
   ]),
   ACCOUNTANT: new Set([
     "dashboard.read", "members.read", "inventory.read", "accounting.read",
     "accounting.write", "invoices.read", "invoices.write", "reports.read", "receipts.read", "payments.read",
-    "purchasing.read", "purchasing.write", "payables.read", "payables.write", "reviews.read",
+    "purchasing.read", "purchasing.write", "payables.read", "payables.write", "reviews.read", "expenses.read", "expenses.submit", "expenses.pay",
   ]),
-  CASHIER: new Set(["dashboard.read", "pos.sell", "payments.read", "coupons.read", "receipts.read", "members.read", "members.write", "inventory.read", "counters.read"]),
+  CASHIER: new Set(["dashboard.read", "pos.sell", "payments.read", "coupons.read", "receipts.read", "members.read", "members.write", "inventory.read", "counters.read", "expenses.read", "expenses.submit"]),
 };
 
 export const ROLE_PROFILES: Record<UserRole, { label: string; summary: string }> = {
@@ -73,6 +77,7 @@ export const ACCESS_AREAS: ReadonlyArray<{ label: string; read: Permission; mana
   { label: "Inventory", read: "inventory.read", manage: "inventory.write" },
   { label: "Purchasing", read: "purchasing.read", manage: "purchasing.write" },
   { label: "Payables", read: "payables.read", manage: "payables.write" },
+  { label: "Expense claims", read: "expenses.read", manage: "expenses.approve" },
   { label: "Accounting", read: "accounting.read", manage: "accounting.write" },
   { label: "Invoices", read: "invoices.read", manage: "invoices.write" },
   { label: "Reports", read: "reports.read" },

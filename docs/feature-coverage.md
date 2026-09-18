@@ -21,6 +21,9 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Local CSV bank-statement import, confirmed matching to posted ledger lines, zero-difference completion and immutable prior/current uncleared-item working papers
 - Month-end integrity/bank checklist, immutable close evidence, direct-ledger drift warning and transactional back-date locks across every journal-posting workflow
 - Fixed-asset register, cash/bank acquisition posting, register-only migration evidence, exact straight-line monthly depreciation, disposal gain/loss journals and month-close depreciation blockers
+- Employee expense drafts, mandatory protected evidence, maker-checker approval/rejection and approved cash/bank payment journals with accounting-period locks
+- Owner-only private GitHub evidence repository configuration, encrypted token storage, exact-byte lossless compression/encryption/checksum verification, and server-authorized downloads
+- Reusable staff fuzzy search with renewable non-authenticating QR/NFC lookup credentials for user-selection workflows
 - 24-hour token-restricted phone scanner passes compatible with Vercel serverless
 - Low-latency auto-connected POS/Inventory scanner bridge with native + ZXing camera decoding
 - QR/link-based phone connection and active POS/Inventory routing, including new-product barcode capture
@@ -74,7 +77,7 @@ This count is a delivery benchmark, not a claim of AutoCount parity. Accounting,
 - Purchase requisitions, RFQs, quotation comparison, purchase returns, landed cost and three-way matching exceptions
 - Recurring invoices
 - Live bank feeds, reusable matching rules, controlled voucher creation and cash-flow forecast
-- Expense claims, approvals, attachments and payment runs
+- Batched expense payment runs, mileage/per-diem policies and corporate-card feeds
 - Serial-number tracking
 - Multi-company consolidation, intercompany journals and elimination entries
 - Payroll, leave, statutory contribution and employee self-service

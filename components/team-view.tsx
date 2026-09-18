@@ -1,13 +1,15 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { Activity, CheckCircle2, Copy, KeyRound, LockKeyhole, RotateCcw, ShieldCheck, Trash2, UserCog, UserPlus } from "lucide-react";
+import { Activity, CheckCircle2, Nfc, Copy, KeyRound, LockKeyhole, RotateCcw, ShieldCheck, Trash2, UserCog, UserPlus } from "lucide-react";
 import { useBusiness } from "@/components/business-context";
+import { NfcControl } from "@/components/nfc-control";
+import { QrImage } from "@/components/qr-image";
 import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
 import { USER_ROLES, type UserRole } from "@/lib/types";
 import { ACCESS_AREAS, ROLE_PROFILES, accessLevel } from "@/lib/rbac";
 
-type TeamUser = { _id: string; fullName: string; username: string; email?: string; role: UserRole; active: boolean; mustChangePassword?: boolean };
+type TeamUser = { _id: string; fullName: string; username: string; email?: string; role: UserRole; active: boolean; mustChangePassword?: boolean; selectionTokenLast4?: string };
 type Audit = { _id: string; actorName: string; action: string; entityType: string; createdAt: string };
 type TeamData = { users: TeamUser[]; audit: Audit[] };
 
@@ -26,6 +28,7 @@ export function TeamView({ actorRole }: { actorRole: UserRole }) {
   const actionPending = useRef(false);
   const [password, setPassword] = useState("");
   const [issued, setIssued] = useState<{ username: string; password: string } | null>(null);
+  const [selectionCredential, setSelectionCredential] = useState<{ user: TeamUser; token: string } | null>(null);
   const { notice, show } = useNotice();
   const canWrite = ["OWNER", "ADMIN"].includes(actorRole);
   const manageable = (user: TeamUser) => canWrite && user.role !== "OWNER" && !(actorRole === "ADMIN" && user.role === "ADMIN");
@@ -53,8 +56,9 @@ export function TeamView({ actorRole }: { actorRole: UserRole }) {
     if (actionPending.current) return;
     actionPending.current = true; setPendingId(user._id);
     try {
-      const result = await apiRequest<{ temporaryPassword?: string }>("/api/users", { method, body: JSON.stringify({ id: user._id, ...fields }) });
+      const result = await apiRequest<{ temporaryPassword?: string; selectionToken?: string }>("/api/users", { method, body: JSON.stringify({ id: user._id, ...fields }) });
       if (result.temporaryPassword) setIssued({ username: user.username, password: result.temporaryPassword });
+      else if (result.selectionToken) setSelectionCredential({ user, token: result.selectionToken });
       else if (method === "DELETE") setIssued(current => current?.username === user.username ? null : current);
       show(message); await load();
     } catch (reason) { show(reason instanceof Error ? reason.message : "Could not change the account.", "error"); }
@@ -78,6 +82,7 @@ export function TeamView({ actorRole }: { actorRole: UserRole }) {
           {manageable(user) ? <label className="team-role"><span>Role</span><select aria-label={`Role for ${user.username}`} value={user.role} disabled={Boolean(pendingId)} onChange={event => void change(user, "PATCH", { role: event.target.value }, "Role updated; previous sessions revoked.")}><option value="ADMIN" disabled={actorRole !== "OWNER"}>Admin</option><option value="MANAGER">Manager</option><option value="ACCOUNTANT">Accountant</option><option value="CASHIER">Cashier</option></select></label> : <span className="role-label team-role">{user.role}</span>}
           {manageable(user) ? <div className="team-actions">
             <button type="button" className="button button-secondary" disabled={Boolean(pendingId)} onClick={() => void change(user, "PATCH", { action: "RESET_PASSWORD" }, "Password reset and existing sessions revoked.")}><RotateCcw size={15} />Reset password</button>
+            <button type="button" className="button button-secondary" disabled={Boolean(pendingId)} onClick={() => void change(user, "PATCH", { action: "ISSUE_SELECTION_CARD" }, "Staff lookup credential issued. Any previous lookup card is now inactive.")}><Nfc size={15} />{user.selectionTokenLast4 ? "Renew lookup card" : "Issue lookup card"}</button>
             <button type="button" className="button button-secondary" disabled={Boolean(pendingId)} onClick={() => void change(user, "PATCH", { active: !user.active }, "Access updated.")}>{user.active ? "Disable" : "Enable"}</button>
             <button type="button" className="button button-quiet danger" disabled={Boolean(pendingId)} onClick={() => deleteUser(user)}><Trash2 size={15} />Delete</button>
           </div> : null}
@@ -92,5 +97,6 @@ export function TeamView({ actorRole }: { actorRole: UserRole }) {
       <p className="form-hint">Share the password securely. The staff member must change it at first sign-in.</p><footer><button type="button" className="button button-secondary" onClick={() => { setOpen(false); setPassword(""); }}>Cancel</button><button className="button button-primary" disabled={busy}><UserPlus size={16} />{busy ? "Generating…" : "Generate account"}</button></footer>
     </form></Modal>
     <Modal open={Boolean(issued)} onClose={() => setIssued(null)} title="Account ready" kicker="COPY ONCE">{issued ? <div className="credentials-card"><p>These credentials will not be shown again.</p><label><span>Username</span><strong>{issued.username}</strong></label><label><span>Temporary password</span><strong>{issued.password}</strong></label><button className="button button-primary" onClick={async () => { try { await navigator.clipboard.writeText(`Username: ${issued.username}\nTemporary password: ${issued.password}`); show("Credentials copied."); } catch { show("Clipboard unavailable. Copy the credentials manually.", "error"); } }}><Copy size={16} />Copy credentials</button></div> : null}</Modal>
+    <Modal open={Boolean(selectionCredential)} onClose={() => setSelectionCredential(null)} title="Staff lookup card ready" kicker="NFC + QR · NOT A LOGIN">{selectionCredential ? <div className="credentials-card staff-credential-card"><p>This credential only finds <strong>{selectionCredential.user.fullName}</strong> inside authorised staff pickers. It cannot sign in or grant permissions. Issuing another one revokes this code.</p><QrImage value={selectionCredential.token} label={`Staff lookup QR for ${selectionCredential.user.fullName}`} /><NfcControl credentialKind="STAFF" writeToken={selectionCredential.token} /><small>Write it to a dedicated NDEF-compatible NFC card, then test it in a staff search field.</small></div> : null}</Modal>
   </div>;
 }

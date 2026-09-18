@@ -13,7 +13,7 @@ test("documents compress before encryption and recover exact Unicode bytes; shor
     const packed = packDocument(content, "einvoice:test");
     assert.equal(unpackDocument({ ...packed, sha256: hash(content) }, "einvoice:test"), content);
     assert.ok(!packed.encryptedContent.includes("Invoice"));
-    if (content.length > 1000) { assert.equal(packed.contentEncoding, "gzip-base64-v1"); assert.ok(packed.encryptedContent.length < Buffer.byteLength(content) / 5); }
+    if (content.length > 1000) { assert.equal(packed.contentEncoding, "br-base64-v2"); assert.ok(packed.encryptedContent.length < Buffer.byteLength(content) / 5); }
     else assert.equal(packed.contentEncoding, "utf8-v1");
     assert.equal(unpackDocument({ encryptedContent: encryptMemberToken(content, "einvoice:test"), sha256: hash(content) }, "einvoice:test"), content);
   }

@@ -6,6 +6,11 @@ export function memberScanToken(value: string) {
   return value.trim().match(/(?:^|[=#/])(KKMC1-[a-f0-9]{64})(?:$|[&\s])/i)?.[1].toUpperCase() || "";
 }
 
+/** Static staff lookup token. It selects a user but never authenticates or grants access. */
+export function staffScanToken(value: string) {
+  return value.trim().match(/(?:^|[=#/])(KKSU1-[a-f0-9]{64})(?:$|[&\s])/i)?.[1].toUpperCase() || "";
+}
+
 export const NFC_BINDING_SOURCES = ["NFC_SERIAL", "NDEF_DIGEST"] as const;
 export type NfcBindingSource = typeof NFC_BINDING_SOURCES[number];
 

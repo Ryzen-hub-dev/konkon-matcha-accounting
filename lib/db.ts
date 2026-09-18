@@ -18,7 +18,7 @@ type IndexMigrationRecord = {
 
 // Bump this value whenever the index definitions below change. The durable marker
 // prevents every new Vercel function instance from re-checking the full index set.
-export const INDEX_SCHEMA_VERSION = "indexes-2026-09-18-v7";
+export const INDEX_SCHEMA_VERSION = "indexes-2026-09-18-v8";
 
 const mongoCache = globalThis as typeof globalThis & { __konkonMongo?: MongoCache };
 
@@ -139,6 +139,7 @@ async function initializeIndexes(db: Db) {
     db.collection("memberCards").createIndex({ memberId: 1, status: 1 }),
     db.collection("memberCards").createIndex({ deletedAt: 1 }, { expireAfterSeconds: OPERATIONAL_LOG_DAYS * 86_400, partialFilterExpression: { status: "DELETED" } }),
     db.collection("users").createIndex({ usernameNormalized: 1 }, { unique: true }),
+    db.collection("users").createIndex({ selectionTokenHash: 1 }, stableOptionalStringIndexOptions("selectionTokenHash")),
     db.collection("users").createIndex(
       { emailNormalized: 1 },
       { unique: true, partialFilterExpression: { emailNormalized: { $type: "string" } } },
@@ -240,6 +241,14 @@ async function initializeIndexes(db: Db) {
     db.collection("fixedAssetDisposals").createIndex({ disposalNo: 1 }, { unique: true }),
     db.collection("fixedAssetDisposals").createIndex({ clientRequestId: 1 }, { unique: true }),
     db.collection("fixedAssetDisposals").createIndex({ assetId: 1 }, { unique: true }),
+    db.collection("expenseClaims").createIndex({ claimNo: 1 }, { unique: true }),
+    db.collection("expenseClaims").createIndex({ clientRequestId: 1 }, { unique: true }),
+    db.collection("expenseClaims").createIndex({ claimantId: 1, createdAt: -1 }),
+    db.collection("expenseClaims").createIndex({ status: 1, updatedAt: -1 }),
+    db.collection("expenseAttachments").createIndex({ claimId: 1, createdAt: 1 }),
+    db.collection("expensePayments").createIndex({ paymentNo: 1 }, { unique: true }),
+    db.collection("expensePayments").createIndex({ clientRequestId: 1 }, { unique: true }),
+    db.collection("expensePayments").createIndex({ claimId: 1 }, { unique: true }),
     db.collection("bankReconciliations").createIndex({ reconciliationNo: 1 }, { unique: true }),
     ensureStableOptionalStringUniqueIndex(db, "bankReconciliations", "clientRequestId"),
     db.collection("bankReconciliations").createIndex({ accountCode: 1, statementDate: -1, status: 1 }),

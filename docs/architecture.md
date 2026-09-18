@@ -2,7 +2,7 @@
 
 ## Runtime
 
-Next.js App Router runs the UI and route handlers on Vercel. MongoDB Atlas is the only durable service. The Node.js runtime is used for MongoDB and password hashing; there is no Edge database access, worker or local filesystem dependency.
+Next.js App Router runs the UI and route handlers on Vercel. MongoDB Atlas is the authoritative database. When the Owner enables expense evidence, an explicitly configured private GitHub repository is the durable encrypted blob store; MongoDB retains the file index, checksum, workflow and audit evidence. The Node.js runtime is used for MongoDB, compression, encryption and password hashing; there is no Edge database access, worker or local filesystem dependency.
 
 ## Authentication and authority
 
@@ -12,9 +12,9 @@ Permissions are enforced in API route handlers, not just hidden in the interface
 
 - Owner: every operation, including Admin creation.
 - Admin: every daily operation, but cannot create/manage Owner or peer Admin accounts.
-- Manager: POS, members, inventory, invoices, reports, purchase-order creation/approval/receiving and read-only team visibility.
-- Accountant: dashboard, accounting, invoices, reports, purchasing entry and accounts-payable settlement; purchase approval remains separated.
-- Cashier: dashboard, POS, members and inventory read access.
+- Manager: POS, members, inventory, invoices, reports, purchase-order creation/approval/receiving, expense approval and read-only team visibility.
+- Accountant: dashboard, accounting, invoices, reports, purchasing entry, accounts-payable settlement and approved-expense payment; purchase and expense approval remain separated.
+- Cashier: dashboard, POS, members and inventory read access, plus submission and tracking of their own expense claims.
 
 Sensitive mutations check same-origin requests and write an audit event.
 
@@ -66,6 +66,16 @@ A sale never trusts product prices from the browser. The API reloads products, c
 - Posted journals are append-only through the UI. Corrections should use a reversing journal.
 
 Goods receipt, stock costing, AP bill creation and the receipt journal share one MongoDB transaction. Supplier payment, bill balance and its settlement journal share another. Stable client request IDs and unique supplier invoice numbers make retries idempotent.
+
+## Expense claims and private evidence
+
+An expense begins as the signed-in employee's draft. Submission requires at least one evidence record and moves forward to Manager/Admin/Owner review. A non-Owner claimant cannot approve or reject the same claim; the Owner retains an explicitly audited override so a one-person company cannot deadlock. Rejection records a reason; approval freezes the reviewed amounts and account snapshot for the payment queue. Payment validates an active cash-equivalent account, enforces the shared accounting-period lock and commits the claim state, payment record, balanced cash-basis journal and audit event in one MongoDB transaction.
+
+Only the Owner can configure the evidence repository. Setup validates that the target GitHub repository is private, the branch exists and the fine-grained token has push access. The token is AES-256-GCM encrypted with authenticated context before MongoDB storage and is never returned after submission. Upload paths are generated from claim/attachment IDs and are never accepted from the browser.
+
+The original attachment is bounded to 4 MB so the multipart upload and exact-byte download stay below Vercel Functions' 4.5 MB request/response ceiling. It is compressed with Brotli quality 11 only when the result is smaller, AES-256-GCM encrypted and wrapped with the original size and SHA-256 digest. Already-compressed images or PDFs remain byte-for-byte unchanged inside encryption instead of being lossy transcoded. GitHub receives only the protected envelope. Downloads pass through an authenticated route, recheck claimant/reviewer/payer scope, fetch from the configured branch, decrypt, decompress and verify exact length and digest before returning the original file. GitHub commits are durable storage evidence, not proof that a receipt is genuine or a reimbursement settled externally.
+
+Staff user pickers rank partial and subsequence matches across name, username, email and role. A renewable `KKSU1` lookup credential may be rendered as QR or written to NDEF NFC. MongoDB stores only a purpose-separated SHA-256 lookup hash and display-safe last four characters; the full credential is returned once for card issuance. It only selects an active eligible user and is never accepted by authentication or RBAC.
 
 ## Bank reconciliation controls
 

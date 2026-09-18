@@ -9,6 +9,7 @@ import { clearArchivedUser } from "@/lib/record-deletion";
 import { canManageRole } from "@/lib/rbac";
 import { USER_ROLES } from "@/lib/types";
 import { serialise } from "@/lib/format";
+import { newStaffSelectionToken, staffSelectionTokenHash } from "@/lib/staff-credentials";
 
 export const runtime = "nodejs";
 
@@ -23,14 +24,14 @@ const userSchema = z.object({
 
 const updateSchema = z.object({
   id: z.string().length(24),
-  action: z.enum(["UPDATE", "RESET_PASSWORD"]).default("UPDATE"),
+  action: z.enum(["UPDATE", "RESET_PASSWORD", "ISSUE_SELECTION_CARD"]).default("UPDATE"),
   role: z.enum(USER_ROLES).optional(),
   active: z.boolean().optional(),
-}).refine((value) => value.action === "RESET_PASSWORD" || value.role !== undefined || value.active !== undefined);
+}).refine((value) => value.action !== "UPDATE" || value.role !== undefined || value.active !== undefined);
 
 const deleteSchema = z.object({ id: z.string().length(24) });
 
-const projection = { passwordHash: 0, usernameNormalized: 0, emailNormalized: 0 };
+const projection = { passwordHash: 0, usernameNormalized: 0, emailNormalized: 0, selectionTokenHash: 0, encryptedSelectionToken: 0 };
 
 export async function GET() {
   const auth = await authorize("team.read");
@@ -106,6 +107,17 @@ export async function PATCH(request: Request) {
       if (!result.matchedCount) return fail("This account was deleted or changed. Reload the directory.", 409);
       await writeAudit(db, auth.session, "user.password_reset", "user", input.data.id, { forcedChange: true });
       return ok({ user: serialise(await db.collection("users").findOne({ _id: target._id }, { projection })), temporaryPassword });
+    }
+    if (input.data.action === "ISSUE_SELECTION_CARD") {
+      const token = newStaffSelectionToken();
+      const changedAt = new Date();
+      const result = await db.collection("users").updateOne(
+        { _id: target._id, archivedAt: { $exists: false }, role: target.role },
+        { $set: { selectionTokenHash: staffSelectionTokenHash(token), selectionTokenLast4: token.slice(-4), selectionCredentialUpdatedAt: changedAt, updatedAt: changedAt }, $unset: { encryptedSelectionToken: "" } },
+      );
+      if (!result.matchedCount) return fail("This account was deleted or changed. Reload the directory.", 409);
+      await writeAudit(db, auth.session, "user.selection_credential_issue", "user", input.data.id, { last4: token.slice(-4) });
+      return ok({ user: serialise(await db.collection("users").findOne({ _id: target._id }, { projection })), selectionToken: token });
     }
     const changes = {
       ...(input.data.role ? { role: input.data.role } : {}),

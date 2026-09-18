@@ -25,7 +25,7 @@ export async function GET() {
     const db = await getDb();
     const [pending, targets] = await Promise.all([
       db.collection("ownershipTransfers").findOne({ status: "PENDING" }, { sort: { createdAt: -1 } }),
-      db.collection("users").find({ _id: { $ne: new ObjectId(auth.session.id) }, active: true, archivedAt: { $exists: false }, role: { $ne: "OWNER" } }, { projection: { passwordHash: 0, usernameNormalized: 0, emailNormalized: 0 } }).sort({ fullName: 1 }).toArray(),
+      db.collection("users").find({ _id: { $ne: new ObjectId(auth.session.id) }, active: true, archivedAt: { $exists: false }, role: { $ne: "OWNER" } }, { projection: { passwordHash: 0, usernameNormalized: 0, emailNormalized: 0, selectionTokenHash: 0, encryptedSelectionToken: 0 } }).sort({ fullName: 1 }).toArray(),
     ]);
     return ok(serialise({ pending, targets, coolingPeriodHours: 24 }));
   } catch (error) {

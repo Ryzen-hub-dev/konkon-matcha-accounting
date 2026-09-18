@@ -26,7 +26,7 @@ export async function clearArchivedUser(db: Db, id: ObjectId, now: Date, session
   const options = session ? { session } : {};
   const result = await db.collection("users").updateOne(
     { _id: id, active: false, archivedAt: { $exists: true }, role: { $ne: "OWNER" } },
-    { $set: { fullName: "Deleted staff", username: `deleted-${id.toHexString()}`, usernameNormalized: `deleted:${id.toHexString()}` }, $unset: { passwordHash: "", email: "", emailNormalized: "", mustChangePassword: "" } }, options,
+    { $set: { fullName: "Deleted staff", username: `deleted-${id.toHexString()}`, usernameNormalized: `deleted:${id.toHexString()}` }, $unset: { passwordHash: "", email: "", emailNormalized: "", mustChangePassword: "", selectionTokenHash: "", encryptedSelectionToken: "", selectionTokenLast4: "" } }, options,
   );
   if (!result.matchedCount) return false;
   for (const collection of ["scannerSessions", "paymentDisplaySessions"]) {
