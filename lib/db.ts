@@ -18,7 +18,7 @@ type IndexMigrationRecord = {
 
 // Bump this value whenever the index definitions below change. The durable marker
 // prevents every new Vercel function instance from re-checking the full index set.
-export const INDEX_SCHEMA_VERSION = "indexes-2026-09-18-v6";
+export const INDEX_SCHEMA_VERSION = "indexes-2026-09-18-v7";
 
 const mongoCache = globalThis as typeof globalThis & { __konkonMongo?: MongoCache };
 
@@ -229,6 +229,17 @@ async function initializeIndexes(db: Db) {
     db.collection("journalEntries").createIndex({ "lines.accountCode": 1, status: 1, date: 1 }),
     db.collection("accountingPeriods").createIndex({ periodKey: 1 }, { unique: true }),
     db.collection("accountingPeriods").createIndex({ status: 1, periodKey: -1 }),
+    db.collection("fixedAssets").createIndex({ assetNo: 1 }, { unique: true }),
+    db.collection("fixedAssets").createIndex({ clientRequestId: 1 }, { unique: true }),
+    db.collection("fixedAssets").createIndex({ status: 1, category: 1, assetNo: 1 }),
+    db.collection("fixedAssetDepreciation").createIndex({ assetId: 1, periodKey: 1 }, { unique: true }),
+    db.collection("fixedAssetDepreciation").createIndex({ periodKey: 1, postedAt: -1 }),
+    db.collection("fixedAssetDepreciationRuns").createIndex({ runNo: 1 }, { unique: true }),
+    db.collection("fixedAssetDepreciationRuns").createIndex({ clientRequestId: 1 }, { unique: true }),
+    db.collection("fixedAssetDepreciationRuns").createIndex({ periodKey: -1, createdAt: -1 }),
+    db.collection("fixedAssetDisposals").createIndex({ disposalNo: 1 }, { unique: true }),
+    db.collection("fixedAssetDisposals").createIndex({ clientRequestId: 1 }, { unique: true }),
+    db.collection("fixedAssetDisposals").createIndex({ assetId: 1 }, { unique: true }),
     db.collection("bankReconciliations").createIndex({ reconciliationNo: 1 }, { unique: true }),
     ensureStableOptionalStringUniqueIndex(db, "bankReconciliations", "clientRequestId"),
     db.collection("bankReconciliations").createIndex({ accountCode: 1, statementDate: -1, status: 1 }),

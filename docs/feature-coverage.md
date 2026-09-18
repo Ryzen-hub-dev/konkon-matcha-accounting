@@ -20,6 +20,7 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Manual journals, chart of accounts and core management reports
 - Local CSV bank-statement import, confirmed matching to posted ledger lines, zero-difference completion and immutable prior/current uncleared-item working papers
 - Month-end integrity/bank checklist, immutable close evidence, direct-ledger drift warning and transactional back-date locks across every journal-posting workflow
+- Fixed-asset register, cash/bank acquisition posting, register-only migration evidence, exact straight-line monthly depreciation, disposal gain/loss journals and month-close depreciation blockers
 - 24-hour token-restricted phone scanner passes compatible with Vercel serverless
 - Low-latency auto-connected POS/Inventory scanner bridge with native + ZXing camera decoding
 - QR/link-based phone connection and active POS/Inventory routing, including new-product barcode capture
@@ -73,7 +74,6 @@ This count is a delivery benchmark, not a claim of AutoCount parity. Accounting,
 - Purchase requisitions, RFQs, quotation comparison, purchase returns, landed cost and three-way matching exceptions
 - Recurring invoices
 - Live bank feeds, reusable matching rules, controlled voucher creation and cash-flow forecast
-- Fixed-asset register, depreciation and disposal journals
 - Expense claims, approvals, attachments and payment runs
 - Serial-number tracking
 - Multi-company consolidation, intercompany journals and elimination entries

@@ -72,6 +72,7 @@ export type PeriodChecklistInput = {
   requiredBankAccounts: Array<{ code: string; name: string }>;
   reconciledBankCodes: string[];
   openBankReconciliationCount: number;
+  fixedAssetDueCount?: number;
 };
 
 export function buildPeriodChecklist(input: PeriodChecklistInput, currency: string) {
@@ -82,6 +83,7 @@ export function buildPeriodChecklist(input: PeriodChecklistInput, currency: stri
   if (currencyMinorUnits(input.totalDebit, currency) !== currencyMinorUnits(input.totalCredit, currency)) blockers.push("The period debit and credit totals do not agree.");
   if (input.openBankReconciliationCount) blockers.push(`${input.openBankReconciliationCount} overlapping bank reconciliation draft${input.openBankReconciliationCount === 1 ? " is" : "s are"} still open.`);
   if (missingBankAccounts.length) blockers.push(`Complete bank reconciliation for ${missingBankAccounts.map(account => `${account.code} · ${account.name}`).join(", ")}.`);
+  if (input.fixedAssetDueCount) blockers.push(`Post depreciation through this month for ${input.fixedAssetDueCount} fixed asset${input.fixedAssetDueCount === 1 ? "" : "s"}.`);
   return {
     journalCount: input.journalCount,
     totalDebit: roundCurrency(input.totalDebit, currency),
@@ -91,14 +93,16 @@ export function buildPeriodChecklist(input: PeriodChecklistInput, currency: stri
     reconciledBankAccountCount: input.requiredBankAccounts.length - missingBankAccounts.length,
     missingBankAccounts,
     openBankReconciliationCount: input.openBankReconciliationCount,
+    fixedAssetDueCount: input.fixedAssetDueCount || 0,
     blockers,
     ready: blockers.length === 0,
   };
 }
 
-export function accountingPeriodSnapshotChanged(snapshot: { journalCount?: unknown; totalDebit?: unknown; totalCredit?: unknown } | null | undefined, live: { journalCount: number; totalDebit: number; totalCredit: number }, currency: string) {
+export function accountingPeriodSnapshotChanged(snapshot: { journalCount?: unknown; totalDebit?: unknown; totalCredit?: unknown; fixedAssetDueCount?: unknown } | null | undefined, live: { journalCount: number; totalDebit: number; totalCredit: number; fixedAssetDueCount?: number }, currency: string) {
   if (!snapshot) return true;
   return Number(snapshot.journalCount || 0) !== live.journalCount
     || currencyMinorUnits(Number(snapshot.totalDebit || 0), currency) !== currencyMinorUnits(live.totalDebit, currency)
-    || currencyMinorUnits(Number(snapshot.totalCredit || 0), currency) !== currencyMinorUnits(live.totalCredit, currency);
+    || currencyMinorUnits(Number(snapshot.totalCredit || 0), currency) !== currencyMinorUnits(live.totalCredit, currency)
+    || Number(snapshot.fixedAssetDueCount || 0) !== Number(live.fixedAssetDueCount || 0);
 }

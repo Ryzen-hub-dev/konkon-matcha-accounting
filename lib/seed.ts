@@ -18,11 +18,14 @@ const chartOfAccounts = [
   ["1000", "Cash on hand", "ASSET"], ["1010", "Bank", "ASSET"],
   ["1200", "Inventory", "ASSET"], ["2000", "Accounts payable", "LIABILITY"],
   ["1300", "Input tax recoverable", "ASSET"],
+  ["1500", "Fixed assets at cost", "ASSET"], ["1510", "Accumulated depreciation", "ASSET"],
   ["2100", "Tax payable", "LIABILITY"],
   ["3000", "Owner's equity", "EQUITY"], ["4000", "Product sales", "REVENUE"],
   ["4100", "Foreign exchange gain", "REVENUE"],
+  ["4300", "Gain on asset disposal", "REVENUE"],
   ["5000", "Cost of goods sold", "EXPENSE"], ["5100", "Inventory write-off", "EXPENSE"], ["6100", "Operating expenses", "EXPENSE"],
   ["6200", "Foreign exchange loss", "EXPENSE"],
+  ["6300", "Depreciation expense", "EXPENSE"], ["6400", "Loss on asset disposal", "EXPENSE"],
 ];
 
 export async function seedWorkspace(db: Db, ownerId: unknown, businessName: string, seedProducts: boolean, session?: ClientSession, regional?: RegionalSettings) {

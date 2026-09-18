@@ -35,10 +35,10 @@ test("month-end checklist exposes journal and bank blockers", () => {
   const blocked = buildPeriodChecklist({
     journalCount: 12, totalDebit: 100, totalCredit: 99, unbalancedCount: 1,
     requiredBankAccounts: [{ code: "1010", name: "Bank" }, { code: "1020", name: "Savings" }],
-    reconciledBankCodes: ["1010"], openBankReconciliationCount: 1,
+    reconciledBankCodes: ["1010"], openBankReconciliationCount: 1, fixedAssetDueCount: 2,
   }, "MYR");
   assert.equal(blocked.ready, false);
-  assert.equal(blocked.blockers.length, 4);
+  assert.equal(blocked.blockers.length, 5);
   assert.deepEqual(blocked.missingBankAccounts, [{ code: "1020", name: "Savings" }]);
 
   const ready = buildPeriodChecklist({
@@ -47,6 +47,7 @@ test("month-end checklist exposes journal and bank blockers", () => {
     reconciledBankCodes: ["1010"], openBankReconciliationCount: 0,
   }, "MYR");
   assert.equal(ready.ready, true);
+  assert.equal(ready.fixedAssetDueCount, 0);
   assert.deepEqual(ready.blockers, []);
 });
 

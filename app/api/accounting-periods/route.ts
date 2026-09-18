@@ -10,6 +10,7 @@ import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { dateKeyInTimeZone } from "@/lib/dates";
 import { getDb, getMongoClient } from "@/lib/db";
 import { serialise } from "@/lib/format";
+import { fixedAssetDepreciationDue } from "@/lib/fixed-assets";
 import { hasPermission } from "@/lib/rbac";
 
 export const runtime = "nodejs";
@@ -31,7 +32,7 @@ async function checklistForPeriod(db: Db, periodKey: string, currency: string, t
     { projection: { code: 1, name: 1 }, ...options },
   ).toArray();
   const bankCodes = bankAccounts.map(account => String(account.code));
-  const [journalSummary, unbalancedCount, touchedBanks] = await Promise.all([
+  const [journalSummary, unbalancedCount, touchedBanks, fixedAssets] = await Promise.all([
     db.collection("journalEntries").aggregate([
       { $match: { status: "POSTED", date: { $gte: coarseStart, $lte: coarseEnd }, $expr: periodExpression } },
       { $group: { _id: null, journalCount: { $sum: 1 }, totalDebit: { $sum: "$totalDebit" }, totalCredit: { $sum: "$totalCredit" } } },
@@ -43,6 +44,10 @@ async function checklistForPeriod(db: Db, periodKey: string, currency: string, t
       { $match: { "lines.accountCode": { $in: bankCodes } } },
       { $group: { _id: "$lines.accountCode" } },
     ], options).toArray() : [],
+    db.collection("fixedAssets").find(
+      { status: { $in: ["ACTIVE", "FULLY_DEPRECIATED", "DISPOSED"] } },
+      { projection: { cost: 1, residualValue: 1, usefulLifeMonths: 1, accumulatedDepreciation: 1, inServiceDate: 1, lastDepreciationPeriod: 1, openingThroughPeriod: 1, status: 1, disposalPeriod: 1 }, ...options },
+    ).toArray(),
   ]);
   const touched = new Set(touchedBanks.map(row => String(row._id)));
   const requiredBankAccounts = bankAccounts.filter(account => touched.has(String(account.code))).map(account => ({ code: String(account.code), name: String(account.name) }));
@@ -65,6 +70,7 @@ async function checklistForPeriod(db: Db, periodKey: string, currency: string, t
     requiredBankAccounts,
     reconciledBankCodes: completed.map(item => String(item.accountCode)),
     openBankReconciliationCount: openCount,
+    fixedAssetDueCount: fixedAssets.filter(asset => fixedAssetDepreciationDue(asset as never, periodKey, currency)).length,
   }, currency);
 }
 
@@ -87,7 +93,7 @@ export async function GET() {
     ).toArray();
     const bankCodes = bankAccounts.map(account => String(account.code));
     const periodProjection = { $dateToString: { format: "%Y-%m", date: "$date", timezone: business.timeZone } };
-    const [journalStats, bankMovements, reconciliations] = await Promise.all([
+    const [journalStats, bankMovements, reconciliations, fixedAssets] = await Promise.all([
       db.collection("journalEntries").aggregate([
         { $match: { status: "POSTED", date: { $gte: earliest.start, $lte: latest.end } } },
         { $project: { periodKey: periodProjection, totalDebit: { $ifNull: ["$totalDebit", 0] }, totalCredit: { $ifNull: ["$totalCredit", 0] } } },
@@ -103,6 +109,10 @@ export async function GET() {
       db.collection("bankReconciliations").find({
         status: { $in: ["DRAFT", "COMPLETED"] }, statementStartDate: { $lte: latest.end }, statementDate: { $gte: earliest.start },
       }, { projection: { accountCode: 1, status: 1, statementStartDate: 1, statementDate: 1 } }).toArray(),
+      db.collection("fixedAssets").find(
+        { status: { $in: ["ACTIVE", "FULLY_DEPRECIATED", "DISPOSED"] } },
+        { projection: { cost: 1, residualValue: 1, usefulLifeMonths: 1, accumulatedDepreciation: 1, inServiceDate: 1, lastDepreciationPeriod: 1, openingThroughPeriod: 1, status: 1, disposalPeriod: 1 } },
+      ).toArray(),
     ]);
     const journalMap = new Map(journalStats.map(item => [String(item._id), item]));
     const touchedMap = new Map<string, Set<string>>();
@@ -128,6 +138,7 @@ export async function GET() {
         journalCount: Number(journal?.journalCount || 0), totalDebit: Number(journal?.totalDebit || 0), totalCredit: Number(journal?.totalCredit || 0),
         unbalancedCount: Number(journal?.unbalancedCount || 0), requiredBankAccounts,
         reconciledBankCodes: completedCodes, openBankReconciliationCount: openCount,
+        fixedAssetDueCount: fixedAssets.filter(asset => fixedAssetDepreciationDue(asset as never, periodKey, business.currency)).length,
       }, business.currency);
       return {
         ...(record || {}), periodKey, status: record?.status === "CLOSED" ? "CLOSED" : "OPEN",
