@@ -145,6 +145,12 @@ export async function PATCH(request: Request) {
 
         const timeZone = String(current.businessSnapshot?.timeZone || "UTC");
         const today = dateKeyInTimeZone(new Date(), timeZone);
+        if (input.action === "VOID" && current.deliveryOrderId) {
+          const deliveryOrder = await db.collection("deliveryOrders").findOne({ _id: current.deliveryOrderId }, { session });
+          if (deliveryOrder && deliveryOrder.status !== "CANCELLED") {
+            throw new QuotationWorkflowError("Cancel the linked delivery order before voiding this quotation.");
+          }
+        }
         assertQuotationAction(String(current.status), input.action, current.validUntil, today);
         if (input.action === "CONVERT") {
           const template = await db.collection("invoiceTemplates").findOne({ isDefault: true, active: { $ne: false } }, { session });
@@ -169,6 +175,16 @@ export async function PATCH(request: Request) {
             { returnDocument: "after", session },
           );
           if (!updated) throw new QuotationWorkflowError("This quotation changed. Refresh it before converting.");
+          if (current.deliveryOrderId) {
+            const linked = await db.collection("deliveryOrders").updateOne(
+              { _id: current.deliveryOrderId },
+              { $set: { sourceInvoiceId: invoice._id, sourceInvoiceNo: invoice.invoiceNo, linkedInvoiceAt: updatedAt } },
+              { session },
+            );
+            if (linked.matchedCount) {
+              await writeAudit(db, auth.session, "delivery_order.invoice_link", "deliveryOrder", current.deliveryOrderId.toHexString(), { deliveryOrderNo: current.deliveryOrderNo, invoiceNo: invoice.invoiceNo }, session);
+            }
+          }
           await writeAudit(db, auth.session, "quotation.convert", "quotation", input.id, { quotationNo: current.quotationNo, invoiceNo: invoice.invoiceNo }, session);
           await writeAudit(db, auth.session, "invoice.create", "invoice", invoice._id.toHexString(), { invoiceNo: invoice.invoiceNo, total: invoice.total, sourceQuoteNo: current.quotationNo }, session);
           return updated;

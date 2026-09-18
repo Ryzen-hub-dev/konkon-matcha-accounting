@@ -36,6 +36,7 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Supplier bills, partial/full settlement, duplicate-post protection and realised foreign-exchange gain/loss posting
 - Customer accounts with optional credit limits, default terms, explicit holds, server-enforced invoice exposure checks and chronological statements
 - Customer quotation drafts, printable snapshots, forward-only customer-decision states and one-time conversion of accepted terms into an invoice draft
+- Quote-linked customer delivery orders with destination, carrier and tracking details, forward-only operational states and printable full-delivery snapshots
 - Smart Replenishment recommendations using stock thresholds, 30-day demand, supplier lead time and open inbound quantities
 - Supply Pulse supplier-performance scoring using delivery punctuality and overdue commitments
 
@@ -68,7 +69,7 @@ This count is a delivery benchmark, not a claim of AutoCount parity. Accounting,
 ## Next accounting modules
 
 - Purchase requisitions, RFQs, quotation comparison, purchase returns, landed cost and three-way matching exceptions
-- Customer delivery orders and recurring invoices
+- Recurring invoices
 - Bank import/feed, reconciliation and cash-flow forecast
 - Fixed-asset register, depreciation and disposal journals
 - Expense claims, approvals, attachments and payment runs

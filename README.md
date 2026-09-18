@@ -92,6 +92,7 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 - Invoice register search and status filters, explicit sent/paid/void confirmations, safe copy-as-new-draft, and optimistic-concurrency editing for unpaid drafts. Retried creates carry an idempotency key; issued and paid documents remain immutable.
 - Customer-account credit limits, default terms and explicit credit holds. Invoices can be linked to a member account; the server rechecks live exposure when the draft is sent, serialises concurrent sends for the same customer, snapshots the decision and produces a chronological customer statement from issued invoices and recorded payments.
 - Controlled customer quotations with calendar-safe validity, immutable sent/accepted/rejected/void states, recorded acceptance evidence, printable snapshots and an idempotent accepted-quote conversion into one invoice draft. Recording “sent” does not email the customer, and recording “accepted” is not an electronic signature.
+- Quote-linked customer delivery orders with scheduled dates, destination/carrier/tracking details, printable item snapshots and forward-only draft/dispatched/delivered/cancelled evidence. Each accepted quotation produces at most one complete delivery order; dispatch does not deduct stock and delivered status is not independent proof of receipt.
 - Sales, margin, tender, inventory-value and receivable reports.
 
 ### Purchasing and accounts payable
@@ -124,7 +125,7 @@ Core endpoints:
 - `/api/scanner-sessions`, `/api/mobile-scans`, `/api/payment-display-sessions`, `/api/payment-display`
 - `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`, `/api/local-payment-events`
 - `/api/receipt-lookup`, `/api/public-receipts`, `/api/member-cards`, `/api/member-cards/lookup`
-- `/api/invoices`, `/api/invoice-templates`, `/api/customer-accounts`, `/api/quotations`, `/api/journals`, `/api/reports`, `/api/e-invoices`
+- `/api/invoices`, `/api/invoice-templates`, `/api/customer-accounts`, `/api/quotations`, `/api/delivery-orders`, `/api/journals`, `/api/reports`, `/api/e-invoices`
 - `/api/suppliers`, `/api/purchase-orders`, `/api/accounts-payable`
 - `/api/settings`, `/api/settings/history`, `/api/locations`, `/api/counters`, `/api/register-shifts`, `/api/maintenance`
 

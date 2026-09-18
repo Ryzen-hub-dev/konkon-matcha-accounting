@@ -81,4 +81,10 @@ Quotation drafts use the same server-side amount, currency precision and tax cal
 
 Only an accepted quotation can convert. Conversion runs in a MongoDB transaction, creates one invoice draft with the quoted currency/tax/line snapshots and default paper template, stores the source quotation reference on that invoice, and marks the quotation `CONVERTED`. A unique source-quotation index plus retry handling prevents duplicate invoices. Conversion does not post accounting or consume credit; the normal invoice credit check still runs when the resulting draft is marked `SENT`.
 
+## Customer delivery-order lifecycle
+
+An `ACCEPTED` or `CONVERTED` quotation can create one full delivery-order draft. Creation runs in a transaction, copies the customer, business and item snapshot, links the new record back to the quotation, and uses both a request key and a unique source-quotation index to make retries safe. The draft holds its own scheduled date, destination, contact, carrier, tracking reference and instructions; only those logistics fields remain editable.
+
+Delivery states move forward from `DRAFT` to `DISPATCHED` and `DELIVERED`, or from an open state to `CANCELLED`. Every transition requires an optimistic version and an operator note; delivery completion also records who the operator says received it. A linked open delivery order prevents its accepted source quotation from being voided. These records do not allocate batches, deduct stock, post accounting, record payment, send carrier instructions or independently prove dispatch or customer receipt. Partial deliveries, stock-affecting fulfilment and attachment-based proof remain later workflows.
+
 This is an operational accounting/POS foundation, not a claim of parity with every AutoCount edition. Payroll, bank feeds, Singapore InvoiceNow/Peppol submission, advanced purchasing documents, serial-number tracking, year-end closing and statutory tax filing require dedicated later modules and compliance review.
