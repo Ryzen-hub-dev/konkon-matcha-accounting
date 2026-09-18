@@ -5,6 +5,7 @@ import { isValidDateKey } from "@/lib/dates";
 import { currencyMinorUnits, roundCurrency } from "@/lib/international";
 
 export const EXPENSE_CATEGORIES = ["TRAVEL", "MEALS", "SUPPLIES", "UTILITIES", "MARKETING", "MAINTENANCE", "OTHER"] as const;
+export const MAX_EXPENSE_ATTACHMENTS = 10;
 const dateKeySchema = z.string().trim().refine(isValidDateKey, "Choose a valid expense date.");
 
 export const expenseClaimInputSchema = z.object({

@@ -1,6 +1,6 @@
 export const OPERATIONAL_LOG_DAYS = 90;
 export const EXPIRING_AUDIT_ACTIONS = [
-  "auth.login", "member.identity_lookup", "member_card.reveal", "einvoice.download",
+  "auth.login", "member.identity_lookup", "member_card.reveal", "einvoice.download", "expense_attachment.view", "expense_attachment.download",
   "scanner.issue", "scanner.route", "scanner.revoke", "scanner.binding_start", "scanner.binding_finish",
   "payment-display.issue", "payment-display.revoke",
 ];

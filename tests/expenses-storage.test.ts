@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
-import { expenseAmounts } from "../lib/expenses";
+import { expenseAmounts, MAX_EXPENSE_ATTACHMENTS } from "../lib/expenses";
 import { MAX_ATTACHMENT_BYTES, packLosslessPayload, unpackLosslessPayload } from "../lib/lossless-storage";
 import { encryptMemberToken } from "../lib/member-cards";
 import { packDocument, unpackDocument } from "../lib/document-storage";
@@ -11,6 +11,7 @@ import { staffScanToken } from "../lib/scan-codes";
 import { searchUsers } from "../lib/user-search";
 import { hasPermission } from "../lib/rbac";
 import { isWritePermission } from "../lib/system-control";
+import { attachmentContentDisposition, attachmentPreviewKind, safeAttachmentName } from "../lib/attachment-files";
 
 process.env.AUTH_SECRET ||= "test-only-auth-secret-that-is-longer-than-thirty-two-characters";
 
@@ -28,6 +29,17 @@ test("evidence compression preserves exact bytes and avoids expanding incompress
   assert.throws(() => unpackLosslessPayload(randomPacked.bytes, "expense-attachment:wrong"));
   assert.equal(MAX_ATTACHMENT_BYTES, 4 * 1024 * 1024);
   assert.throws(() => packLosslessPayload(Buffer.alloc(MAX_ATTACHMENT_BYTES + 1), "expense-attachment:too-large"), /4 MB/);
+});
+
+test("protected evidence selects safe previews and download headers", () => {
+  assert.equal(attachmentPreviewKind("image/jpeg"), "IMAGE");
+  assert.equal(attachmentPreviewKind("application/pdf"), "PDF");
+  assert.equal(attachmentPreviewKind("text/plain"), "TEXT");
+  assert.equal(attachmentPreviewKind("application/octet-stream"), "DOWNLOAD");
+  assert.equal(safeAttachmentName(" ../receipt\r\n.jpg "), "..-receipt.jpg");
+  assert.match(attachmentContentDisposition("收据 1.jpg", false), /^inline;/);
+  assert.match(attachmentContentDisposition("收据 1.jpg", true), /^attachment;/);
+  assert.match(attachmentContentDisposition("收据 1.jpg", true), /filename\*=UTF-8''/);
 });
 
 test("text documents use Brotli while legacy gzip documents remain readable", () => {
@@ -69,4 +81,5 @@ test("expense precision, role separation and read-only write classification are 
   assert.equal(hasPermission("ACCOUNTANT", "expenses.pay"), true);
   assert.equal(isWritePermission("expenses.submit"), true);
   assert.equal(isWritePermission("expenses.pay"), true);
+  assert.equal(MAX_EXPENSE_ATTACHMENTS, 10);
 });

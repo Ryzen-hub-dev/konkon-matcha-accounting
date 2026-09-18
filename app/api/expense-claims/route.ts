@@ -29,7 +29,7 @@ export async function GET() {
       hasPermission(auth.session.role, "expenses.pay") ? db.collection("chartOfAccounts").find({ type: "ASSET", active: { $ne: false }, $or: [{ cashEquivalent: true }, { code: { $in: ["1000", "1010"] } }] }).project({ code: 1, name: 1 }).sort({ code: 1 }).toArray() : [],
       getAttachmentStorageConfig(db),
     ]);
-    const attachments = claims.length ? await db.collection("expenseAttachments").find({ claimId: { $in: claims.map(claim => claim._id) } }, { projection: { claimId: 1, originalName: 1, mimeType: 1, originalSize: 1, storedSize: 1, encoding: 1, createdByName: 1, createdAt: 1 } }).sort({ createdAt: 1 }).toArray() : [];
+    const attachments = claims.length ? await db.collection("expenseAttachments").find({ claimId: { $in: claims.map(claim => claim._id) }, status: { $ne: "REMOVED" } }, { projection: { claimId: 1, originalName: 1, mimeType: 1, originalSize: 1, storedSize: 1, encoding: 1, createdByName: 1, createdAt: 1 } }).sort({ createdAt: 1 }).toArray() : [];
     return ok(serialise({ claims, attachments, expenseAccounts, paymentAccounts, storageConfigured: Boolean(storage), permissions: { approve: hasPermission(auth.session.role, "expenses.approve"), pay: hasPermission(auth.session.role, "expenses.pay"), ownerSelfReview: auth.session.role === "OWNER" } }));
   } catch (error) { return publicError(error); }
 }
