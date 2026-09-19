@@ -44,8 +44,8 @@ import {
 } from "../lib/payment-verification";
 import { locationParentChainIsValid } from "../lib/locations";
 import {
-  allocateSupplierPayment, approvalRequiresDifferentMaker, purchaseOrderInputSchema,
-  suggestedReorderAfterInbound, suggestedReorderQuantity, supplierInputSchema,
+  allocateSupplierPayment, approvalRequiresDifferentMaker, payableAge, purchaseOrderActionSchema, purchaseOrderInputSchema,
+  suggestedReorderAfterInbound, suggestedReorderQuantity, summarisePayableAging, supplierInputSchema,
   supplierPulse, weightedAverageInventoryCost,
 } from "../lib/procurement";
 import { dateKeyInTimeZone } from "../lib/dates";
@@ -221,6 +221,31 @@ test("purchase controls use business dates and maker-checker approval", () => {
   assert.equal(approvalRequiresDifferentMaker("MANAGER"), true);
   assert.equal(approvalRequiresDifferentMaker("ADMIN"), true);
   assert.equal(approvalRequiresDifferentMaker("OWNER"), false);
+  assert.equal(purchaseOrderActionSchema.safeParse({ id: "a".repeat(24), action: "CLOSE_SHORT", reason: "Supplier discontinued the balance" }).success, true);
+  assert.equal(purchaseOrderActionSchema.safeParse({ id: "a".repeat(24), action: "CLOSE_SHORT", reason: "" }).success, false);
+});
+
+test("payable aging uses calendar-day buckets and excludes settled balances", () => {
+  assert.deepEqual(payableAge("2026-09-19", "2026-09-19"), { dueDate: "2026-09-19", asOf: "2026-09-19", daysOverdue: 0, bucket: "CURRENT" });
+  assert.equal(payableAge("2026-08-20", "2026-09-19").bucket, "1_30");
+  assert.equal(payableAge("2026-08-19", "2026-09-19").bucket, "31_60");
+  assert.equal(payableAge("2026-06-21", "2026-09-19").bucket, "61_90");
+  assert.equal(payableAge("2026-06-20", "2026-09-19").bucket, "90_PLUS");
+  const summary = summarisePayableAging([
+    { dueDate: "2026-09-25", baseBalance: 100, status: "OPEN" },
+    { dueDate: "2026-09-01", baseBalance: 50.25, status: "PARTIALLY_PAID" },
+    { dueDate: "2026-06-01", baseBalance: 25, status: "OPEN" },
+    { dueDate: "2026-08-01", baseBalance: 0, status: "PAID" },
+  ], "2026-09-19");
+  assert.equal(summary.openBillCount, 3);
+  assert.equal(summary.totalBase, 175.25);
+  assert.equal(summary.overdueBase, 75.25);
+  assert.equal(summary.dueNext7DaysBase, 100);
+  assert.deepEqual(summary.buckets.CURRENT, { count: 1, baseAmount: 100 });
+  assert.deepEqual(summary.buckets["1_30"], { count: 1, baseAmount: 50.25 });
+  assert.deepEqual(summary.buckets["90_PLUS"], { count: 1, baseAmount: 25 });
+  const zeroDecimal = summarisePayableAging([{ dueDate: "2026-09-01", baseBalance: 10.6, status: "OPEN" }], "2026-09-19", "JPY");
+  assert.equal(zeroDecimal.totalBase, 11);
 });
 
 test("supplier Supply Pulse is deterministic and explains delivery risk", () => {

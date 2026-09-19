@@ -220,6 +220,19 @@ export async function PATCH(request: Request) {
       return ok(serialise(order));
     }
 
+    if (input.data.action === "CLOSE_SHORT") {
+      const now = new Date();
+      const order = await db.collection("purchaseOrders").findOneAndUpdate(
+        { _id: orderId, status: "PARTIALLY_RECEIVED" },
+        { $set: { status: "CLOSED_SHORT", shortClosedAt: now, shortClosedBy: new ObjectId(auth.session.id), shortClosedByName: auth.session.fullName, shortCloseReason: input.data.reason, updatedAt: now } },
+        { returnDocument: "after" },
+      );
+      if (!order) return fail("Only a partially received order with an outstanding balance can be closed short.", 409);
+      const outstandingUnits = order.items.reduce((sum: number, line: Record<string, unknown>) => sum + Math.max(0, Number(line.quantity || 0) - Number(line.receivedQuantity || 0)), 0);
+      await writeAudit(db, auth.session, "purchase_order.close_short", "purchaseOrder", input.data.id, { purchaseOrderNo: order.purchaseOrderNo, reason: input.data.reason, outstandingUnits });
+      return ok(serialise(order));
+    }
+
     if (input.data.action !== "RECEIVE") return fail("This purchase order action is unavailable.", 422);
     const receiveInput = input.data;
     const duplicate = await db.collection("goodsReceipts").findOne({ clientRequestId: receiveInput.clientRequestId });

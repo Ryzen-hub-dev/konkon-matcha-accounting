@@ -39,14 +39,15 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Multi-country headquarters, branch, warehouse and franchise hierarchy with cycle/archive safeguards
 - Administrator-defined payment methods with reference/provider controls, settlement currencies and ledger-account routing
 - Supplier master data with country/currency, commercial terms, archive/restore and protected historical references
-- Purchase order draft, maker-checker approval, cancellation, partial receiving and location/supplier/product/time-zone snapshots
+- Purchase order draft, maker-checker approval, cancellation, partial receiving, audited outstanding-balance short-close and location/supplier/product/time-zone snapshots
 - Transactional goods receipts that update stock, weighted-average cost, AP, input tax, journals and audit history together
-- Supplier bills, partial/full settlement, duplicate-post protection and realised foreign-exchange gain/loss posting
+- Supplier bills, base-currency AP aging buckets, seven-day maturity and supplier-exposure views, safe CSV export, partial/full settlement, duplicate-post protection and realised foreign-exchange gain/loss posting
 - Customer accounts with optional credit limits, default terms, explicit holds, server-enforced invoice exposure checks and chronological statements
 - Customer quotation drafts, printable snapshots, forward-only customer-decision states and one-time conversion of accepted terms into an invoice draft
 - Quote-linked customer delivery orders with destination, carrier and tracking details, forward-only operational states and printable full-delivery snapshots
 - Smart Replenishment recommendations using stock thresholds, 30-day demand, supplier lead time and open inbound quantities
 - Supply Pulse supplier-performance scoring using delivery punctuality and overdue commitments
+- Searchable and printable in-app bilingual learning centre plus complete standalone Chinese and English user manuals
 
 ## AutoCount comparison baseline (reviewed 22 August 2026)
 

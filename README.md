@@ -2,6 +2,8 @@
 
 A matcha-branded accounting, inventory, membership and point-of-sale workspace built for Kōn-Kōn Matchā. The production application is a Next.js App Router project backed by MongoDB Atlas and designed for Vercel serverless deployment.
 
+User training: [完整中文使用手册](docs/user-manual-zh.md) · [Complete English user manual](docs/user-manual-en.md). The signed-in workspace also includes a searchable, printable bilingual **Help & manual** centre.
+
 > This is an actively developed accounting platform, not yet a drop-in replacement for every AutoCount module. The repository clearly separates shipped, tested workflows from planned country-compliance modules so unfinished tax functionality is never presented as filing-ready.
 
 ## Shipped workflows
@@ -105,10 +107,11 @@ A matcha-branded accounting, inventory, membership and point-of-sale workspace b
 ### Purchasing and accounts payable
 
 - Auditable supplier master records with country, currency, tax/registration details, terms, lead time and archive/restore controls.
-- Draft, maker-checker approve, cancel and partially receive purchase orders with immutable supplier, product, location, time-zone, tax and exchange-rate snapshots.
+- Draft, maker-checker approve, cancel and partially receive purchase orders with immutable supplier, product, location, time-zone, tax and exchange-rate snapshots. A controlled short-close records why an outstanding balance will not be delivered without altering receipts already posted.
 - Atomic goods receipt posting: stock, weighted-average cost, stock movement, supplier bill, input tax, accounts payable, journal and audit event succeed or roll back together.
 - Duplicate-request and duplicate-supplier-invoice protection prevents double receipts, duplicate inventory and repeated payables.
 - Partial/full supplier settlement from approved cash/bank accounts with unique bank-reference protection, payment-time FX rates and automatic exchange-gain/loss journals.
+- Base-currency AP aging across Current, 1–30, 31–60, 61–90 and 90+ day buckets, with seven-day maturity visibility, supplier exposure and safe CSV export.
 - Smart Replenishment combines reorder thresholds, trailing 30-day unit demand and supplier lead time, then deducts quantities already inbound on open purchase orders.
 - Supply Pulse scores suppliers from actual on-time receipts, average lateness and overdue commitments.
 

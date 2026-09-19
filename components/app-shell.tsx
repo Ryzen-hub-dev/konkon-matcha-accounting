@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
-  ArrowLeftRight, BarChart3, BookOpen, Boxes, ChevronLeft, ChevronRight, CircleDollarSign,
+  ArrowLeftRight, BarChart3, BookOpen, Boxes, ChevronLeft, ChevronRight, CircleDollarSign, CircleHelp,
   CalendarClock, ClipboardList, FileSearch2, FileText, Landmark, Laptop, LayoutDashboard, LockKeyhole, LogOut, MapPinned, Menu, PackageCheck, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
   Store, Truck, Users, WalletCards, X, HandCoins, Target, Tags,
 } from "lucide-react";
@@ -41,6 +41,7 @@ const nav: NavItem[] = [
   { href: "/customers", label: "Customer accounts", icon: CircleDollarSign, permission: "invoices.read" },
   { href: "/reports", label: "Reports", icon: BarChart3, permission: "reports.read" },
   { href: "/reviews", label: "Exception reviews", icon: FileSearch2, permission: "reviews.read" },
+  { href: "/help", label: "Help & manual", icon: CircleHelp },
   { href: "/team", label: "Team & access", icon: Users, permission: "team.read" },
   { href: "/locations", label: "Locations & franchises", icon: MapPinned, permission: "settings.read" },
   { href: "/settings", label: "Workspace", icon: Settings, permission: "settings.read" },

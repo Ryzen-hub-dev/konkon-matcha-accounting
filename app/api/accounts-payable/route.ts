@@ -3,32 +3,63 @@ import { authorize, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
 import { AccountingPeriodClosedError } from "@/lib/accounting-periods";
 import { assertAccountingPeriodOpen } from "@/lib/accounting-period-lock";
+import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { getDb, getMongoClient } from "@/lib/db";
 import { dateKeyInTimeZone } from "@/lib/dates";
 import { readExchangeRate } from "@/lib/exchange-rates";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { currencyMinorUnits, roundCurrency } from "@/lib/international";
-import { allocateSupplierPayment, ensureProcurementAccounts, supplierPaymentSchema } from "@/lib/procurement";
+import { allocateSupplierPayment, ensureProcurementAccounts, payableAge, summarisePayableAging, supplierPaymentSchema } from "@/lib/procurement";
 
 export const runtime = "nodejs";
 
 class PayableConflictError extends Error {}
 
-export async function GET() {
+type PayableBillDocument = {
+  _id: ObjectId;
+  dueDate: Date | string;
+  status: string;
+  baseBalance: number;
+  supplierId: ObjectId;
+  supplierName: string;
+  [key: string]: unknown;
+};
+
+export async function GET(request: Request) {
   const auth = await authorize("payables.read");
   if (auth.error) return auth.error;
   try {
     const db = await getDb();
-    const [bills, payments, accounts] = await Promise.all([
+    const [bills, payments, accounts, settings] = await Promise.all([
       db.collection("accountsPayableBills").find({}).sort({ dueDate: 1, createdAt: -1 }).limit(500).toArray(),
       db.collection("supplierPayments").find({}).sort({ paidAt: -1 }).limit(300).toArray(),
       db.collection("chartOfAccounts").find({ type: "ASSET", active: { $ne: false }, $or: [{ cashEquivalent: true }, { code: { $in: ["1000", "1010"] } }] }).project({ code: 1, name: 1, type: 1 }).sort({ code: 1 }).toArray(),
+      db.collection("settings").findOne({ key: "business" }),
     ]);
-    const now = new Date();
+    const payableBills = bills as PayableBillDocument[];
+    const business = normaliseBusinessSettings(settings);
+    const requestedAsOf = new URL(request.url).searchParams.get("asOf") || dateKeyInTimeZone(new Date(), business.timeZone);
+    const parsedAsOf = new Date(`${requestedAsOf}T00:00:00.000Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedAsOf) || Number.isNaN(parsedAsOf.getTime()) || parsedAsOf.toISOString().slice(0, 10) !== requestedAsOf) return fail("Choose a valid accounts-payable ageing date.", 422);
+    const agedBills = payableBills.map((bill) => ({ ...bill, ...payableAge(bill.dueDate, requestedAsOf) }));
+    const aging = summarisePayableAging(payableBills, requestedAsOf, business.currency);
+    const supplierMap = new Map<string, { supplierId: unknown; supplierName: string; billCount: number; totalBase: number; overdueBase: number; oldestDaysOverdue: number }>();
+    for (const bill of agedBills) {
+      if (bill.status === "PAID" || Number(bill.baseBalance || 0) <= 0) continue;
+      const key = String(bill.supplierId);
+      const current = supplierMap.get(key) || { supplierId: bill.supplierId, supplierName: String(bill.supplierName || "Supplier"), billCount: 0, totalBase: 0, overdueBase: 0, oldestDaysOverdue: 0 };
+      current.billCount += 1;
+      current.totalBase = roundCurrency(current.totalBase + Number(bill.baseBalance || 0), business.currency);
+      if (bill.daysOverdue > 0) current.overdueBase = roundCurrency(current.overdueBase + Number(bill.baseBalance || 0), business.currency);
+      current.oldestDaysOverdue = Math.max(current.oldestDaysOverdue, bill.daysOverdue);
+      supplierMap.set(key, current);
+    }
     return ok(serialise({
-      bills: bills.map((bill) => ({ ...bill, displayStatus: bill.status !== "PAID" && new Date(bill.dueDate).toISOString().slice(0, 10) < dateKeyInTimeZone(now, String(bill.timeZone || "UTC")) ? "OVERDUE" : bill.status })),
+      bills: agedBills.map((bill) => ({ ...bill, displayStatus: bill.status !== "PAID" && bill.daysOverdue > 0 ? "OVERDUE" : bill.status })),
       payments,
       accounts,
+      aging,
+      supplierAging: [...supplierMap.values()].sort((left, right) => right.overdueBase - left.overdueBase || right.totalBase - left.totalBase || left.supplierName.localeCompare(right.supplierName)),
     }));
   } catch (error) { return publicError(error); }
 }

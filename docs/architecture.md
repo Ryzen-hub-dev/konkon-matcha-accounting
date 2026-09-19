@@ -65,7 +65,7 @@ A sale never trusts product prices from the browser. The API reloads products, c
 - Settling a supplier bill debits Accounts payable and credits an approved cash/bank account; payment-time currency differences post to realised exchange gain or loss.
 - Posted journals are append-only through the UI. Corrections should use a reversing journal.
 
-Goods receipt, stock costing, AP bill creation and the receipt journal share one MongoDB transaction. Supplier payment, bill balance and its settlement journal share another. Stable client request IDs and unique supplier invoice numbers make retries idempotent.
+Goods receipt, stock costing, AP bill creation and the receipt journal share one MongoDB transaction. Supplier payment, bill balance and its settlement journal share another. Stable client request IDs and unique supplier invoice numbers make retries idempotent. A partially received purchase order may be explicitly short-closed with an audited reason; this changes only the remaining commitment state and never rewrites posted receipts, bills, stock or journals. AP aging is a read-time base-currency management view over open bill balances, not settlement evidence.
 
 ## Expense claims and private evidence
 

@@ -51,6 +51,7 @@ const actionBase = z.object({ id: z.string().length(24) });
 export const purchaseOrderActionSchema = z.discriminatedUnion("action", [
   actionBase.extend({ action: z.literal("APPROVE") }),
   actionBase.extend({ action: z.literal("CANCEL"), reason: z.string().trim().min(3).max(200) }),
+  actionBase.extend({ action: z.literal("CLOSE_SHORT"), reason: z.string().trim().min(3).max(200) }),
   actionBase.extend({
     action: z.literal("RECEIVE"),
     clientRequestId: z.string().uuid(),
@@ -69,6 +70,68 @@ export const purchaseOrderActionSchema = z.discriminatedUnion("action", [
     if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", path: ["lines"], message: "Each received product can appear only once." });
   }),
 ]);
+
+export const PAYABLE_AGING_BUCKETS = ["CURRENT", "1_30", "31_60", "61_90", "90_PLUS"] as const;
+export type PayableAgingBucket = (typeof PAYABLE_AGING_BUCKETS)[number];
+
+function dateKey(value: unknown) {
+  const date = value instanceof Date ? value : new Date(value as string | number);
+  if (Number.isNaN(date.getTime())) throw new Error("A valid payable date is required.");
+  return date.toISOString().slice(0, 10);
+}
+
+export function payableAge(dueDateValue: unknown, asOfValue: unknown = new Date()) {
+  const dueDate = dateKey(dueDateValue);
+  const asOf = dateKey(asOfValue);
+  const daysOverdue = Math.floor((Date.parse(`${asOf}T00:00:00.000Z`) - Date.parse(`${dueDate}T00:00:00.000Z`)) / 86_400_000);
+  const bucket: PayableAgingBucket = daysOverdue <= 0
+    ? "CURRENT"
+    : daysOverdue <= 30
+      ? "1_30"
+      : daysOverdue <= 60
+        ? "31_60"
+        : daysOverdue <= 90
+          ? "61_90"
+          : "90_PLUS";
+  return { dueDate, asOf, daysOverdue: Math.max(0, daysOverdue), bucket };
+}
+
+type PayableForAging = {
+  dueDate: unknown;
+  baseBalance?: unknown;
+  status?: unknown;
+};
+
+export function summarisePayableAging(bills: PayableForAging[], asOfValue: unknown = new Date(), currency = "SGD") {
+  const asOf = dateKey(asOfValue);
+  const emptyBucket = () => ({ count: 0, baseAmount: 0 });
+  const buckets: Record<PayableAgingBucket, { count: number; baseAmount: number }> = {
+    CURRENT: emptyBucket(),
+    "1_30": emptyBucket(),
+    "31_60": emptyBucket(),
+    "61_90": emptyBucket(),
+    "90_PLUS": emptyBucket(),
+  };
+  let totalBase = 0;
+  let overdueBase = 0;
+  let dueNext7DaysBase = 0;
+  let openBillCount = 0;
+
+  for (const bill of bills) {
+    const baseBalance = Math.max(0, Number(bill.baseBalance || 0));
+    if (!baseBalance || bill.status === "PAID") continue;
+    const age = payableAge(bill.dueDate, asOf);
+    buckets[age.bucket].count += 1;
+    buckets[age.bucket].baseAmount = roundCurrency(buckets[age.bucket].baseAmount + baseBalance, currency);
+    totalBase = roundCurrency(totalBase + baseBalance, currency);
+    openBillCount += 1;
+    if (age.daysOverdue > 0) overdueBase = roundCurrency(overdueBase + baseBalance, currency);
+    const daysUntilDue = Math.floor((Date.parse(`${age.dueDate}T00:00:00.000Z`) - Date.parse(`${asOf}T00:00:00.000Z`)) / 86_400_000);
+    if (daysUntilDue >= 0 && daysUntilDue <= 7) dueNext7DaysBase = roundCurrency(dueNext7DaysBase + baseBalance, currency);
+  }
+
+  return { asOf, openBillCount, totalBase, overdueBase, dueNext7DaysBase, buckets };
+}
 
 export const supplierPaymentSchema = z.object({
   id: z.string().length(24),

@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
+  Download,
   Factory,
   FilePlus2,
   PackageCheck,
@@ -31,6 +32,7 @@ import {
   useNotice,
 } from "@/components/ui";
 import { dateKeyInTimeZone } from "@/lib/dates";
+import { csvCell, downloadReceiptFile } from "@/lib/receipt-export";
 import {
   COUNTRY_PROFILES,
   CURRENCY_OPTIONS,
@@ -150,6 +152,8 @@ type Bill = {
   baseBalance: number;
   status: string;
   displayStatus: string;
+  daysOverdue: number;
+  bucket: "CURRENT" | "1_30" | "31_60" | "61_90" | "90_PLUS";
 };
 type Payment = {
   _id: string;
@@ -165,6 +169,22 @@ type PayablesBundle = {
   bills: Bill[];
   payments: Payment[];
   accounts: Account[];
+  aging: {
+    asOf: string;
+    openBillCount: number;
+    totalBase: number;
+    overdueBase: number;
+    dueNext7DaysBase: number;
+    buckets: Record<Bill["bucket"], { count: number; baseAmount: number }>;
+  };
+  supplierAging: Array<{
+    supplierId: string;
+    supplierName: string;
+    billCount: number;
+    totalBase: number;
+    overdueBase: number;
+    oldestDaysOverdue: number;
+  }>;
 };
 type ExchangeData = {
   baseCurrency: string;
@@ -216,6 +236,21 @@ export function ProcurementView({
     bills: [],
     payments: [],
     accounts: [],
+    aging: {
+      asOf: isoDate(profile.timeZone),
+      openBillCount: 0,
+      totalBase: 0,
+      overdueBase: 0,
+      dueNext7DaysBase: 0,
+      buckets: {
+        CURRENT: { count: 0, baseAmount: 0 },
+        "1_30": { count: 0, baseAmount: 0 },
+        "31_60": { count: 0, baseAmount: 0 },
+        "61_90": { count: 0, baseAmount: 0 },
+        "90_PLUS": { count: 0, baseAmount: 0 },
+      },
+    },
+    supplierAging: [],
   });
   const [exchange, setExchange] = useState<ExchangeData>({
     baseCurrency: profile.currency,
@@ -566,13 +601,15 @@ export function ProcurementView({
 
   async function orderAction(
     order: PurchaseOrder,
-    action: "APPROVE" | "CANCEL",
+    action: "APPROVE" | "CANCEL" | "CLOSE_SHORT",
   ) {
     const reason =
-      action === "CANCEL"
-        ? window.prompt("Reason for cancelling this purchase order:")?.trim()
+      action === "CANCEL" || action === "CLOSE_SHORT"
+        ? window.prompt(action === "CLOSE_SHORT"
+            ? "Reason for closing the unreceived balance:"
+            : "Reason for cancelling this purchase order:")?.trim()
         : "";
-    if (action === "CANCEL" && !reason) return;
+    if ((action === "CANCEL" || action === "CLOSE_SHORT") && !reason) return;
     try {
       await apiRequest("/api/purchase-orders", {
         method: "PATCH",
@@ -585,7 +622,9 @@ export function ProcurementView({
       show(
         action === "APPROVE"
           ? "Purchase order approved for receiving."
-          : "Purchase order cancelled.",
+          : action === "CLOSE_SHORT"
+            ? "Outstanding quantities closed with a permanent audit reason."
+            : "Purchase order cancelled.",
       );
       await load(false);
     } catch (reasonValue) {
@@ -685,6 +724,17 @@ export function ProcurementView({
     } finally {
       setBusy(false);
     }
+  }
+
+  function exportPayableAging() {
+    const rows = [
+      ["As of", "Bill", "Purchase order", "Supplier", "Supplier invoice", "Invoice date", "Due date", "Currency", "Original total", "Open balance", `Open balance (${profile.currency})`, "Days overdue", "Age bucket", "Status"],
+      ...payables.bills
+        .filter((bill) => bill.status !== "PAID" && Number(bill.baseBalance || 0) > 0)
+        .map((bill) => [payables.aging.asOf, bill.billNo, bill.purchaseOrderNo, bill.supplierName, bill.supplierInvoiceNo, bill.invoiceDate.slice(0, 10), bill.dueDate.slice(0, 10), bill.currency, bill.total, bill.balance, bill.baseBalance, bill.daysOverdue, bill.bucket, bill.displayStatus]),
+    ];
+    const csv = `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}`;
+    downloadReceiptFile(csv, "text/csv;charset=utf-8", `accounts-payable-aging-${payables.aging.asOf}.csv`);
   }
 
   return (
@@ -928,6 +978,15 @@ export function ProcurementView({
                               Receive delivery
                             </button>
                           ) : null}
+                          {canWrite && order.status === "PARTIALLY_RECEIVED" ? (
+                            <button
+                              className="button button-quiet"
+                              onClick={() => void orderAction(order, "CLOSE_SHORT")}
+                            >
+                              <XCircle size={15} />
+                              Close remainder
+                            </button>
+                          ) : null}
                         </div>
                       </footer>
                     </div>
@@ -1079,9 +1138,30 @@ export function ProcurementView({
               <span className="eyebrow">ACCOUNTS PAYABLE</span>
               <h2>Supplier bills</h2>
             </div>
-            <span className="panel-note">
-              BASE OUTSTANDING · {money.format(outstandingBase)}
-            </span>
+            <button className="button button-secondary" onClick={exportPayableAging} disabled={!payables.aging.openBillCount}>
+              <Download size={15} />
+              Export aging CSV
+            </button>
+          </div>
+          <div className="payable-aging-summary" aria-label={`Accounts payable aging as of ${payables.aging.asOf}`}>
+            {([
+              ["CURRENT", "Current"],
+              ["1_30", "1–30 days"],
+              ["31_60", "31–60 days"],
+              ["61_90", "61–90 days"],
+              ["90_PLUS", "Over 90 days"],
+            ] as const).map(([key, label]) => (
+              <article key={key} className={key !== "CURRENT" && payables.aging.buckets[key].baseAmount ? "overdue" : ""}>
+                <span>{label}</span>
+                <strong>{money.format(payables.aging.buckets[key].baseAmount)}</strong>
+                <small>{payables.aging.buckets[key].count} open bill{payables.aging.buckets[key].count === 1 ? "" : "s"}</small>
+              </article>
+            ))}
+          </div>
+          <div className="payable-aging-meta">
+            <span>As of <strong>{payables.aging.asOf}</strong></span>
+            <span>Due in the next 7 days <strong>{money.format(payables.aging.dueNext7DaysBase)}</strong></span>
+            <span>Overdue exposure <strong>{money.format(payables.aging.overdueBase)}</strong></span>
           </div>
           {payables.bills.length ? (
             <div className="payable-list">
@@ -1122,6 +1202,7 @@ export function ProcurementView({
                   </div>
                   <div className="payable-action">
                     <StatusPill value={bill.displayStatus} />
+                    {bill.daysOverdue > 0 ? <small>{bill.daysOverdue}d overdue</small> : null}
                     {canPay && bill.status !== "PAID" ? (
                       <button
                         className="button button-secondary"
@@ -1141,6 +1222,18 @@ export function ProcurementView({
               detail="Bills are created automatically when an approved purchase order is received."
             />
           )}
+          {payables.supplierAging.length ? (
+            <div className="supplier-aging-list">
+              <span className="eyebrow">SUPPLIER EXPOSURE</span>
+              {payables.supplierAging.slice(0, 8).map((supplier) => (
+                <div key={supplier.supplierId}>
+                  <span><strong>{supplier.supplierName}</strong><small>{supplier.billCount} open bill{supplier.billCount === 1 ? "" : "s"}{supplier.oldestDaysOverdue ? ` · oldest ${supplier.oldestDaysOverdue}d overdue` : ""}</small></span>
+                  <span><small>Total</small><strong>{money.format(supplier.totalBase)}</strong></span>
+                  <span className={supplier.overdueBase ? "danger-text" : ""}><small>Overdue</small><strong>{money.format(supplier.overdueBase)}</strong></span>
+                </div>
+              ))}
+            </div>
+          ) : null}
           {payables.payments.length ? (
             <div className="recent-supplier-payments">
               <span className="eyebrow">RECENT PAYMENTS</span>
