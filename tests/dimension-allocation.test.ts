@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ObjectId } from "mongodb";
-import { applyDimensionAllocation, dimensionRuleAuditId, dimensionRuleCreateSchema, dimensionRuleUpdateSchema, type ResolvedDimensionAllocation } from "../lib/dimension-allocation";
+import { applyDimensionAllocation, dimensionRuleAuditId, dimensionRuleCreateSchema, dimensionRuleUpdateSchema, normaliseDimensionRuleMatchKey, type ResolvedDimensionAllocation } from "../lib/dimension-allocation";
 
 test("allocation rules require an exact source target and at least one dimension", () => {
   const costCentreId = new ObjectId().toHexString();
@@ -84,4 +84,10 @@ test("journals remain unchanged when no active allocation rule resolves", () => 
   const lines = [{ accountCode: "6000", debit: 25, credit: 0 }];
   assert.equal(applyDimensionAllocation(lines, null), lines);
   assert.equal(dimensionRuleAuditId(null), "");
+});
+
+test("rule match keys canonicalize accounts and ObjectIds before uniqueness locking", () => {
+  const locationId = new ObjectId();
+  assert.equal(normaliseDimensionRuleMatchKey("EXPENSE_ACCOUNT", " 6000a "), "6000A");
+  assert.equal(normaliseDimensionRuleMatchKey("POS_LOCATION", locationId.toHexString().toUpperCase()), locationId.toHexString());
 });

@@ -55,6 +55,11 @@ export type ResolvedDimensionAllocation = {
 };
 export type AllocatedJournalLine<T> = T & { costCentre?: DimensionSnapshot; project?: DimensionSnapshot; dimensionRule?: ResolvedDimensionAllocation["rule"]; dimensionSplit?: { percentage: number; index: number; count: number } };
 
+export function normaliseDimensionRuleMatchKey(source: DimensionRuleSource, value: string) {
+  const trimmed = value.trim();
+  return source === "EXPENSE_ACCOUNT" ? trimmed.toUpperCase() : ObjectId.isValid(trimmed) ? new ObjectId(trimmed).toHexString() : trimmed;
+}
+
 export async function resolveDimensionAllocation(
   db: Db,
   source: DimensionRuleSource,

@@ -1,19 +1,16 @@
 import { ObjectId, type ClientSession, type Db } from "mongodb";
 import { authorize, created, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { writeAudit } from "@/lib/audit";
-import { dimensionRuleCreateSchema, dimensionRuleUpdateSchema, effectiveRuleAllocations, type DimensionRuleSource } from "@/lib/dimension-allocation";
+import { dimensionRuleCreateSchema, dimensionRuleUpdateSchema, effectiveRuleAllocations, normaliseDimensionRuleMatchKey, type DimensionRuleSource } from "@/lib/dimension-allocation";
 import { getDb, getMongoClient } from "@/lib/db";
 import { serialise } from "@/lib/format";
 import { hasPermission } from "@/lib/rbac";
+import { businessKeyLockId, touchBusinessKeyLock } from "@/lib/business-key-lock";
 
 export const runtime = "nodejs";
 
 class DimensionRuleConflictError extends Error {}
 class DimensionRuleValidationError extends Error {}
-
-function normaliseMatchKey(source: DimensionRuleSource, value: string) {
-  return source === "EXPENSE_ACCOUNT" ? value.trim().toUpperCase() : value.trim();
-}
 
 async function resolveTarget(db: Db, source: DimensionRuleSource, matchKey: string, session?: ClientSession) {
   if (source === "EXPENSE_ACCOUNT") {
@@ -96,10 +93,14 @@ export async function POST(request: Request) {
     const parsed = dimensionRuleCreateSchema.safeParse(body);
     if (!parsed.success) return fail("Check the allocation rule.", 422, parsed.error.flatten().fieldErrors);
     const db = await getDb(), client = await getMongoClient(), session = client.startSession();
-    const _id = new ObjectId(), now = new Date(), matchKey = normaliseMatchKey(parsed.data.source, parsed.data.matchKey);
+    const _id = new ObjectId(), now = new Date(), matchKey = normaliseDimensionRuleMatchKey(parsed.data.source, parsed.data.matchKey);
     let document: Record<string, any> = {};
     try {
       await session.withTransaction(async () => {
+        await touchBusinessKeyLock(db, businessKeyLockId("DIMENSION_RULE", parsed.data.source, matchKey), session, now);
+        if (await db.collection("dimensionAllocationRules").findOne({ source: parsed.data.source, matchKey }, { projection: { _id: 1 }, session })) {
+          throw new DimensionRuleConflictError("An allocation rule already exists for this source and target.");
+        }
         const requestedAllocations = effectiveRuleAllocations(parsed.data);
         const [target, allocations] = await Promise.all([
           resolveTarget(db, parsed.data.source, matchKey, session),
@@ -116,6 +117,7 @@ export async function POST(request: Request) {
     } finally { await session.endSession(); }
     return created(serialise(safeRule({ _id, ...document })));
   } catch (error) {
+    if (error instanceof DimensionRuleConflictError) return fail(error.message, 409);
     if (error instanceof DimensionRuleValidationError) return fail(error.message, 422);
     if ((error as { code?: number }).code === 11000) return fail("An allocation rule already exists for this source and target.", 409);
     return publicError(error);

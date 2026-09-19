@@ -8,6 +8,7 @@ import { getDb, getMongoClient } from "@/lib/db";
 import { serialise } from "@/lib/format";
 import { roundCurrency } from "@/lib/international";
 import { hasPermission } from "@/lib/rbac";
+import { businessKeyLockId, touchBusinessKeyLock } from "@/lib/business-key-lock";
 
 export const runtime = "nodejs";
 type BudgetLine = { accountCode: string; accountName: string; accountType: BudgetAccountType; monthly: number[] };
@@ -102,20 +103,27 @@ export async function POST(request: Request) {
     const settings = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
     const currentYear = Number(dateKeyInTimeZone(new Date(), settings.timeZone).slice(0, 4));
     if (parsed.data.year < currentYear - 5 || parsed.data.year > currentYear + 10) return fail("Choose a budget year within five years back or ten years ahead.", 422);
-    const existingDraft = await db.collection("budgetPlans").findOne({ year: parsed.data.year, status: "DRAFT" });
-    if (existingDraft) return ok(serialise(safeBudgetPlan(existingDraft)));
-    const [latest, approved, accounts] = await Promise.all([
-      db.collection("budgetPlans").find({ year: parsed.data.year }).sort({ revision: -1 }).limit(1).next(),
-      db.collection("budgetPlans").findOne({ year: parsed.data.year, status: "APPROVED" }),
-      db.collection("chartOfAccounts").find({ type: { $in: ["REVENUE", "EXPENSE"] }, active: { $ne: false } }).project({ code: 1, name: 1, type: 1 }).sort({ type: 1, code: 1 }).toArray(),
-    ]);
-    const approvedMap = new Map<string, BudgetLine>((Array.isArray(approved?.lines) ? approved.lines : []).map((line: BudgetLine) => [String(line.accountCode), line]));
-    const lines = accounts.map(account => ({ accountCode: String(account.code), accountName: String(account.name), accountType: String(account.type), monthly: approvedMap.get(String(account.code))?.monthly?.map(Number) || Array(12).fill(0) }));
-    const now = new Date(), revision = Number(latest?.revision || 0) + 1;
-    const document = { year: parsed.data.year, revision, name: `${parsed.data.year} operating budget`, notes: approved ? `Revision ${revision} copied from approved revision ${approved.revision}.` : "", currency: settings.currency, timeZone: settings.timeZone, status: "DRAFT", activeSlot: "DRAFT", version: 1, lines, createdBy: new ObjectId(auth.session.id), createdByName: auth.session.fullName, createdAt: now, updatedAt: now, history: [{ action: "CREATED", by: new ObjectId(auth.session.id), byName: auth.session.fullName, at: now }] };
-    const result = await db.collection("budgetPlans").insertOne(document);
-    await writeAudit(db, auth.session, "budget.create", "budgetPlan", result.insertedId.toHexString(), { year: document.year, revision });
-    return created(serialise(safeBudgetPlan({ _id: result.insertedId, ...document })));
+    const client = await getMongoClient(), session = client.startSession(), now = new Date();
+    let plan: Record<string, any> | null = null, existing = false;
+    try {
+      await session.withTransaction(async () => {
+        await touchBusinessKeyLock(db, businessKeyLockId("BUDGET_YEAR", parsed.data.year), session, now);
+        const existingDraft = await db.collection("budgetPlans").findOne({ year: parsed.data.year, status: "DRAFT" }, { session });
+        if (existingDraft) { plan = existingDraft; existing = true; return; }
+        const [latest, approved, accounts] = await Promise.all([
+          db.collection("budgetPlans").find({ year: parsed.data.year }, { session }).sort({ revision: -1 }).limit(1).next(),
+          db.collection("budgetPlans").findOne({ year: parsed.data.year, status: "APPROVED" }, { session }),
+          db.collection("chartOfAccounts").find({ type: { $in: ["REVENUE", "EXPENSE"] }, active: { $ne: false } }, { session }).project({ code: 1, name: 1, type: 1 }).sort({ type: 1, code: 1 }).toArray(),
+        ]);
+        const approvedMap = new Map<string, BudgetLine>((Array.isArray(approved?.lines) ? approved.lines : []).map((line: BudgetLine) => [String(line.accountCode), line]));
+        const lines = accounts.map(account => ({ accountCode: String(account.code), accountName: String(account.name), accountType: String(account.type), monthly: approvedMap.get(String(account.code))?.monthly?.map(Number) || Array(12).fill(0) }));
+        const revision = Number(latest?.revision || 0) + 1, _id = new ObjectId();
+        plan = { _id, year: parsed.data.year, revision, name: `${parsed.data.year} operating budget`, notes: approved ? `Revision ${revision} copied from approved revision ${approved.revision}.` : "", currency: settings.currency, timeZone: settings.timeZone, status: "DRAFT", activeSlot: "DRAFT", version: 1, lines, createdBy: new ObjectId(auth.session.id), createdByName: auth.session.fullName, createdAt: now, updatedAt: now, history: [{ action: "CREATED", by: new ObjectId(auth.session.id), byName: auth.session.fullName, at: now }] };
+        await db.collection("budgetPlans").insertOne(plan, { session });
+        await writeAudit(db, auth.session, "budget.create", "budgetPlan", _id.toHexString(), { year: parsed.data.year, revision }, session);
+      });
+    } finally { await session.endSession(); }
+    return existing ? ok(serialise(safeBudgetPlan(plan))) : created(serialise(safeBudgetPlan(plan)));
   } catch (error) {
     if ((error as { code?: number }).code === 11000) return fail("A draft already exists for this budget year. Reload the page.", 409);
     return publicError(error);
@@ -161,6 +169,7 @@ export async function PATCH(request: Request) {
       await session.withTransaction(async () => {
         const plan = await db.collection("budgetPlans").findOne({ _id: id, status: "DRAFT", version: approval.expectedVersion }, { session });
         if (!plan) throw new BudgetConflictError("The budget draft changed or is no longer awaiting approval.");
+        await touchBusinessKeyLock(db, businessKeyLockId("BUDGET_YEAR", Number(plan.year)), session, now);
         const hasBudget = Array.isArray(plan.lines) && plan.lines.some((line: BudgetLine) => line.monthly.some(value => Number(value) > 0));
         if (!hasBudget) throw new BudgetConflictError("Enter at least one budget amount before approval.");
         const prior = await db.collection("budgetPlans").findOne({ year: plan.year, status: "APPROVED", _id: { $ne: id } }, { session });

@@ -7,6 +7,7 @@ import { dateKeyInTimeZone, isValidDateKey, journalReportDateExpression, shiftDa
 import { getDb, getMongoClient } from "@/lib/db";
 import { serialise } from "@/lib/format";
 import { hasPermission } from "@/lib/rbac";
+import { businessKeyLockId, touchBusinessKeyLock } from "@/lib/business-key-lock";
 
 export const runtime = "nodejs";
 
@@ -123,12 +124,17 @@ export async function POST(request: Request) {
     const document = { ...parsed.data, active: true, version: 1, createdAt: now, updatedAt: now, createdBy: new ObjectId(auth.session.id), updatedBy: new ObjectId(auth.session.id) };
     try {
       await session.withTransaction(async () => {
+        await touchBusinessKeyLock(db, businessKeyLockId("ACCOUNTING_DIMENSION", document.type, document.code), session, now);
+        if (await db.collection("accountingDimensions").findOne({ type: document.type, code: document.code }, { projection: { _id: 1 }, session })) {
+          throw new DimensionConflictError("That code already exists for this dimension type.");
+        }
         await db.collection("accountingDimensions").insertOne({ _id, ...document }, { session });
         await writeAudit(db, auth.session, "accounting-dimension.create", "accountingDimension", _id.toHexString(), { type: document.type, code: document.code, name: document.name }, session);
       });
     } finally { await session.endSession(); }
     return created(serialise(safeDimension({ _id, ...document })));
   } catch (error) {
+    if (error instanceof DimensionConflictError) return fail(error.message, 409);
     if ((error as { code?: number }).code === 11000) return fail("That code already exists for this dimension type.", 409);
     return publicError(error);
   }
