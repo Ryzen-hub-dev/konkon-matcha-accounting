@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isValidDateKey } from "@/lib/dates";
+import { documentDimensionSelectionSchema } from "@/lib/dimension-selection";
 import { currencyFractionDigits, roundCurrency } from "@/lib/international";
 import { calculateTaxTotals, type TaxMode } from "@/lib/tax";
 
@@ -22,6 +23,7 @@ const invoiceFieldsSchema = z.object({
   dueDate: invoiceDueDateSchema,
   notes: z.string().trim().max(500),
   templateId: z.union([objectIdSchema, z.literal("")]),
+  dimensionSelection: documentDimensionSelectionSchema.optional(),
   items: z.array(z.object({
     description: z.string().trim().min(2).max(160),
     quantity: z.coerce.number().positive().max(100_000),
@@ -37,6 +39,7 @@ export const invoiceInputSchema = invoiceFieldsSchema.extend({
   customerReference: invoiceFieldsSchema.shape.customerReference.default(""),
   notes: invoiceFieldsSchema.shape.notes.default(""),
   templateId: invoiceFieldsSchema.shape.templateId.default(""),
+  dimensionSelection: documentDimensionSelectionSchema,
   clientRequestId: z.string().uuid().optional(),
 });
 

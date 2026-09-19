@@ -8,6 +8,7 @@ import { makeDocumentNo, serialise } from "@/lib/format";
 import { DEFAULT_INVOICE_TEMPLATE, normaliseInvoiceTemplate } from "@/lib/invoice-templates";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { evaluateCustomerCredit } from "@/lib/customer-accounts";
+import { applyDocumentDimensions, DimensionSelectionError, resolveDocumentDimensionSelection } from "@/lib/dimension-selection";
 import { roundCurrency } from "@/lib/international";
 import { dateKeyInTimeZone } from "@/lib/dates";
 import {
@@ -71,6 +72,7 @@ export async function POST(request: Request) {
         const defaultTemplate = requestedTemplate || await db.collection("invoiceTemplates").findOne({ isDefault: true, active: { $ne: false } }, { session: mongoSession });
         const templateSnapshot = normaliseInvoiceTemplate(defaultTemplate || DEFAULT_INVOICE_TEMPLATE);
         const now = new Date();
+        const dimensionSelection = await resolveDocumentDimensionSelection(db, input.data.dimensionSelection, member, mongoSession, now);
         const document = {
           _id: new ObjectId(),
           invoiceNo: makeDocumentNo("INV"),
@@ -86,6 +88,7 @@ export async function POST(request: Request) {
           templateId: defaultTemplate?._id || null,
           templateName: templateSnapshot.name,
           templateSnapshot,
+          dimensionSelection,
           businessSnapshot: {
             businessName: business.businessName, legalEntityName: business.legalEntityName,
             registrationNo: business.registrationNo, email: business.email, phone: business.phone,
@@ -99,7 +102,7 @@ export async function POST(request: Request) {
           createdBy: new ObjectId(auth.session.id), createdAt: now, updatedAt: now,
         };
         await db.collection("invoices").insertOne(document, { session: mongoSession });
-        await writeAudit(db, auth.session, "invoice.create", "invoice", document._id.toHexString(), { invoiceNo: document.invoiceNo, total: document.total, memberNo: member?.memberNo || null }, mongoSession);
+        await writeAudit(db, auth.session, "invoice.create", "invoice", document._id.toHexString(), { invoiceNo: document.invoiceNo, total: document.total, memberNo: member?.memberNo || null, dimensionMode: dimensionSelection.mode, costCentreCode: dimensionSelection.costCentre?.code || "", projectCode: dimensionSelection.project?.code || "" }, mongoSession);
         return { invoice: document, isNew: true };
       });
       return result.isNew ? created(serialise(result.invoice)) : ok(serialise(result.invoice));
@@ -113,6 +116,7 @@ export async function POST(request: Request) {
       } catch (lookupError) { return publicError(lookupError); }
     }
     if (error instanceof InvoiceWorkflowError) return fail(error.message, error.status);
+    if (error instanceof DimensionSelectionError) return fail(error.message, 422);
     return publicError(error);
   }
 }
@@ -149,11 +153,14 @@ export async function PATCH(request: Request) {
             ? await db.collection("members").findOne({ _id: new ObjectId(input.memberId), active: { $ne: false } }, { session: mongoSession })
             : null;
           if (input.memberId && !member) throw new InvoiceWorkflowError("Choose an active customer account.", 422);
+          const dimensionSelection = input.dimensionSelection
+            ? await resolveDocumentDimensionSelection(db, input.dimensionSelection, member, mongoSession, updatedAt)
+            : current.dimensionSelection || { mode: "NONE", source: "EXPLICIT_NONE", resolvedAt: updatedAt };
           const changes: Record<string, unknown> = {
             customerName: input.customerName, customerEmail: input.customerEmail,
             customerPhone: input.customerPhone, customerAddress: input.customerAddress,
             customerReference: input.customerReference, dueDate: input.dueDate, notes: input.notes,
-            ...amounts, updatedAt,
+            dimensionSelection, ...amounts, updatedAt,
           };
           if (input.memberId !== undefined) {
             changes.memberId = member?._id || null;
@@ -175,6 +182,7 @@ export async function PATCH(request: Request) {
           await writeAudit(db, auth.session, "invoice.edit", "invoice", input.id, {
             invoiceNo: current.invoiceNo, previousTotal: current.total, total: amounts.total,
             previousUpdatedAt: current.updatedAt, templateChanged: "templateSnapshot" in changes,
+            dimensionMode: dimensionSelection.mode, costCentreCode: dimensionSelection.costCentre?.code || "", projectCode: dimensionSelection.project?.code || "",
           }, mongoSession);
           return updated;
         }
@@ -234,15 +242,15 @@ export async function PATCH(request: Request) {
           await db.collection("journalEntries").insertOne({
             entryNo: makeDocumentNo("JE"), date: updatedAt, businessDate: postingDateKey, timeZone: postingTimeZone, memo: "Invoice payment " + current.invoiceNo,
             reference: current.invoiceNo, source: "INVOICE", status: "POSTED",
-            lines: [
+            lines: applyDocumentDimensions([
               { accountCode: "1010", accountName: "Bank", debit: current.total, credit: 0 },
               { accountCode: "4000", accountName: "Product sales", debit: 0, credit: Number(current.netSales ?? roundCurrency(Number(current.total) - tax, currency)) },
               ...(tax > 0 ? [{ accountCode: "2100", accountName: "Tax payable", debit: 0, credit: tax }] : []),
-            ],
+            ], current.dimensionSelection),
             totalDebit: current.total, totalCredit: current.total,
             createdBy: new ObjectId(auth.session.id), createdAt: updatedAt,
           }, { session: mongoSession });
-          await writeAudit(db, auth.session, "invoice.paid", "invoice", input.id, { invoiceNo: current.invoiceNo, total: current.total }, mongoSession);
+          await writeAudit(db, auth.session, "invoice.paid", "invoice", input.id, { invoiceNo: current.invoiceNo, total: current.total, dimensionMode: current.dimensionSelection?.mode || "LEGACY_NONE", costCentreCode: current.dimensionSelection?.costCentre?.code || "", projectCode: current.dimensionSelection?.project?.code || "" }, mongoSession);
         } else {
           await writeAudit(db, auth.session, "invoice.status", "invoice", input.id, {
             previousStatus: current.status,
@@ -257,6 +265,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     if (error instanceof AccountingPeriodClosedError) return fail(error.message, error.status);
     if (error instanceof InvoiceWorkflowError) return fail(error.message, error.status);
+    if (error instanceof DimensionSelectionError) return fail(error.message, 422);
     return publicError(error);
   }
 }

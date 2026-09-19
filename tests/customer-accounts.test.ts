@@ -28,6 +28,8 @@ test("credit-control updates require an optimistic version and a reason", () => 
   };
   assert.equal(customerAccountUpdateSchema.safeParse(valid).success, true);
   assert.equal(customerAccountUpdateSchema.safeParse({ ...valid, creditLimit: null }).success, true);
+  assert.equal(customerAccountUpdateSchema.parse(valid).dimensionDefaults, undefined);
+  assert.equal(customerAccountUpdateSchema.safeParse({ ...valid, dimensionDefaults: { costCentreId: "invalid", projectId: "" } }).success, false);
   assert.equal(customerAccountUpdateSchema.safeParse({ ...valid, reason: "" }).success, false);
   assert.equal(customerAccountUpdateSchema.safeParse({ ...valid, creditTermsDays: 366 }).success, false);
   assert.equal(customerAccountUpdateSchema.safeParse({ ...valid, expectedUpdatedAt: "2026-09-18" }).success, false);

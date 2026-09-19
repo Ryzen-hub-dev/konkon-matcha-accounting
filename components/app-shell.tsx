@@ -6,7 +6,7 @@ import { useState } from "react";
 import {
   ArrowLeftRight, BarChart3, BookOpen, Boxes, ChevronLeft, ChevronRight, CircleDollarSign,
   CalendarClock, ClipboardList, FileSearch2, FileText, Landmark, Laptop, LayoutDashboard, LockKeyhole, LogOut, MapPinned, Menu, PackageCheck, ReceiptText, Settings, ShoppingBasket, Sprout, TicketPercent,
-  Store, Truck, Users, WalletCards, X, HandCoins,
+  Store, Truck, Users, WalletCards, X, HandCoins, Target, Tags,
 } from "lucide-react";
 import type { SessionUser } from "@/lib/types";
 import { BusinessProvider } from "@/components/business-context";
@@ -32,6 +32,8 @@ const nav: NavItem[] = [
   { href: "/accounting", label: "Accounting", icon: BookOpen, permission: "accounting.read" },
   { href: "/bank-reconciliation", label: "Bank reconciliation", icon: Landmark, permission: "accounting.read" },
   { href: "/fixed-assets", label: "Fixed assets", icon: Laptop, permission: "accounting.read" },
+  { href: "/budgets", label: "Budgets & variance", icon: Target, permission: "budgets.read" },
+  { href: "/dimensions", label: "Cost centres & projects", icon: Tags, permission: "reports.read" },
   { href: "/period-close", label: "Month-end close", icon: LockKeyhole, permission: "accounting.read" },
   { href: "/quotations", label: "Quotations", icon: ClipboardList, permission: "invoices.read" },
   { href: "/delivery-orders", label: "Delivery orders", icon: Truck, permission: "invoices.read" },

@@ -18,7 +18,7 @@ type IndexMigrationRecord = {
 
 // Bump this value whenever the index definitions below change. The durable marker
 // prevents every new Vercel function instance from re-checking the full index set.
-export const INDEX_SCHEMA_VERSION = "indexes-2026-09-18-v8";
+export const INDEX_SCHEMA_VERSION = "indexes-2026-09-19-v11";
 
 const mongoCache = globalThis as typeof globalThis & { __konkonMongo?: MongoCache };
 
@@ -228,6 +228,12 @@ async function initializeIndexes(db: Db) {
     db.collection("journalEntries").createIndex({ entryNo: 1 }, { unique: true }),
     db.collection("journalEntries").createIndex({ status: 1, date: 1 }),
     db.collection("journalEntries").createIndex({ "lines.accountCode": 1, status: 1, date: 1 }),
+    db.collection("journalEntries").createIndex({ "lines.costCentre.code": 1, status: 1, date: 1 }),
+    db.collection("journalEntries").createIndex({ "lines.project.code": 1, status: 1, date: 1 }),
+    db.collection("accountingDimensions").createIndex({ type: 1, code: 1 }, { unique: true }),
+    db.collection("accountingDimensions").createIndex({ type: 1, active: 1, code: 1 }),
+    db.collection("dimensionAllocationRules").createIndex({ source: 1, matchKey: 1 }, { unique: true }),
+    db.collection("dimensionAllocationRules").createIndex({ active: 1, source: 1, updatedAt: -1 }),
     db.collection("accountingPeriods").createIndex({ periodKey: 1 }, { unique: true }),
     db.collection("accountingPeriods").createIndex({ status: 1, periodKey: -1 }),
     db.collection("fixedAssets").createIndex({ assetNo: 1 }, { unique: true }),
@@ -249,6 +255,9 @@ async function initializeIndexes(db: Db) {
     db.collection("expensePayments").createIndex({ paymentNo: 1 }, { unique: true }),
     db.collection("expensePayments").createIndex({ clientRequestId: 1 }, { unique: true }),
     db.collection("expensePayments").createIndex({ claimId: 1 }, { unique: true }),
+    db.collection("budgetPlans").createIndex({ year: 1, revision: 1 }, { unique: true }),
+    db.collection("budgetPlans").createIndex({ year: 1, status: 1, revision: -1 }),
+    db.collection("budgetPlans").createIndex({ year: 1, activeSlot: 1 }, { unique: true, partialFilterExpression: { activeSlot: { $type: "string" } } }),
     db.collection("bankReconciliations").createIndex({ reconciliationNo: 1 }, { unique: true }),
     ensureStableOptionalStringUniqueIndex(db, "bankReconciliations", "clientRequestId"),
     db.collection("bankReconciliations").createIndex({ accountCode: 1, statementDate: -1, status: 1 }),

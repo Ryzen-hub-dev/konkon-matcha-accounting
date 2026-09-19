@@ -8,6 +8,7 @@ import { roundCurrency } from "@/lib/international";
 import { serialise } from "@/lib/format";
 import { assessInventoryAdjustment, writeOperationalReview } from "@/lib/operational-reviews";
 import { dateKeyInTimeZone } from "@/lib/dates";
+import { DimensionSelectionError, dimensionDefaultsSchema, resolveDimensionPair } from "@/lib/dimension-selection";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,7 @@ const productSchema = z.object({
   cost: z.coerce.number().min(0).max(1_000_000),
   stock: z.coerce.number().int().min(0).max(10_000_000),
   reorderLevel: z.coerce.number().int().min(0).max(1_000_000),
+  dimensionDefaults: dimensionDefaultsSchema,
 });
 
 const adjustmentSchema = z.object({
@@ -42,6 +44,7 @@ const productUpdateSchema = z.object({
   price: productSchema.shape.price.optional(),
   cost: productSchema.shape.cost.optional(),
   reorderLevel: productSchema.shape.reorderLevel.optional(),
+  dimensionDefaults: dimensionDefaultsSchema.optional(),
   restore: z.boolean().optional(),
 }).refine((value) => value.restore || Object.keys(value).some((key) => key !== "id"));
 
@@ -118,9 +121,11 @@ export async function POST(request: Request) {
     const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
     const money = (value: unknown) => roundCurrency(value, business.currency);
     const now = new Date();
-    const { barcode, ...productData } = input.data;
+    const { barcode, dimensionDefaults: requestedDimensions, ...productData } = input.data;
+    const dimensionDefaults = await resolveDimensionPair(db, requestedDimensions);
     const document = {
       ...productData,
+      dimensionDefaults,
       sku: input.data.sku.toUpperCase(),
       ...(barcode ? { barcode: normaliseBarcode(barcode) } : {}),
       price: money(input.data.price),
@@ -136,9 +141,10 @@ export async function POST(request: Request) {
       quantity: document.stock, type: "OPENING", reason: "Opening balance",
       createdBy: new ObjectId(auth.session.id), createdAt: now,
     });
-    await writeAudit(db, auth.session, "product.create", "product", result.insertedId.toHexString(), { sku: document.sku });
+    await writeAudit(db, auth.session, "product.create", "product", result.insertedId.toHexString(), { sku: document.sku, costCentreCode: dimensionDefaults.costCentre?.code || "", projectCode: dimensionDefaults.project?.code || "" });
     return created(serialise({ _id: result.insertedId, ...document }));
   } catch (error) {
+    if (error instanceof DimensionSelectionError) return fail(error.message, 422);
     if ((error as { code?: number }).code === 11000) return fail("A product with this SKU or barcode already exists.", 409);
     return publicError(error);
   }
@@ -157,9 +163,11 @@ export async function PATCH(request: Request) {
       const db = await getDb();
       const business = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
       const money = (value: unknown) => roundCurrency(value, business.currency);
-      const { id, restore, barcode, ...changes } = update.data;
+      const { id, restore, barcode, dimensionDefaults: requestedDimensions, ...changes } = update.data;
+      const dimensionDefaults = requestedDimensions === undefined ? undefined : await resolveDimensionPair(db, requestedDimensions);
       const set = {
         ...changes,
+        ...(dimensionDefaults !== undefined ? { dimensionDefaults } : {}),
         ...(changes.sku ? { sku: changes.sku.toUpperCase() } : {}),
         ...(barcode ? { barcode: normaliseBarcode(barcode) } : {}),
         ...(changes.price !== undefined ? { price: money(changes.price) } : {}),
@@ -175,7 +183,7 @@ export async function PATCH(request: Request) {
         { returnDocument: "after" },
       );
       if (!product) return fail("The product no longer exists or is already in that state.", 404);
-      await writeAudit(db, auth.session, restore ? "product.restore" : "product.update", "product", id, { fields: [...Object.keys(changes), ...(barcode !== undefined ? ["barcode"] : [])] });
+      await writeAudit(db, auth.session, restore ? "product.restore" : "product.update", "product", id, { fields: [...Object.keys(changes), ...(barcode !== undefined ? ["barcode"] : []), ...(dimensionDefaults !== undefined ? ["dimensionDefaults"] : [])], costCentreCode: dimensionDefaults?.costCentre?.code || "", projectCode: dimensionDefaults?.project?.code || "" });
       return ok(serialise(product));
     }
     const input = adjustment;
@@ -241,6 +249,7 @@ export async function PATCH(request: Request) {
     }
     return ok(serialise(product));
   } catch (error) {
+    if (error instanceof DimensionSelectionError) return fail(error.message, 422);
     if (error instanceof InventoryAdjustmentError) return fail(error.message, 409);
     if ((error as { code?: number }).code === 11000) return fail("A product with this SKU or barcode already exists.", 409);
     return publicError(error);

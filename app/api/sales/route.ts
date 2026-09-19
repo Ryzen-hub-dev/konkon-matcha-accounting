@@ -21,6 +21,9 @@ import { hasPermission } from "@/lib/rbac";
 import { assessManualDiscount, writeOperationalReview } from "@/lib/operational-reviews";
 import { dateKeyInTimeZone } from "@/lib/dates";
 import { BatchInventoryError, consumeInventoryBatches, type InventoryBatchAllocation } from "@/lib/inventory-batches";
+import { dimensionRuleAuditId, resolveDimensionAllocation } from "@/lib/dimension-allocation";
+import { DimensionSelectionError, resolveProductDimensionSelections, type DocumentDimensionSelection } from "@/lib/dimension-selection";
+import { allocateSaleItemFinancials, buildClassifiedPosJournalLines } from "@/lib/pos-accounting";
 
 export const runtime = "nodejs";
 
@@ -145,7 +148,7 @@ export async function POST(request: Request) {
     const products = await db.collection("products").find({ _id: { $in: ids }, active: { $ne: false } }).toArray();
     if (products.length !== ids.length) return fail("One or more products are no longer available.", 409);
     const productMap = new Map(products.map((product) => [product._id.toHexString(), product]));
-    const items = [...quantities.entries()].map(([productId, quantity]) => {
+    const baseItems = [...quantities.entries()].map(([productId, quantity]) => {
       const product = productMap.get(productId)!;
       const price = money(product.price);
       const cost = money(product.cost);
@@ -161,7 +164,7 @@ export async function POST(request: Request) {
         batchAllocations: [] as InventoryBatchAllocation[],
       };
     });
-    const subtotal = money(items.reduce((sum, item) => sum + item.lineTotal, 0));
+    const subtotal = money(baseItems.reduce((sum, item) => sum + item.lineTotal, 0));
     const manualDiscount = money(input.data.manualDiscount ?? input.data.discount ?? 0);
     if (manualDiscount > 0 && !hasPermission(auth.session.role, "coupons.manage")) {
       return fail("A Manager must approve a manual discount. Use an active coupon instead.", 403);
@@ -185,6 +188,8 @@ export async function POST(request: Request) {
     if (discount > subtotal) return fail("Combined discounts cannot exceed the subtotal.", 422);
     const taxMode = business.taxMode;
     const { taxRate, tax, netSales, total } = calculateTaxTotals(subtotal, discount, business.taxRate, taxMode, business.currency);
+    const items = allocateSaleItemFinancials(baseItems, { discount, netSales, tax, total, taxMode }, business.currency)
+      .map(item => ({ ...item } as typeof item & { dimensionSelection?: DocumentDimensionSelection }));
     const tenderCurrency = input.data.tenderCurrency || business.currency;
     if (!paymentCurrencies(selectedPayment, business.currency, business.acceptedCurrencies).includes(tenderCurrency)) return fail("This payment method does not accept the selected currency.", 422);
     const exchange = await readExchangeRate(db, business.currency, tenderCurrency);
@@ -302,6 +307,14 @@ export async function POST(request: Request) {
     try {
       await mongoSession.withTransaction(async () => {
         await assertAccountingPeriodOpen(db, businessDate, mongoSession);
+        const dimensionAllocation = await resolveDimensionAllocation(db, "POS_LOCATION", counterLocation._id.toHexString(), mongoSession);
+        const postingProducts = await db.collection("products").find({ _id: { $in: ids }, active: { $ne: false } }, { session: mongoSession }).project({ name: 1, dimensionDefaults: 1 }).toArray();
+        if (postingProducts.length !== ids.length) throw new StockError("One or more products became unavailable before checkout.");
+        const productDimensionSelections = await resolveProductDimensionSelections(db, postingProducts as Array<{ _id: ObjectId; name?: unknown; dimensionDefaults?: { costCentre?: { id?: unknown }; project?: { id?: unknown } } }>, mongoSession, now);
+        for (const item of items) {
+          const selection = productDimensionSelections.get(String(item.productId));
+          if (selection) item.dimensionSelection = selection;
+        }
         if (openShift) {
           const activeShift = await db.collection("registerShifts").updateOne(
             { _id: openShift._id, counterId: counter._id, status: "OPEN" },
@@ -401,7 +414,7 @@ export async function POST(request: Request) {
             createdAt: now,
           }, { session: mongoSession });
         }
-        await db.collection("sales").insertOne(sale, { session: mongoSession });
+        await db.collection("sales").insertOne({ ...sale, ...(dimensionAllocation ? { dimensionAllocation } : {}) }, { session: mongoSession });
         await writeOperationalReview(db, assessManualDiscount({ subtotal, manualDiscount }), {
           sourceType: "sale",
           sourceId: saleId.toHexString(),
@@ -419,10 +432,6 @@ export async function POST(request: Request) {
           );
         }
         const paymentAccount = [String(selectedPayment.accountCode), String(selectedPayment.accountName)];
-        const revenueLines = [
-          { accountCode: "4000", accountName: "Product sales", debit: 0, credit: netSales },
-          ...(tax > 0 ? [{ accountCode: "2100", accountName: "Tax payable", debit: 0, credit: tax }] : []),
-        ];
         await db.collection("journalEntries").insertOne({
           entryNo: journalNo,
           date: now,
@@ -435,18 +444,21 @@ export async function POST(request: Request) {
           locationId: counterLocation._id,
           ...(openShift ? { shiftId: openShift._id } : {}),
           status: "POSTED",
-          lines: [
-            { accountCode: paymentAccount[0], accountName: paymentAccount[1], debit: total, credit: 0 },
-            ...revenueLines,
-            { accountCode: "5000", accountName: "Cost of goods sold", debit: totalCost, credit: 0 },
-            { accountCode: "1200", accountName: "Inventory", debit: 0, credit: totalCost },
-          ],
+          lines: buildClassifiedPosJournalLines({
+            kind: "SALE",
+            currency: business.currency,
+            total,
+            tax,
+            paymentAccount: { code: paymentAccount[0], name: paymentAccount[1] },
+            items,
+            fallbackAllocation: dimensionAllocation,
+          }),
           totalDebit: money(total + totalCost),
           totalCredit: money(total + totalCost),
           createdBy: new ObjectId(auth.session.id),
           createdAt: now,
         }, { session: mongoSession });
-        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, counterCode: counter.code, locationId: counterLocation._id.toHexString(), shiftNo: openShift?.shiftNo || "", total, currency: business.currency, tenderCurrency, tenderTotal, exchangeRate: exchange.rate, verificationMode, manualPaymentConfirmed: verificationMode === "STATIC_QR", itemCount: items.length, couponCode: couponResult?.coupon.code || "", manualDiscount }, mongoSession);
+        await writeAudit(db, auth.session, "sale.complete", "sale", saleId.toHexString(), { receiptNo, counterCode: counter.code, locationId: counterLocation._id.toHexString(), shiftNo: openShift?.shiftNo || "", total, currency: business.currency, tenderCurrency, tenderTotal, exchangeRate: exchange.rate, verificationMode, manualPaymentConfirmed: verificationMode === "STATIC_QR", itemCount: items.length, productDimensionCount: productDimensionSelections.size, couponCode: couponResult?.coupon.code || "", manualDiscount, dimensionRuleId: dimensionRuleAuditId(dimensionAllocation) }, mongoSession);
       });
     } finally {
       await mongoSession.endSession();
@@ -454,7 +466,7 @@ export async function POST(request: Request) {
     return created(saleResponse(sale, request));
   } catch (error) {
     if (error instanceof AccountingPeriodClosedError) return fail(error.message, error.status);
-    if (error instanceof StockError || error instanceof CouponError || error instanceof PaymentError || error instanceof ShiftError || error instanceof BatchInventoryError) return fail(error.message, 409);
+    if (error instanceof StockError || error instanceof CouponError || error instanceof PaymentError || error instanceof ShiftError || error instanceof BatchInventoryError || error instanceof DimensionSelectionError) return fail(error.message, 409);
     if ((error as { code?: number; keyPattern?: Record<string, number> }).code === 11000 && (error as { keyPattern?: Record<string, number> }).keyPattern?.paymentReferenceNormalized) return fail("This static QR transaction reference was already used. Verify the receiving account and enter the reference for this payment.", 409);
     if ((error as { code?: number }).code === 11000 && clientRequestId) {
       const db = await getDb();

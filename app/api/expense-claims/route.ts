@@ -12,6 +12,7 @@ import { prepareJournalAmounts } from "@/lib/journals";
 import { hasPermission } from "@/lib/rbac";
 import { getAttachmentStorageConfig } from "@/lib/attachment-storage";
 import { ensureProcurementAccounts } from "@/lib/procurement";
+import { applyDimensionAllocation, dimensionRuleAuditId, resolveDimensionAllocation } from "@/lib/dimension-allocation";
 
 export const runtime = "nodejs";
 class ExpenseConflictError extends Error {}
@@ -125,13 +126,15 @@ export async function PATCH(request: Request) {
           ...(Number(claim.taxAmount) > 0 ? [{ accountCode: "1300", accountName: String(taxAccount?.name), debit: Number(claim.taxAmount), credit: 0 }] : []),
           { accountCode: String(paymentAccount.code), accountName: String(paymentAccount.name), debit: 0, credit: Number(claim.amount) },
         ], String(claim.currency));
+        const dimensionAllocation = await resolveDimensionAllocation(db, "EXPENSE_ACCOUNT", String(claim.expenseAccountCode), session);
+        const allocatedJournal = { ...journal, lines: applyDimensionAllocation(journal.lines, dimensionAllocation, String(claim.currency)) };
         const paymentId = new ObjectId(), paymentNo = makeDocumentNo("EPM"), entryNo = makeDocumentNo("JE");
         const updated = await db.collection("expenseClaims").findOneAndUpdate({ _id: claimId, status: "APPROVED" }, { $set: { status: "PAID", paidAt: now, paymentDate: input.paymentDate, paymentNo, paymentReference: input.reference, paidBy: new ObjectId(auth.session.id), paidByName: auth.session.fullName, updatedAt: now, history: [...(Array.isArray(claim.history) ? claim.history : []), { action: "PAID", by: new ObjectId(auth.session.id), byName: auth.session.fullName, note: input.note, at: now }] } }, { returnDocument: "after", session });
         if (!updated) throw new ExpenseConflictError("The claim changed while payment was posting.");
-        const payment = { _id: paymentId, clientRequestId: input.clientRequestId, paymentNo, claimId, claimNo: claim.claimNo, claimantId: claim.claimantId, claimantName: claim.claimantName, amount: claim.amount, currency: claim.currency, paymentDate: input.paymentDate, paymentAccountCode: paymentAccount.code, paymentAccountName: paymentAccount.name, reference: input.reference, note: input.note, journalEntryNo: entryNo, createdBy: new ObjectId(auth.session.id), createdByName: auth.session.fullName, createdAt: now };
+        const payment = { _id: paymentId, clientRequestId: input.clientRequestId, paymentNo, claimId, claimNo: claim.claimNo, claimantId: claim.claimantId, claimantName: claim.claimantName, amount: claim.amount, currency: claim.currency, paymentDate: input.paymentDate, paymentAccountCode: paymentAccount.code, paymentAccountName: paymentAccount.name, reference: input.reference, note: input.note, journalEntryNo: entryNo, ...(dimensionAllocation ? { dimensionAllocation } : {}), createdBy: new ObjectId(auth.session.id), createdByName: auth.session.fullName, createdAt: now };
         await db.collection("expensePayments").insertOne(payment, { session });
-        await db.collection("journalEntries").insertOne({ entryNo, date: new Date(`${input.paymentDate}T00:00:00.000Z`), businessDate: input.paymentDate, timeZone: business.timeZone, memo: `Expense payment ${paymentNo} · ${claim.claimantName}`, reference: input.reference, source: "EXPENSE_PAYMENT", sourceId: paymentId, status: "POSTED", ...journal, createdBy: new ObjectId(auth.session.id), createdAt: now }, { session });
-        await writeAudit(db, auth.session, "expense_claim.pay", "expenseClaim", input.id, { claimNo: claim.claimNo, paymentNo, amount: claim.amount, entryNo, reference: input.reference }, session);
+        await db.collection("journalEntries").insertOne({ entryNo, date: new Date(`${input.paymentDate}T00:00:00.000Z`), businessDate: input.paymentDate, timeZone: business.timeZone, memo: `Expense payment ${paymentNo} · ${claim.claimantName}`, reference: input.reference, source: "EXPENSE_PAYMENT", sourceId: paymentId, status: "POSTED", ...allocatedJournal, createdBy: new ObjectId(auth.session.id), createdAt: now }, { session });
+        await writeAudit(db, auth.session, "expense_claim.pay", "expenseClaim", input.id, { claimNo: claim.claimNo, paymentNo, amount: claim.amount, entryNo, reference: input.reference, dimensionRuleId: dimensionRuleAuditId(dimensionAllocation) }, session);
         result = { claim: updated, payment };
       });
     } finally { await session.endSession(); }

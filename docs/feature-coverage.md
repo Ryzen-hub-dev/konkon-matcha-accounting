@@ -21,6 +21,8 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Local CSV bank-statement import, confirmed matching to posted ledger lines, zero-difference completion and immutable prior/current uncleared-item working papers
 - Month-end integrity/bank checklist, immutable close evidence, direct-ledger drift warning and transactional back-date locks across every journal-posting workflow
 - Fixed-asset register, cash/bank acquisition posting, register-only migration evidence, exact straight-line monthly depreciation, disposal gain/loss journals and month-close depreciation blockers
+- Versioned annual revenue/expense budgets, monthly account plans, Owner-only approval locks and posted-journal YTD favourable/unfavourable variance
+- Cost-centre/project masters, immutable manual and automatic journal-line snapshots, audited POS-location/expense-account/purchase-location rules with exact percentage splits and deterministic minor-unit rounding, customer-account invoice defaults, invoice inherit/override/unassigned controls, product-level POS defaults, per-item discount/tax snapshots, exact partial-refund classification reversal, quotation-conversion snapshots, archive-safe history and posted-ledger profit/coverage reporting with visible unassigned activity
 - Employee expense drafts with sequential multi-file evidence, audited pre-submission removal, mandatory active evidence, maker-checker approval/rejection and approved cash/bank payment journals with accounting-period locks
 - Owner-only private GitHub evidence repository configuration, encrypted token storage, exact-byte lossless compression/encryption/checksum verification, authenticated image/PDF/text previews with HEIC/HEIF fallback, and server-authorized original downloads
 - Reusable staff fuzzy search with renewable non-authenticating QR/NFC lookup credentials for user-selection workflows
@@ -81,7 +83,7 @@ This count is a delivery benchmark, not a claim of AutoCount parity. Accounting,
 - Serial-number tracking
 - Multi-company consolidation, intercompany journals and elimination entries
 - Payroll, leave, statutory contribution and employee self-service
-- Budgeting, dimensions/cost centres, projects and variance reporting
+- Overrides on additional non-invoice document types and balance-sheet tracking reports
 - Year-end adjustment workflow, retained-earnings transfer and accountant close pack
 
 ## Country packs

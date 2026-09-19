@@ -4,6 +4,7 @@ import { writeAudit } from "@/lib/audit";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { dateKeyInTimeZone } from "@/lib/dates";
 import { getDb, getMongoClient } from "@/lib/db";
+import { DimensionSelectionError, resolveDocumentDimensionSelection } from "@/lib/dimension-selection";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { DEFAULT_INVOICE_TEMPLATE, normaliseInvoiceTemplate } from "@/lib/invoice-templates";
 import { calculateInvoiceAmounts } from "@/lib/invoices";
@@ -153,8 +154,12 @@ export async function PATCH(request: Request) {
         }
         assertQuotationAction(String(current.status), input.action, current.validUntil, today);
         if (input.action === "CONVERT") {
-          const template = await db.collection("invoiceTemplates").findOne({ isDefault: true, active: { $ne: false } }, { session });
+          const [template, member] = await Promise.all([
+            db.collection("invoiceTemplates").findOne({ isDefault: true, active: { $ne: false } }, { session }),
+            current.memberId ? db.collection("members").findOne({ _id: current.memberId, active: { $ne: false } }, { session }) : Promise.resolve(null),
+          ]);
           const templateSnapshot = normaliseInvoiceTemplate(template || DEFAULT_INVOICE_TEMPLATE);
+          const dimensionSelection = await resolveDocumentDimensionSelection(db, { mode: "CUSTOMER_DEFAULT", costCentreId: "", projectId: "" }, member, session, updatedAt);
           const invoice = {
             _id: new ObjectId(), invoiceNo: makeDocumentNo("INV"), sourceQuoteId: current._id, sourceQuoteNo: current.quotationNo,
             ...(current.memberId ? { memberId: current.memberId, memberNo: current.memberNo } : {}),
@@ -163,6 +168,7 @@ export async function PATCH(request: Request) {
             customerReference: current.customerReference || "", dueDate: input.dueDate,
             notes: current.notes || "", templateId: template?._id || null,
             templateName: templateSnapshot.name, templateSnapshot,
+            dimensionSelection,
             businessSnapshot: current.businessSnapshot,
             items: current.items, subtotal: current.subtotal, taxRate: current.taxRate,
             taxMode: current.taxMode, tax: current.tax, netSales: current.netSales, total: current.total,
@@ -186,7 +192,7 @@ export async function PATCH(request: Request) {
             }
           }
           await writeAudit(db, auth.session, "quotation.convert", "quotation", input.id, { quotationNo: current.quotationNo, invoiceNo: invoice.invoiceNo }, session);
-          await writeAudit(db, auth.session, "invoice.create", "invoice", invoice._id.toHexString(), { invoiceNo: invoice.invoiceNo, total: invoice.total, sourceQuoteNo: current.quotationNo }, session);
+          await writeAudit(db, auth.session, "invoice.create", "invoice", invoice._id.toHexString(), { invoiceNo: invoice.invoiceNo, total: invoice.total, sourceQuoteNo: current.quotationNo, dimensionMode: dimensionSelection.mode, costCentreCode: dimensionSelection.costCentre?.code || "", projectCode: dimensionSelection.project?.code || "" }, session);
           return updated;
         }
 
@@ -208,6 +214,7 @@ export async function PATCH(request: Request) {
       if (existing) return ok(serialise(withEffectiveStatus(existing)));
     }
     if (error instanceof QuotationWorkflowError) return fail(error.message, error.status);
+    if (error instanceof DimensionSelectionError) return fail(error.message, 422);
     return publicError(error);
   }
 }

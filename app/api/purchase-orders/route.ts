@@ -12,6 +12,7 @@ import { currencyMinorUnits, roundCurrency } from "@/lib/international";
 import { approvalRequiresDifferentMaker, ensureProcurementAccounts, purchaseOrderActionSchema, purchaseOrderInputSchema, suggestedReorderAfterInbound, weightedAverageInventoryCost } from "@/lib/procurement";
 import { calculateTaxTotals } from "@/lib/tax";
 import { addInventoryBatchQuantity, lotKey, normaliseLotNo } from "@/lib/inventory-batches";
+import { applyDimensionAllocation, dimensionRuleAuditId, resolveDimensionAllocation } from "@/lib/dimension-allocation";
 
 export const runtime = "nodejs";
 
@@ -351,6 +352,7 @@ export async function PATCH(request: Request) {
         if (!updatedOrder) throw new PurchaseConflictError("The purchase order changed during receiving. Reload before trying again.");
         const supplierInvoiceNoNormalized = receiveInput.supplierInvoiceNo.trim().toUpperCase();
         const dueDate = new Date(receiveInput.invoiceDate.getTime() + Number(order.supplierSnapshot?.paymentTermsDays || 0) * 86_400_000);
+        const dimensionAllocation = await resolveDimensionAllocation(db, "PURCHASE_LOCATION", String(order.locationId), mongoSession);
         const receipt = {
           _id: receiptId, clientRequestId: receiveInput.clientRequestId, receiptNo, purchaseOrderId: order._id, purchaseOrderNo: order.purchaseOrderNo,
           supplierId: order.supplierId, supplierCode: order.supplierCode, supplierName: order.supplierName,
@@ -358,7 +360,7 @@ export async function PATCH(request: Request) {
           supplierInvoiceNo: receiveInput.supplierInvoiceNo, items: receiptLines, currency: order.currency, baseCurrency: order.baseCurrency,
           exchangeRate: order.exchangeRate, exchangeRateSource: order.exchangeRateSource, subtotal: receiptSubtotal, taxRate: totals.taxRate,
           taxMode: totals.taxMode, tax: totals.tax, total: totals.total, baseInventoryValue, baseTax, baseTotal,
-          notes: receiveInput.notes, receivedAt: transactionDate, receivedBy: new ObjectId(auth.session.id), receivedByName: auth.session.fullName, createdAt: postedAt,
+          notes: receiveInput.notes, ...(dimensionAllocation ? { dimensionAllocation } : {}), receivedAt: transactionDate, receivedBy: new ObjectId(auth.session.id), receivedByName: auth.session.fullName, createdAt: postedAt,
         };
         const bill = {
           _id: billId, billNo, supplierId: order.supplierId, supplierCode: order.supplierCode, supplierName: order.supplierName,
@@ -366,7 +368,7 @@ export async function PATCH(request: Request) {
           goodsReceiptId: receiptId, receiptNo, invoiceDate: receiveInput.invoiceDate, dueDate,
           currency: order.currency, baseCurrency: order.baseCurrency, timeZone: order.timeZone || "UTC", exchangeRate: order.exchangeRate, total: totals.total, baseTotal,
           paidAmount: 0, balance: totals.total, baseSettledAmount: 0, baseBalance: baseTotal, status: "OPEN",
-          createdBy: new ObjectId(auth.session.id), createdAt: postedAt, updatedAt: postedAt,
+          ...(dimensionAllocation ? { dimensionAllocation } : {}), createdBy: new ObjectId(auth.session.id), createdAt: postedAt, updatedAt: postedAt,
         };
         await ensureProcurementAccounts(db, new ObjectId(auth.session.id), mongoSession);
         await db.collection("goodsReceipts").insertOne(receipt, { session: mongoSession });
@@ -378,7 +380,7 @@ export async function PATCH(request: Request) {
         ];
         await db.collection("journalEntries").insertOne({
           entryNo: journalNo, date: transactionDate, businessDate: receivedDay, timeZone: orderTimeZone, memo: `Goods receipt ${receiptNo} · ${order.supplierName}`, reference: receiveInput.supplierInvoiceNo,
-          source: "PURCHASE_RECEIPT", sourceId: receiptId, status: "POSTED", lines: journalLines,
+          source: "PURCHASE_RECEIPT", sourceId: receiptId, status: "POSTED", lines: applyDimensionAllocation(journalLines, dimensionAllocation, String(order.baseCurrency)),
           totalDebit: baseTotal, totalCredit: baseTotal, createdBy: new ObjectId(auth.session.id), createdAt: postedAt,
         }, { session: mongoSession });
         const lateDays = Math.max(0, Math.round((new Date(`${receivedDay}T00:00:00.000Z`).getTime() - new Date(`${documentDateKey(order.expectedDate)}T00:00:00.000Z`).getTime()) / 86_400_000));
@@ -387,7 +389,7 @@ export async function PATCH(request: Request) {
           { $inc: { receiptCount: 1, onTimeReceiptCount: lateDays === 0 ? 1 : 0, lateDaysTotal: lateDays, receivedBaseValue: baseTotal }, $set: { lastReceiptAt: transactionDate, updatedAt: postedAt } },
           { session: mongoSession },
         );
-        await writeAudit(db, auth.session, "purchase_order.receive", "purchaseOrder", receiveInput.id, { purchaseOrderNo: order.purchaseOrderNo, receiptNo, billNo, supplierInvoiceNo: receiveInput.supplierInvoiceNo, baseTotal, fullyReceived }, mongoSession);
+        await writeAudit(db, auth.session, "purchase_order.receive", "purchaseOrder", receiveInput.id, { purchaseOrderNo: order.purchaseOrderNo, receiptNo, billNo, supplierInvoiceNo: receiveInput.supplierInvoiceNo, baseTotal, fullyReceived, dimensionRuleId: dimensionRuleAuditId(dimensionAllocation) }, mongoSession);
         result = { order: updatedOrder, receipt, bill };
       });
     } finally { await mongoSession.endSession(); }

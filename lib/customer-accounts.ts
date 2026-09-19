@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dimensionDefaultsInputSchema } from "@/lib/dimension-selection";
 import { roundCurrency } from "@/lib/international";
 
 const objectIdSchema = z.string().regex(/^[a-fA-F0-9]{24}$/, "Choose a valid customer account.").transform(value => value.toLowerCase());
@@ -9,6 +10,7 @@ export const customerAccountUpdateSchema = z.object({
   creditLimit: z.number().finite().min(0).max(100_000_000).nullable(),
   creditTermsDays: z.coerce.number().int().min(0).max(365),
   creditHold: z.boolean(),
+  dimensionDefaults: dimensionDefaultsInputSchema.optional(),
   reason: z.string().trim().min(3).max(300),
 });
 

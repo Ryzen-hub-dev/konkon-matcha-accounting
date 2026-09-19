@@ -9,9 +9,12 @@ import { currencyFractionDigits } from "@/lib/international";
 import { ScannerBridge } from "@/components/scanner-bridge";
 import type { ProductRecord } from "@/lib/types";
 
+type DimensionChoice = { _id: string; type: "COST_CENTRE" | "PROJECT"; code: string; name: string; active: boolean };
+
 export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
   const { money, profile } = useBusiness();
   const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [dimensions, setDimensions] = useState<DimensionChoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -27,13 +30,20 @@ export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
 
   async function load() {
     setLoading(true);
-    try { setProducts(await apiRequest<ProductRecord[]>(`/api/products?includeBalances=1${canWrite ? "&includeArchived=1" : ""}`)); }
+    try {
+      const [nextProducts, dimensionData] = await Promise.all([
+        apiRequest<ProductRecord[]>(`/api/products?includeBalances=1${canWrite ? "&includeArchived=1" : ""}`),
+        canWrite ? apiRequest<{ dimensions: DimensionChoice[] }>("/api/accounting-dimensions?choices=1") : Promise.resolve({ dimensions: [] }),
+      ]);
+      setProducts(nextProducts);
+      setDimensions(dimensionData.dimensions);
+    }
     catch (reason) { show(reason instanceof Error ? reason.message : "Could not load inventory.", "error"); }
     finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, []);
   const visible = products.filter((product) => showArchived ? !product.active : product.active !== false);
-  const filtered = useMemo(() => visible.filter((product) => `${product.name} ${product.sku} ${product.barcode || ""} ${product.category}`.toLowerCase().includes(search.toLowerCase())), [visible, search]);
+  const filtered = useMemo(() => visible.filter((product) => `${product.name} ${product.sku} ${product.barcode || ""} ${product.category} ${product.dimensionDefaults?.costCentre?.code || ""} ${product.dimensionDefaults?.project?.code || ""}`.toLowerCase().includes(search.toLowerCase())), [visible, search]);
   const active = products.filter((product) => product.active !== false);
   const inventoryLocations = useMemo(() => {
     const values = new Map<string, { id: string; code: string; name: string }>();
@@ -46,16 +56,22 @@ export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
   const stockAtScope = (product: ProductRecord) => stocktakeLocationId === "GLOBAL" ? product.stock : Number(product.locationBalances?.find((balance) => balance.locationId === stocktakeLocationId)?.quantity || 0);
   const low = active.filter((product) => product.stock <= product.reorderLevel).length;
 
+  function productPayload(form: HTMLFormElement) {
+    const data = Object.fromEntries(new FormData(form));
+    const { costCentreId = "", projectId = "", ...product } = data;
+    return { ...product, dimensionDefaults: { costCentreId, projectId } };
+  }
+
   async function add(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true);
-    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const data = productPayload(event.currentTarget);
     try { await apiRequest("/api/products", { method: "POST", body: JSON.stringify(data) }); show("Product added to inventory."); setAddOpen(false); setDraftBarcode(""); await load(); }
     catch (reason) { show(reason instanceof Error ? reason.message : "Could not add product.", "error"); }
     finally { setBusy(false); }
   }
   async function edit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!editing) return; setBusy(true);
-    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const data = productPayload(event.currentTarget);
     try { await apiRequest("/api/products", { method: "PATCH", body: JSON.stringify({ id: editing._id, ...data }) }); show("Product details updated."); setEditing(null); setDraftBarcode(""); await load(); }
     catch (reason) { show(reason instanceof Error ? reason.message : "Could not update the product.", "error"); }
     finally { setBusy(false); }
@@ -135,11 +151,15 @@ export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
 
   const productForm = (mode: "add" | "edit") => {
     const product = mode === "edit" ? editing : null;
+    const dimensionOptions = (type: DimensionChoice["type"], selectedId = "") => dimensions.filter(dimension => dimension.type === type && (dimension.active || dimension._id === selectedId));
+    const costCentreId = product?.dimensionDefaults?.costCentre?.id || "";
+    const projectId = product?.dimensionDefaults?.project?.id || "";
     return <form className="modal-form" onSubmit={mode === "add" ? add : edit} key={product?._id || "new"}>
       <div className="barcode-entry"><Barcode /><label className="field"><span>Product barcode · scan or type · optional</span><input name="barcode" value={draftBarcode} onChange={(event) => setDraftBarcode(event.target.value.toUpperCase())} autoComplete="off" autoFocus placeholder="Scan above or type here" /></label><small>The live whisk line opens this form and fills the barcode automatically. Products without a manufacturer barcode can leave it blank.</small></div>
       <div className="form-grid two"><label className="field"><span>Product name</span><input name="name" defaultValue={product?.name} required /></label><label className="field"><span>SKU</span><input name="sku" defaultValue={product?.sku} pattern="[A-Za-z0-9._-]+" required /></label></div>
       <div className="form-grid two"><label className="field"><span>Category</span><input name="category" defaultValue={product?.category} placeholder="Matcha powder" required /></label><label className="field"><span>Unit</span><input name="unit" defaultValue={product?.unit} placeholder="tin" required /></label></div>
       <div className={`form-grid ${mode === "add" ? "four" : "three"}`}><label className="field"><span>Retail</span><input name="price" type="number" min="0" step={10 ** -currencyFractionDigits(profile.currency)} defaultValue={product?.price} required /></label><label className="field"><span>Cost</span><input name="cost" type="number" min="0" step={10 ** -currencyFractionDigits(profile.currency)} defaultValue={product?.cost} required /></label>{mode === "add" ? <label className="field"><span>Opening stock</span><input name="stock" type="number" min="0" step="1" required /></label> : null}<label className="field"><span>Reorder at</span><input name="reorderLevel" type="number" min="0" step="1" defaultValue={product?.reorderLevel} required /></label></div>
+      <section className="product-dimension-defaults"><div><strong>Default management classification</strong><small>Optional. POS revenue, cost and inventory for this product use these frozen values; unclassified products keep the location rule.</small></div><div className="form-grid two"><label className="field"><span>Cost centre</span><select name="costCentreId" defaultValue={costCentreId}><option value="">Use location rule</option>{dimensionOptions("COST_CENTRE", costCentreId).map(dimension => <option key={dimension._id} value={dimension._id} disabled={!dimension.active}>{dimension.code} · {dimension.name}{dimension.active ? "" : " · archived"}</option>)}</select></label><label className="field"><span>Project</span><select name="projectId" defaultValue={projectId}><option value="">Use location rule</option>{dimensionOptions("PROJECT", projectId).map(dimension => <option key={dimension._id} value={dimension._id} disabled={!dimension.active}>{dimension.code} · {dimension.name}{dimension.active ? "" : " · archived"}</option>)}</select></label></div></section>
       <footer><button type="button" className="button button-secondary" onClick={() => { mode === "add" ? setAddOpen(false) : setEditing(null); setDraftBarcode(""); }}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Saving…" : mode === "add" ? "Add product" : "Save product"}</button></footer>
     </form>;
   };
@@ -150,7 +170,7 @@ export function InventoryView({ canWrite = false }: { canWrite?: boolean }) {
     {canWrite ? <ScannerBridge contextLabel={stocktakeOpen ? "Inventory stocktake" : "Inventory editor"} purpose="INVENTORY" enabled={!loading} placeholder={stocktakeOpen ? "Scan each physical unit to count it" : "Scan a product · existing opens edit, new fills barcode"} onScan={handleInventoryScan} onFeedback={show} /> : null}
     <section className="mini-stat-row"><article><Boxes /><span>Units on hand</span><strong>{active.reduce((sum, product) => sum + product.stock, 0).toLocaleString()}</strong></article><article><CircleDollarSign /><span>Stock at cost</span><strong>{money.format(active.reduce((sum, product) => sum + product.cost * product.stock, 0))}</strong></article><article className={low ? "warn" : ""}><AlertTriangle /><span>At or below reorder</span><strong>{low}</strong></article></section>
     <section className="panel resource-panel"><div className="resource-toolbar"><label className="search-box"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search product, barcode, category or SKU" /></label>{canWrite ? <div className="archive-toggle"><button className={!showArchived ? "active" : ""} onClick={() => setShowArchived(false)}>Active</button><button className={showArchived ? "active" : ""} onClick={() => setShowArchived(true)}>Archived</button></div> : <span>{filtered.length} active SKUs</span>}</div>
-      {loading ? <LoadingPanel /> : filtered.length ? <div className="data-list inventory-list"><div className="data-list-head"><span>Product</span><span>Category</span><span>On hand</span><span>Retail / cost</span><span>Barcode</span><span>Actions</span></div>{filtered.map((product) => <div className={`data-row ${!product.active ? "is-archived" : ""}`} key={product._id}><div className="product-cell"><i>{product.name.toLowerCase().includes("hojicha") ? "焙" : "抹"}</i><div><strong>{product.name}</strong><small>{product.sku}{product.batchTracked ? " · BATCH TRACKED" : ""}</small></div></div><span>{product.category}</span><div><strong>{product.stock} {product.unit}</strong>{product.active && product.stock <= product.reorderLevel ? <small className="low-label">Reorder at {product.reorderLevel}</small> : <small>{product.active ? "Healthy" : "Preserved"}</small>}</div><div><strong>{money.format(product.price)}</strong><small>{money.format(product.cost)} cost</small></div><div><strong className="barcode-value">{product.barcode || "NO BARCODE"}</strong><small><StatusPill value={product.active ? "ACTIVE" : "ARCHIVED"} /></small></div>{canWrite ? <div className="row-actions">{product.active ? <><button className="icon-button" title="Edit product" onClick={() => { setDraftBarcode(product.barcode || ""); setEditing(product); }}><Pencil size={15} /></button>{product.batchTracked ? <Link className="icon-button" title="Adjust batch stock" href="/batches"><Boxes size={15} /></Link> : <button className="icon-button" title="Adjust stock" onClick={() => setAdjusting(product)}><SlidersHorizontal size={15} /></button>}<button className="icon-button danger" title="Archive product" onClick={() => archive(product)}><Archive size={15} /></button></> : <button className="button button-secondary" onClick={() => restore(product)}><RotateCcw size={15} />Restore</button>}</div> : <span />}</div>)}</div> : <EmptyState title={showArchived ? "No archived products" : "The shelf is empty"} detail={showArchived ? "Archived catalogue items will remain available for audit here." : "Add the first product to begin tracking stock."} action={!showArchived && canWrite ? <AddButton onClick={() => { setDraftBarcode(""); setAddOpen(true); }}>New product</AddButton> : undefined} />}
+      {loading ? <LoadingPanel /> : filtered.length ? <div className="data-list inventory-list"><div className="data-list-head"><span>Product</span><span>Category</span><span>On hand</span><span>Retail / cost</span><span>Barcode</span><span>Actions</span></div>{filtered.map((product) => <div className={`data-row ${!product.active ? "is-archived" : ""}`} key={product._id}><div className="product-cell"><i>{product.name.toLowerCase().includes("hojicha") ? "焙" : "抹"}</i><div><strong>{product.name}</strong><small>{product.sku}{product.batchTracked ? " · BATCH TRACKED" : ""}{product.dimensionDefaults?.costCentre ? ` · ${product.dimensionDefaults.costCentre.code}` : ""}{product.dimensionDefaults?.project ? ` · ${product.dimensionDefaults.project.code}` : ""}</small></div></div><span>{product.category}</span><div><strong>{product.stock} {product.unit}</strong>{product.active && product.stock <= product.reorderLevel ? <small className="low-label">Reorder at {product.reorderLevel}</small> : <small>{product.active ? "Healthy" : "Preserved"}</small>}</div><div><strong>{money.format(product.price)}</strong><small>{money.format(product.cost)} cost</small></div><div><strong className="barcode-value">{product.barcode || "NO BARCODE"}</strong><small><StatusPill value={product.active ? "ACTIVE" : "ARCHIVED"} /></small></div>{canWrite ? <div className="row-actions">{product.active ? <><button className="icon-button" title="Edit product" onClick={() => { setDraftBarcode(product.barcode || ""); setEditing(product); }}><Pencil size={15} /></button>{product.batchTracked ? <Link className="icon-button" title="Adjust batch stock" href="/batches"><Boxes size={15} /></Link> : <button className="icon-button" title="Adjust stock" onClick={() => setAdjusting(product)}><SlidersHorizontal size={15} /></button>}<button className="icon-button danger" title="Archive product" onClick={() => archive(product)}><Archive size={15} /></button></> : <button className="button button-secondary" onClick={() => restore(product)}><RotateCcw size={15} />Restore</button>}</div> : <span />}</div>)}</div> : <EmptyState title={showArchived ? "No archived products" : "The shelf is empty"} detail={showArchived ? "Archived catalogue items will remain available for audit here." : "Add the first product to begin tracking stock."} action={!showArchived && canWrite ? <AddButton onClick={() => { setDraftBarcode(""); setAddOpen(true); }}>New product</AddButton> : undefined} />}
     </section>
     <Modal open={addOpen} onClose={() => { setAddOpen(false); setDraftBarcode(""); }} title="New product" kicker="SCAN OR ADD"><>{productForm("add")}</></Modal>
     <Modal open={Boolean(editing)} onClose={() => { setEditing(null); setDraftBarcode(""); }} title={`Edit ${editing?.name || "product"}`} kicker="CATALOGUE"><>{productForm("edit")}</></Modal>

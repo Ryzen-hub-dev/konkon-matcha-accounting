@@ -11,14 +11,19 @@ import type { InvoiceTemplateRecord } from "@/lib/invoice-templates";
 
 type Customer = { customerName: string; customerEmail: string; customerPhone: string; customerAddress: string; customerReference: string; notes: string };
 type Item = { description: string; quantity: number; unitPrice: number };
+type DimensionChoice = { _id: string; type: "COST_CENTRE" | "PROJECT"; code: string; name: string; active: boolean };
+type DimensionMode = "CUSTOMER_DEFAULT" | "CUSTOM" | "NONE";
+type DimensionSnapshot = { id: string; code: string; name: string };
 type CustomerAccountChoice = {
   _id: string; memberNo: string; name: string; email: string; phone: string;
   creditLimit: number | null; creditTermsDays: number; creditHold: boolean; outstanding: number; availableCredit: number | null;
+  dimensionDefaults?: { costCentre?: DimensionSnapshot; project?: DimensionSnapshot };
 };
 export type EditableInvoice = Customer & {
   _id: string; invoiceNo: string; dueDate: string; createdAt: string; updatedAt: string;
   items: Item[]; total: number; paidAmount: number; status: string; taxRate: number; taxMode?: "EXCLUSIVE" | "INCLUSIVE";
   memberId?: string; memberNo?: string; templateId?: string; templateName?: string; businessSnapshot?: { currency?: string; locale?: string; taxName?: string };
+  dimensionSelection?: { mode: DimensionMode; source: string; costCentre?: DimensionSnapshot; project?: DimensionSnapshot; resolvedAt?: string };
 };
 const empty: Customer = { customerName: "", customerEmail: "", customerPhone: "", customerAddress: "", customerReference: "", notes: "" };
 
@@ -32,6 +37,10 @@ export function InvoiceDraftEditor({ source, mode, templates, onClose, onSaved }
   const [customer, setCustomer] = useState<Customer>(() => source ? Object.fromEntries(Object.keys(empty).map(key => [key, source[key as keyof Customer] || ""])) as Customer : { ...empty });
   const [memberId, setMemberId] = useState(source?.memberId || "");
   const [accounts, setAccounts] = useState<CustomerAccountChoice[]>([]);
+  const [dimensions, setDimensions] = useState<DimensionChoice[]>([]);
+  const [dimensionMode, setDimensionMode] = useState<DimensionMode>(() => source?.dimensionSelection?.mode || (editing ? "NONE" : "CUSTOMER_DEFAULT"));
+  const [costCentreId, setCostCentreId] = useState(source?.dimensionSelection?.costCentre?.id || "");
+  const [projectId, setProjectId] = useState(source?.dimensionSelection?.project?.id || "");
   const [items, setItems] = useState<Item[]>(() => source ? source.items.map(({ description, quantity, unitPrice }) => ({ description, quantity, unitPrice })) : [{ description: "", quantity: 1, unitPrice: 0 }]);
   const [dueDate, setDueDate] = useState(() => editing && source ? source.dueDate.slice(0, 10) : shiftDateKey(dateKeyInTimeZone(new Date(), profile.timeZone), preferred?.termsDays ?? 14));
   const [templateId, setTemplateId] = useState(editing ? source?.templateId || "" : preferred?._id || "");
@@ -49,10 +58,11 @@ export function InvoiceDraftEditor({ source, mode, templates, onClose, onSaved }
   const subtotal = round(items.reduce((sum, item) => sum + round(item.quantity * round(item.unitPrice)), 0));
   const totals = calculateTaxTotals(subtotal, 0, editing ? source!.taxRate : profile.taxRate, editing ? source!.taxMode || "EXCLUSIVE" : profile.taxMode, currency);
   const selectedAccount = accounts.find(account => account._id === memberId);
+  const dimensionValid = dimensionMode !== "CUSTOM" || Boolean(costCentreId || projectId);
 
   useEffect(() => {
-    void apiRequest<{ accounts: CustomerAccountChoice[] }>("/api/customer-accounts")
-      .then(result => setAccounts(result.accounts))
+    void apiRequest<{ accounts: CustomerAccountChoice[]; dimensions: DimensionChoice[] }>("/api/customer-accounts")
+      .then(result => { setAccounts(result.accounts); setDimensions(result.dimensions); })
       .catch(() => undefined);
   }, []);
 
@@ -74,7 +84,11 @@ export function InvoiceDraftEditor({ source, mode, templates, onClose, onSaved }
     event.preventDefault(); if (guard.current) return;
     guard.current = true; setBusy(true); setError("");
     requestId.current ||= crypto.randomUUID();
-    const payload = retry.current || JSON.stringify({ ...customer, memberId, items, dueDate, templateId, ...(editing ? { action: "EDIT_DRAFT", id: source!._id, expectedUpdatedAt: source!.updatedAt } : { clientRequestId: requestId.current }) });
+    const payload = retry.current || JSON.stringify({
+      ...customer, memberId, items, dueDate, templateId,
+      dimensionSelection: { mode: dimensionMode, costCentreId, projectId },
+      ...(editing ? { action: "EDIT_DRAFT", id: source!._id, expectedUpdatedAt: source!.updatedAt } : { clientRequestId: requestId.current }),
+    });
     try {
       const saved = await apiRequest<EditableInvoice>("/api/invoices", { method: editing ? "PATCH" : "POST", body: payload });
       onSaved(saved);
@@ -94,6 +108,11 @@ export function InvoiceDraftEditor({ source, mode, templates, onClose, onSaved }
       {error ? <div className="invoice-form-error" role="alert">{error}</div> : null}
       <fieldset disabled={busy || uncertain}>
         <div className={`invoice-account-link ${selectedAccount?.creditHold ? "is-held" : ""}`}><label className="field"><span>Customer account · optional</span><select value={memberId} onChange={event => chooseAccount(event.target.value)}><option value="">Unlinked invoice customer</option>{source?.memberId && !accounts.some(account => account._id === source.memberId) ? <option value={source.memberId}>{source.memberNo || "Saved customer account"} · unavailable</option> : null}{accounts.map(account => <option key={account._id} value={account._id}>{account.memberNo} · {account.name}{account.creditHold ? " · CREDIT HOLD" : ""}</option>)}</select></label><p>{selectedAccount ? selectedAccount.creditHold ? "This account is on hold. The draft can be saved, but it cannot be marked sent until the hold is removed." : selectedAccount.creditLimit === null ? `${selectedAccount.creditTermsDays} day terms · no configured credit ceiling.` : `${selectedAccount.creditTermsDays} day terms · ${money.format(selectedAccount.availableCredit || 0)} credit available.` : "Link a member account to enforce credit controls and include this invoice on its statement."}</p></div>
+        <div className="invoice-dimension-selection">
+          <label className="field"><span>Management classification</span><select value={dimensionMode} onChange={event => setDimensionMode(event.target.value as DimensionMode)}><option value="CUSTOMER_DEFAULT">Use customer account default</option><option value="CUSTOM">Override for this invoice</option><option value="NONE">Leave this invoice unassigned</option></select></label>
+          <p>{dimensionMode === "CUSTOMER_DEFAULT" ? selectedAccount ? [selectedAccount.dimensionDefaults?.costCentre?.code, selectedAccount.dimensionDefaults?.project?.code].filter(Boolean).join(" / ") || "This customer has no dimension default; the invoice will remain unassigned." : "Link a customer account or choose a document override." : dimensionMode === "NONE" ? "This explicit choice is saved on the draft and will keep the payment journal unassigned." : "The active selections below are frozen onto this draft and its payment journal."}</p>
+          {dimensionMode === "CUSTOM" ? <div className="form-grid two"><label className="field"><span>Cost centre · optional</span><select value={costCentreId} onChange={event => setCostCentreId(event.target.value)}><option value="">Not assigned</option>{dimensions.filter(item => item.type === "COST_CENTRE" && (item.active || item._id === costCentreId)).map(item => <option key={item._id} value={item._id} disabled={!item.active}>{item.code} · {item.name}{item.active ? "" : " · archived"}</option>)}</select></label><label className="field"><span>Project · optional</span><select value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">Not assigned</option>{dimensions.filter(item => item.type === "PROJECT" && (item.active || item._id === projectId)).map(item => <option key={item._id} value={item._id} disabled={!item.active}>{item.code} · {item.name}{item.active ? "" : " · archived"}</option>)}</select></label></div> : null}
+        </div>
         <div className="form-grid three">{([["customerName", "Customer", "text", 120], ["customerEmail", "Email · optional", "email", 254], ["customerPhone", "Phone · optional", "text", 40]] as const).map(([key, label, type, max]) => <label key={key} className="field"><span>{label}</span><input name={key} type={type} minLength={key === "customerName" ? 2 : undefined} maxLength={max} required={key === "customerName"} autoFocus={key === "customerName"} value={customer[key]} onChange={event => setCustomer({ ...customer, [key]: event.target.value })} /></label>)}</div>
         <div className="form-grid three"><label className="field"><span>Customer reference</span><input name="customerReference" maxLength={80} placeholder="PO number or event" value={customer.customerReference} onChange={event => setCustomer({ ...customer, customerReference: event.target.value })} /></label><label className="field"><span>Due date</span><input name="dueDate" type="date" required value={dueDate} onChange={event => setDueDate(event.target.value)} /></label><label className="field"><span>Paper template</span><select value={templateId} onChange={event => setTemplateId(event.target.value)} required={!editing}><option value="">{editing ? "Keep saved paper" : "Choose template"}</option>{editing && source?.templateId && !templates.some(template => template._id === source.templateId) ? <option value={source.templateId}>{source.templateName} · saved snapshot</option> : null}{templates.map(template => <option key={template._id} value={template._id}>{template.name}{editing && template._id === source?.templateId ? " · saved snapshot" : template.isDefault ? " · default" : ""}</option>)}</select></label></div>
         <label className="field"><span>Billing address · optional</span><textarea name="customerAddress" maxLength={300} rows={2} value={customer.customerAddress} onChange={event => setCustomer({ ...customer, customerAddress: event.target.value })} /></label>
@@ -106,7 +125,7 @@ export function InvoiceDraftEditor({ source, mode, templates, onClose, onSaved }
         <label className="field"><span>Customer-facing notes · optional</span><textarea name="notes" maxLength={500} rows={3} value={customer.notes} onChange={event => setCustomer({ ...customer, notes: event.target.value })} /></label>
       </fieldset>
       <dl className="invoice-draft-totals"><div><dt>Subtotal</dt><dd>{money.format(subtotal)}</dd></div><div><dt>{(editing && source?.businessSnapshot?.taxName) || profile.taxName} · {totals.taxRate}%{totals.taxMode === "INCLUSIVE" ? " included" : " added"}</dt><dd>{money.format(totals.tax)}</dd></div><div><dt>Invoice total</dt><dd>{money.format(totals.total)}</dd></div></dl>
-      <footer><button type="button" className="button button-secondary" disabled={busy} onClick={close}>Cancel</button><button className="button button-primary" disabled={busy || (!editing && !templateId)}><FilePlus2 size={16} />{busy ? "Saving…" : uncertain ? "Retry same save" : editing ? "Save draft changes" : "Create draft"}</button></footer>
+      <footer><button type="button" className="button button-secondary" disabled={busy} onClick={close}>Cancel</button><button className="button button-primary" disabled={busy || !dimensionValid || (!editing && !templateId)}><FilePlus2 size={16} />{busy ? "Saving…" : uncertain ? "Retry same save" : editing ? "Save draft changes" : "Create draft"}</button></footer>
     </form>
   </Modal>;
 }

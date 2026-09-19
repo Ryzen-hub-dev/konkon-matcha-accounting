@@ -35,6 +35,7 @@ test("invoice creation remains compatible without request keys and validates UUI
   assert.equal(legacy.clientRequestId, undefined);
   assert.equal(legacy.customerEmail, "");
   assert.equal(legacy.templateId, "");
+  assert.deepEqual(legacy.dimensionSelection, { mode: "CUSTOMER_DEFAULT", costCentreId: "", projectId: "" });
   assert.equal(invoiceInputSchema.parse({ ...minimal, clientRequestId: "12345678-1234-4234-8234-123456789abc" }).clientRequestId, "12345678-1234-4234-8234-123456789abc");
   assert.equal(invoiceInputSchema.safeParse({ ...minimal, clientRequestId: "repeat-me" }).success, false);
 });
@@ -58,6 +59,12 @@ test("invoice object references are validated and canonicalized", () => {
   assert.equal(invoiceInputSchema.safeParse({ ...fields, templateId: "z".repeat(24) }).success, false);
   assert.equal(invoiceInputSchema.safeParse({ ...fields, memberId: "z".repeat(24) }).success, false);
   assert.equal(invoiceEditSchema.safeParse({ ...fields, action: "EDIT_DRAFT", id: "z".repeat(24), expectedUpdatedAt: version }).success, false);
+});
+
+test("invoice drafts validate document-level dimension overrides", () => {
+  assert.equal(invoiceInputSchema.safeParse({ ...fields, dimensionSelection: { mode: "CUSTOM", costCentreId: id, projectId: "" } }).success, true);
+  assert.equal(invoiceInputSchema.safeParse({ ...fields, dimensionSelection: { mode: "CUSTOM", costCentreId: "", projectId: "" } }).success, false);
+  assert.equal(invoiceInputSchema.safeParse({ ...fields, dimensionSelection: { mode: "NONE", costCentreId: "", projectId: "" } }).success, true);
 });
 
 test("invoice input bounds reject empty lines and non-finite amounts", () => {

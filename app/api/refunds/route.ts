@@ -12,6 +12,8 @@ import { quoteAmount } from "@/lib/exchange-rates";
 import { assessRefund, writeOperationalReview } from "@/lib/operational-reviews";
 import { addInventoryBatchQuantity, BatchInventoryError, sliceBatchAllocations } from "@/lib/inventory-batches";
 import { dateKeyInTimeZone } from "@/lib/dates";
+import { dimensionRuleAuditId, resolveDimensionAllocation, type ResolvedDimensionAllocation } from "@/lib/dimension-allocation";
+import { buildClassifiedPosJournalLines, sliceRefundItemFinancials } from "@/lib/pos-accounting";
 
 export const runtime = "nodejs";
 
@@ -81,6 +83,8 @@ export async function POST(request: Request) {
         const postingTimeZone = String(sale.businessSnapshot?.timeZone || "UTC");
         const postingDateKey = dateKeyInTimeZone(new Date(), postingTimeZone);
         await assertAccountingPeriodOpen(db, postingDateKey, mongoSession);
+        const dimensionAllocation = sale.dimensionAllocation as ResolvedDimensionAllocation | undefined
+          || (ObjectId.isValid(String(sale.locationId || "")) ? await resolveDimensionAllocation(db, "POS_LOCATION", String(sale.locationId), mongoSession) : null);
 
         const counterIdValue = input.data.counterId || String(sale.counterId || "");
         const counterId = ObjectId.isValid(counterIdValue) ? new ObjectId(counterIdValue) : null;
@@ -100,6 +104,7 @@ export async function POST(request: Request) {
 
         const currency = String(sale.businessSnapshot?.currency || "SGD");
         const money = (value: unknown) => roundCurrency(value, currency);
+        const taxMode: TaxMode = sale.taxMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE";
         const saleItems = Array.isArray(sale.items) ? sale.items : [];
         const itemMap = new Map(saleItems.map((item) => [item.productId.toString(), item]));
         for (const [productId, quantity] of requested) {
@@ -108,10 +113,14 @@ export async function POST(request: Request) {
           if (!item || quantity > remaining) throw new Error("REFUND_QUANTITY_INVALID");
         }
 
+        const financialSlices = new Map<string, ReturnType<typeof sliceRefundItemFinancials>>();
         const refundItems = [...requested.entries()].map(([productId, quantity]) => {
           const item = itemMap.get(productId)!;
+          const refundedQuantity = Number(item.refundedQuantity || 0);
+          const financials = sliceRefundItemFinancials(item, refundedQuantity, quantity, currency, taxMode);
+          financialSlices.set(productId, financials);
           const batchResult = Array.isArray(item.batchAllocations) && item.batchAllocations.length
-            ? sliceBatchAllocations(item.batchAllocations, Number(item.refundedQuantity || 0), quantity)
+            ? sliceBatchAllocations(item.batchAllocations, refundedQuantity, quantity)
             : { allocations: [], shortage: 0 };
           if (batchResult.shortage) throw new BatchInventoryError(`${String(item.name)} batch allocation history is incomplete. Review the original receipt before refunding.`);
           return {
@@ -121,29 +130,45 @@ export async function POST(request: Request) {
             quantity,
             price: money(item.price),
             cost: money(item.cost),
-            lineSubtotal: money(Number(item.price) * quantity),
-            lineCost: money(Number(item.cost) * quantity),
+            ...(financials || { lineSubtotal: money(Number(item.price) * quantity), lineCost: money(Number(item.cost) * quantity) }),
+            ...(item.dimensionSelection ? { dimensionSelection: item.dimensionSelection } : {}),
             batchAllocations: batchResult.allocations,
           };
         });
 
         const updatedItems = saleItems.map((item) => {
-          const refundQuantity = requested.get(item.productId.toString()) || 0;
+          const productId = item.productId.toString();
+          const refundQuantity = requested.get(productId) || 0;
+          const financials = financialSlices.get(productId);
           return refundQuantity ? {
             ...item,
             refundedQuantity: Number(item.refundedQuantity || 0) + refundQuantity,
-            refundedLineTotal: money(Number(item.refundedLineTotal || 0) + Number(item.price) * refundQuantity),
+            refundedLineTotal: money(Number(item.refundedLineTotal || 0) + Number(financials?.lineSubtotal ?? Number(item.price) * refundQuantity)),
+            ...(financials ? {
+              refundedLineDiscount: money(Number(item.refundedLineDiscount || 0) + financials.lineDiscount),
+              refundedLineNetSales: money(Number(item.refundedLineNetSales || 0) + financials.lineNetSales),
+              refundedLineTax: money(Number(item.refundedLineTax || 0) + financials.lineTax),
+              refundedLineGross: money(Number(item.refundedLineGross || 0) + financials.lineGross),
+              refundedLineCost: money(Number(item.refundedLineCost || 0) + financials.lineCost),
+            } : {}),
           } : item;
         });
         const isFinalRefund = updatedItems.every((item) => Number(item.refundedQuantity || 0) >= Number(item.quantity || 0));
+        const hasFrozenItemFinancials = [...requested.keys()].every(productId => financialSlices.get(productId));
         const lineSubtotal = money(refundItems.reduce((sum, item) => sum + item.lineSubtotal, 0));
         const lineCost = money(refundItems.reduce((sum, item) => sum + item.lineCost, 0));
         const originalSubtotal = Math.max(Number.EPSILON, Number(sale.subtotal || 0));
-        let discount = money(Number(sale.discount || 0) * (lineSubtotal / originalSubtotal));
-        const taxMode: TaxMode = sale.taxMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE";
-        let totals = calculateTaxTotals(lineSubtotal, discount, Number(sale.taxRate || 0), taxMode, currency);
+        let discount = hasFrozenItemFinancials
+          ? money(refundItems.reduce((sum, item) => sum + ("lineDiscount" in item ? Number(item.lineDiscount || 0) : 0), 0))
+          : money(Number(sale.discount || 0) * (lineSubtotal / originalSubtotal));
+        let totals = hasFrozenItemFinancials ? {
+          taxRate: Number(sale.taxRate || 0),
+          tax: money(refundItems.reduce((sum, item) => sum + ("lineTax" in item ? Number(item.lineTax || 0) : 0), 0)),
+          netSales: money(refundItems.reduce((sum, item) => sum + ("lineNetSales" in item ? Number(item.lineNetSales || 0) : 0), 0)),
+          total: money(refundItems.reduce((sum, item) => sum + ("lineGross" in item ? Number(item.lineGross || 0) : 0), 0)),
+        } : calculateTaxTotals(lineSubtotal, discount, Number(sale.taxRate || 0), taxMode, currency);
 
-        if (isFinalRefund) {
+        if (isFinalRefund && !hasFrozenItemFinancials) {
           discount = money(Number(sale.discount || 0) - Number(sale.refundedDiscount || 0));
           totals = {
             ...calculateTaxTotals(lineSubtotal, discount, Number(sale.taxRate || 0), taxMode, currency),
@@ -189,6 +214,7 @@ export async function POST(request: Request) {
           tenderTotal,
           exchangeRate: Number(sale.exchangeRate || 1),
           pointsReversed,
+          ...(dimensionAllocation ? { dimensionAllocation } : {}),
           createdBy: new ObjectId(auth.session.id),
           createdByName: auth.session.fullName,
           createdAt: now,
@@ -305,19 +331,30 @@ export async function POST(request: Request) {
           ...(sale.locationId ? { locationId: sale.locationId } : {}),
           ...(openShift ? { shiftId: openShift._id } : {}),
           status: "POSTED",
-          lines: [
-            { accountCode: "4000", accountName: "Product sales", debit: totals.netSales, credit: 0 },
-            ...(totals.tax > 0 ? [{ accountCode: "2100", accountName: "Tax payable", debit: totals.tax, credit: 0 }] : []),
-            { accountCode: paymentAccount[0], accountName: paymentAccount[1], debit: 0, credit: totals.total },
-            { accountCode: "1200", accountName: "Inventory", debit: lineCost, credit: 0 },
-            { accountCode: "5000", accountName: "Cost of goods sold", debit: 0, credit: lineCost },
-          ],
+          lines: buildClassifiedPosJournalLines({
+            kind: "REFUND",
+            currency,
+            total: totals.total,
+            tax: totals.tax,
+            paymentAccount: { code: paymentAccount[0], name: paymentAccount[1] },
+            items: hasFrozenItemFinancials ? refundItems.map(item => ({
+              productId: item.productId,
+              sku: item.sku,
+              name: item.name,
+              lineNetSales: "lineNetSales" in item ? Number(item.lineNetSales || 0) : 0,
+              lineTax: "lineTax" in item ? Number(item.lineTax || 0) : 0,
+              lineGross: "lineGross" in item ? Number(item.lineGross || 0) : 0,
+              lineCost: item.lineCost,
+              dimensionSelection: item.dimensionSelection,
+            })) : [{ name: "Refunded products", lineNetSales: totals.netSales, lineTax: totals.tax, lineGross: totals.total, lineCost }],
+            fallbackAllocation: dimensionAllocation,
+          }),
           totalDebit: money(totals.total + lineCost),
           totalCredit: money(totals.total + lineCost),
           createdBy: new ObjectId(auth.session.id),
           createdAt: now,
         }, { session: mongoSession });
-        await writeAudit(db, auth.session, "sale.refund", "sale", input.data.saleId, { refundNo, shiftNo: openShift?.shiftNo || "", total: totals.total, reason: input.data.reason }, mongoSession);
+        await writeAudit(db, auth.session, "sale.refund", "sale", input.data.saleId, { refundNo, shiftNo: openShift?.shiftNo || "", total: totals.total, reason: input.data.reason, frozenItemFinancials: hasFrozenItemFinancials, productDimensionCount: hasFrozenItemFinancials ? refundItems.filter(item => item.dimensionSelection).length : 0, dimensionRuleId: dimensionRuleAuditId(dimensionAllocation) }, mongoSession);
       });
     } finally {
       await mongoSession.endSession();

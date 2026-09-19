@@ -5,6 +5,7 @@ import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { buildCustomerStatement, customerAccountUpdateSchema, type StatementInvoice } from "@/lib/customer-accounts";
 import { dateKeyInTimeZone } from "@/lib/dates";
 import { getDb } from "@/lib/db";
+import { DimensionSelectionError, resolveDimensionPair } from "@/lib/dimension-selection";
 import { serialise } from "@/lib/format";
 import { roundCurrency } from "@/lib/international";
 
@@ -13,6 +14,7 @@ export const runtime = "nodejs";
 const memberProjection = {
   memberNo: 1, name: 1, email: 1, phone: 1, active: 1,
   creditLimit: 1, creditTermsDays: 1, creditHold: 1, updatedAt: 1,
+  dimensionDefaults: 1,
 };
 
 export async function GET(request: Request) {
@@ -53,7 +55,7 @@ export async function GET(request: Request) {
     }
 
     const dueBefore = new Date(`${today}T00:00:00.000Z`);
-    const [members, metrics] = await Promise.all([
+    const [members, metrics, dimensions] = await Promise.all([
       db.collection("members").find({ active: { $ne: false } }, { projection: memberProjection }).sort({ name: 1 }).limit(500).toArray(),
       db.collection("invoices").aggregate([
         { $match: {
@@ -69,10 +71,12 @@ export async function GET(request: Request) {
           lastInvoiceAt: { $max: "$createdAt" },
         } },
       ]).toArray(),
+      db.collection("accountingDimensions").find({}).project({ type: 1, code: 1, name: 1, active: 1 }).sort({ type: 1, code: 1 }).toArray(),
     ]);
     const byMember = new Map(metrics.map(metric => [String(metric._id), metric]));
     return ok(serialise({
       currency: settings.currency,
+      dimensions: dimensions.map(dimension => ({ _id: dimension._id, type: dimension.type, code: dimension.code, name: dimension.name, active: dimension.active !== false })),
       accounts: members.map(member => {
         const metric = byMember.get(String(member._id));
         const outstanding = roundCurrency(Number(metric?.outstanding || 0), settings.currency);
@@ -104,7 +108,7 @@ export async function PATCH(request: Request) {
   catch { return fail("The request body must be valid JSON.", 400); }
   try {
     const input = customerAccountUpdateSchema.safeParse(body);
-    if (!input.success) return fail("Check the customer credit controls.", 422, input.error.flatten().fieldErrors);
+    if (!input.success) return fail("Check the customer account controls.", 422, input.error.flatten().fieldErrors);
     const db = await getDb();
     const settings = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }));
     const _id = new ObjectId(input.data.id);
@@ -116,16 +120,19 @@ export async function PATCH(request: Request) {
     }
     const updatedAt = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
     const creditLimit = input.data.creditLimit === null ? null : roundCurrency(input.data.creditLimit, settings.currency);
+    const dimensionDefaults = input.data.dimensionDefaults
+      ? await resolveDimensionPair(db, input.data.dimensionDefaults)
+      : current.dimensionDefaults || {};
     const updated = await db.collection("members").findOneAndUpdate(
       { _id, active: { $ne: false }, updatedAt: current.updatedAt },
-      { $set: { creditLimit, creditTermsDays: input.data.creditTermsDays, creditHold: input.data.creditHold, updatedAt } },
+      { $set: { creditLimit, creditTermsDays: input.data.creditTermsDays, creditHold: input.data.creditHold, dimensionDefaults, updatedAt } },
       { returnDocument: "after", projection: memberProjection },
     );
     if (!updated) return fail("This customer account changed. Refresh it before saving.", 409);
     await writeAudit(db, auth.session, "customer.credit_controls", "member", input.data.id, {
       memberNo: current.memberNo,
-      previous: { creditLimit: current.creditLimit ?? null, creditTermsDays: current.creditTermsDays ?? 14, creditHold: current.creditHold === true },
-      next: { creditLimit, creditTermsDays: input.data.creditTermsDays, creditHold: input.data.creditHold },
+      previous: { creditLimit: current.creditLimit ?? null, creditTermsDays: current.creditTermsDays ?? 14, creditHold: current.creditHold === true, costCentreCode: current.dimensionDefaults?.costCentre?.code || "", projectCode: current.dimensionDefaults?.project?.code || "" },
+      next: { creditLimit, creditTermsDays: input.data.creditTermsDays, creditHold: input.data.creditHold, costCentreCode: dimensionDefaults.costCentre?.code || "", projectCode: dimensionDefaults.project?.code || "" },
       reason: input.data.reason,
     });
     return ok(serialise({
@@ -135,6 +142,7 @@ export async function PATCH(request: Request) {
       creditHold: updated.creditHold === true,
     }));
   } catch (error) {
+    if (error instanceof DimensionSelectionError) return fail(error.message, 422);
     return publicError(error);
   }
 }

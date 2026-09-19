@@ -21,9 +21,11 @@ export type CustomerAccount = {
   openInvoices: number;
   availableCredit: number | null;
   lastInvoiceAt: string | null;
+  dimensionDefaults?: { costCentre?: { id: string; code: string; name: string }; project?: { id: string; code: string; name: string } };
 };
 
-type AccountBundle = { currency: string; accounts: CustomerAccount[] };
+type DimensionChoice = { _id: string; type: "COST_CENTRE" | "PROJECT"; code: string; name: string; active: boolean };
+type AccountBundle = { currency: string; accounts: CustomerAccount[]; dimensions: DimensionChoice[] };
 type StatementEntry = {
   id: string; date: string; type: "INVOICE" | "PAYMENT"; invoiceNo: string;
   reference: string; dueDate: string; charge: number; payment: number; balance: number;
@@ -38,7 +40,7 @@ type Statement = {
 
 export function CustomerAccountsView({ canWrite }: { canWrite: boolean }) {
   const { profile } = useBusiness();
-  const [data, setData] = useState<AccountBundle>({ currency: profile.currency, accounts: [] });
+  const [data, setData] = useState<AccountBundle>({ currency: profile.currency, accounts: [], dimensions: [] });
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
@@ -79,6 +81,7 @@ export function CustomerAccountsView({ canWrite }: { canWrite: boolean }) {
           creditLimit: limitText === "" ? null : Number(limitText),
           creditTermsDays: Number(form.get("creditTermsDays")),
           creditHold: form.get("creditHold") === "on",
+          dimensionDefaults: { costCentreId: form.get("costCentreId"), projectId: form.get("projectId") },
           reason: form.get("reason"),
         }),
       });
@@ -111,7 +114,7 @@ export function CustomerAccountsView({ canWrite }: { canWrite: boolean }) {
         <div className="data-list-head"><span>Customer</span><span>Credit control</span><span>Outstanding</span><span>Overdue</span><span>Status</span><span>Actions</span></div>
         {visible.map(account => <div className="data-row" key={account._id}>
           <div><strong>{account.name}</strong><small>{account.memberNo} · {account.email || account.phone}</small></div>
-          <div><strong>{account.creditLimit === null ? "No limit configured" : money.format(account.creditLimit)}</strong><small>{account.creditTermsDays} day terms{account.availableCredit === null ? "" : ` · ${money.format(account.availableCredit)} available`}</small></div>
+          <div><strong>{account.creditLimit === null ? "No limit configured" : money.format(account.creditLimit)}</strong><small>{account.creditTermsDays} day terms{account.availableCredit === null ? "" : ` · ${money.format(account.availableCredit)} available`}</small><small>{[account.dimensionDefaults?.costCentre?.code, account.dimensionDefaults?.project?.code].filter(Boolean).join(" / ") || "No dimension default"}</small></div>
           <div><strong>{money.format(account.outstanding)}</strong><small>{account.openInvoices} open invoice{account.openInvoices === 1 ? "" : "s"}</small></div>
           <div><strong>{money.format(account.overdue)}</strong><small>{account.lastInvoiceAt ? `Last invoice ${date.format(new Date(account.lastInvoiceAt))}` : "No issued invoices"}</small></div>
           <StatusPill value={accountStatus(account)} />
@@ -120,12 +123,13 @@ export function CustomerAccountsView({ canWrite }: { canWrite: boolean }) {
       </div> : <EmptyState title={data.accounts.length ? "No matching customer" : "No customer accounts"} detail={data.accounts.length ? "Change the search to find another account." : "Create a member first, then link that account while drafting an invoice."} />}
     </section>
 
-    <Modal open={Boolean(editing)} onClose={() => { if (!busy) setEditing(null); }} title={`Credit controls · ${editing?.name || "customer"}`} kicker={editing?.memberNo}>
+    <Modal open={Boolean(editing)} onClose={() => { if (!busy) setEditing(null); }} title={`Account controls · ${editing?.name || "customer"}`} kicker={editing?.memberNo}>
       {editing ? <form className="modal-form" onSubmit={saveControls}>
         <p className="form-hint">Leave the limit blank for no configured ceiling. Enter zero to prevent new account-credit invoices while still allowing immediate full payment.</p>
         <div className="form-grid two"><label className="field"><span>Credit limit · {data.currency}</span><input name="creditLimit" type="number" min="0" max="100000000" step={10 ** -currencyFractionDigits(data.currency)} defaultValue={editing.creditLimit ?? ""} placeholder="No configured limit" /></label><label className="field"><span>Default terms · days</span><input name="creditTermsDays" type="number" min="0" max="365" step="1" defaultValue={editing.creditTermsDays} required /></label></div>
+        <div className="customer-dimension-defaults"><strong>Invoice management defaults</strong><p>New linked invoice drafts copy these active dimensions. The draft keeps its own snapshot and can be overridden before issue.</p><div className="form-grid two"><label className="field"><span>Default cost centre · optional</span><select name="costCentreId" defaultValue={editing.dimensionDefaults?.costCentre?.id || ""}><option value="">Not assigned</option>{data.dimensions.filter(item => item.type === "COST_CENTRE" && (item.active || item._id === editing.dimensionDefaults?.costCentre?.id)).map(item => <option key={item._id} value={item._id} disabled={!item.active}>{item.code} · {item.name}{item.active ? "" : " · archived"}</option>)}</select></label><label className="field"><span>Default project · optional</span><select name="projectId" defaultValue={editing.dimensionDefaults?.project?.id || ""}><option value="">Not assigned</option>{data.dimensions.filter(item => item.type === "PROJECT" && (item.active || item._id === editing.dimensionDefaults?.project?.id)).map(item => <option key={item._id} value={item._id} disabled={!item.active}>{item.code} · {item.name}{item.active ? "" : " · archived"}</option>)}</select></label></div></div>
         <label className="customer-hold-toggle"><input name="creditHold" type="checkbox" defaultChecked={editing.creditHold} /><span><strong>Place account on credit hold</strong><small>Blocks marking linked drafts as sent; it does not rewrite existing invoices.</small></span></label>
-        <label className="field"><span>Reason for this control change</span><textarea name="reason" minLength={3} maxLength={300} rows={3} required placeholder="Approved limit, temporary hold, reviewed terms…" /></label>
+        <label className="field"><span>Reason for this account change</span><textarea name="reason" minLength={3} maxLength={300} rows={3} required placeholder="Approved terms, reporting default, temporary hold…" /></label>
         <footer><button type="button" className="button button-secondary" disabled={busy} onClick={() => setEditing(null)}>Cancel</button><button className="button button-primary" disabled={busy}>{busy ? "Saving…" : "Save controls"}</button></footer>
       </form> : null}
     </Modal>
