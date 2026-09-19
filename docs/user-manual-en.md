@@ -188,7 +188,20 @@ Recommendations combine:
 
 Use **Build from replenishment queue** while drafting a purchase order. A human still needs to consider seasonality, promotions, shelf life, storage capacity and supplier availability.
 
-### 5.3 Purchase order
+### 5.3 Purchase requisition
+
+When a shop or department needs internal approval before committing:
+
+1. Open **Requisitions** and create a new purchase requisition.
+2. Choose receiving location, required date, priority and an optional suggested supplier.
+3. Enter a clear business justification, products and quantities, then submit.
+4. A different authorised user approves or rejects it with a reason; except for the Owner override, the requester cannot approve their own request.
+5. On an approved request, choose **Create purchase order**, select the supplier and confirm cost, tax and expected date.
+6. Conversion locks the approved destination, products and quantities and marks the source requisition converted in the same database transaction, preventing a second purchase order.
+
+Cancellation, rejection, approval and conversion retain version, operator, time and reason. A requisition alone does not move stock, create a payable or post accounting.
+
+### 5.4 Purchase order
 
 1. Create a purchase-order draft.
 2. Choose supplier, receiving location and expected date.
@@ -197,7 +210,7 @@ Use **Build from replenishment queue** while drafting a purchase order. A human 
 5. Save and obtain authorised approval. Except for the Owner small-business override, a maker cannot approve their own order.
 6. A draft or approved order with no receipt can be cancelled with a reason.
 
-### 5.4 Goods receipt
+### 5.5 Goods receipt
 
 1. Receive only an `APPROVED` or `PARTIALLY_RECEIVED` order.
 2. Enter only quantity physically received now, not the expected remainder.
@@ -206,7 +219,7 @@ Use **Build from replenishment queue** while drafting a purchase order. A human 
 5. Submission updates inventory, weighted cost, supplier performance, payable, general ledger and audit in one database transaction.
 6. If the supplier will not deliver the outstanding quantity, use **Close remainder** on a partially received order and record a permanent reason. This does not reverse received stock or bills.
 
-### 5.5 AP aging
+### 5.6 AP aging
 
 Open **Bills & payments** to review:
 
@@ -221,7 +234,7 @@ Open **Bills & payments** to review:
 
 Use **Export aging CSV** to give management or an external accountant the open-bill position as of the displayed date.
 
-### 5.6 Supplier payment
+### 5.7 Supplier payment
 
 1. Select an open bill.
 2. Enter a payment amount. A partial payment is allowed but cannot exceed the balance.

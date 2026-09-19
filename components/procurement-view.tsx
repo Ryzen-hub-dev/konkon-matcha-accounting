@@ -108,6 +108,37 @@ type PurchaseOrder = {
   createdAt: string;
   createdBy?: string;
 };
+type RequisitionLine = {
+  productId: string;
+  sku: string;
+  productName: string;
+  unit: string;
+  quantity: number;
+};
+type PurchaseRequisition = {
+  _id: string;
+  requisitionNo: string;
+  locationId: string;
+  locationCode: string;
+  locationName: string;
+  requiredDate: string;
+  priority: "NORMAL" | "URGENT";
+  justification: string;
+  notes: string;
+  items: RequisitionLine[];
+  suggestedSupplierId?: string | null;
+  suggestedSupplierCode?: string;
+  suggestedSupplierName?: string;
+  status: "SUBMITTED" | "APPROVED" | "REJECTED" | "CANCELLED" | "CONVERTED";
+  version: number;
+  createdBy?: string;
+  createdByName: string;
+  createdAt: string;
+  approvedByName?: string;
+  rejectionReason?: string;
+  cancellationReason?: string;
+  convertedPurchaseOrderNo?: string;
+};
 type Suggestion = {
   productId: string;
   sku: string;
@@ -191,6 +222,7 @@ type ExchangeData = {
   rates: Array<{ quoteCurrency: string; rate: number }>;
 };
 type DraftLine = { productId: string; quantity: number; unitCost: number };
+type RequisitionDraftLine = { productId: string; quantity: number };
 
 function isoDate(timeZone: string, days = 0) {
   return dateKeyInTimeZone(new Date(Date.now() + days * 86_400_000), timeZone);
@@ -216,8 +248,9 @@ export function ProcurementView({
   allowSelfApproval: boolean;
 }) {
   const { profile, money, shortDate } = useBusiness();
-  const [tab, setTab] = useState<"ORDERS" | "SUPPLIERS" | "PAYABLES">("ORDERS");
+  const [tab, setTab] = useState<"REQUISITIONS" | "ORDERS" | "SUPPLIERS" | "PAYABLES">("REQUISITIONS");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [requisitions, setRequisitions] = useState<PurchaseRequisition[]>([]);
   const [purchase, setPurchase] = useState<PurchaseBundle>({
     orders: [],
     products: [],
@@ -260,11 +293,17 @@ export function ProcurementView({
   const [busy, setBusy] = useState(false);
   const [supplierOpen, setSupplierOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [requisitionOpen, setRequisitionOpen] = useState(false);
   const [orderOpen, setOrderOpen] = useState(false);
   const [receiveOrder, setReceiveOrder] = useState<PurchaseOrder | null>(null);
   const [payBill, setPayBill] = useState<Bill | null>(null);
   const [supplierId, setSupplierId] = useState("");
   const [locationId, setLocationId] = useState("");
+  const [sourceRequisitionId, setSourceRequisitionId] = useState("");
+  const [requisitionLocationId, setRequisitionLocationId] = useState("");
+  const [requisitionSupplierId, setRequisitionSupplierId] = useState("");
+  const [requisitionRequiredDate, setRequisitionRequiredDate] = useState(isoDate(profile.timeZone, 7));
+  const [requisitionLines, setRequisitionLines] = useState<RequisitionDraftLine[]>([{ productId: "", quantity: 1 }]);
   const [expectedDate, setExpectedDate] = useState(
     isoDate(profile.timeZone, 7),
   );
@@ -284,7 +323,7 @@ export function ProcurementView({
   async function load(showLoading = true) {
     if (showLoading) setLoading(true);
     try {
-      const [supplierData, purchaseData, payableData, exchangeData] =
+      const [supplierData, purchaseData, payableData, exchangeData, requisitionData] =
         await Promise.all([
           apiRequest<Supplier[]>(
             `/api/suppliers${canWrite ? "?includeArchived=1" : ""}`,
@@ -292,11 +331,13 @@ export function ProcurementView({
           apiRequest<PurchaseBundle>("/api/purchase-orders"),
           apiRequest<PayablesBundle>("/api/accounts-payable"),
           apiRequest<ExchangeData>("/api/exchange-rates"),
+          apiRequest<PurchaseRequisition[]>("/api/purchase-requisitions"),
         ]);
       setSuppliers(supplierData);
       setPurchase(purchaseData);
       setPayables(payableData);
       setExchange(exchangeData);
+      setRequisitions(requisitionData);
       setSupplierId((current) =>
         supplierData.some(
           (supplier) => supplier._id === current && supplier.active !== false,
@@ -491,12 +532,87 @@ export function ProcurementView({
 
   function beginOrder() {
     const supplier = activeSuppliers[0];
+    setSourceRequisitionId("");
     setSupplierId(supplier?._id || "");
     setLocationId(purchase.locations[0]?._id || "");
     setExpectedDate(isoDate(profile.timeZone, supplier?.leadTimeDays || 7));
     setTaxRate(purchase.business.taxRate);
     setTaxMode(purchase.business.taxMode);
     setDraftLines([{ productId: "", quantity: 1, unitCost: 0 }]);
+    setOrderOpen(true);
+  }
+
+  function beginRequisition() {
+    setRequisitionLocationId(purchase.locations[0]?._id || "");
+    setRequisitionSupplierId("");
+    setRequisitionRequiredDate(isoDate(profile.timeZone, 7));
+    setRequisitionLines([{ productId: "", quantity: 1 }]);
+    setRequisitionOpen(true);
+  }
+
+  async function createRequisition(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    setBusy(true);
+    try {
+      await apiRequest("/api/purchase-requisitions", {
+        method: "POST",
+        body: JSON.stringify({
+          clientRequestId: crypto.randomUUID(),
+          locationId: requisitionLocationId,
+          suggestedSupplierId: requisitionSupplierId,
+          requiredDate: requisitionRequiredDate,
+          priority: data.get("priority"),
+          justification: data.get("justification"),
+          notes: data.get("notes"),
+          items: requisitionLines,
+        }),
+      });
+      show("Purchase requisition submitted for approval.");
+      setRequisitionOpen(false);
+      await load(false);
+    } catch (reason) {
+      show(reason instanceof Error ? reason.message : "Could not submit the purchase requisition.", "error");
+    } finally { setBusy(false); }
+  }
+
+  async function requisitionAction(requisition: PurchaseRequisition, action: "APPROVE" | "REJECT" | "CANCEL") {
+    const reason = action === "REJECT"
+      ? window.prompt("Reason for rejecting this purchase requisition:")?.trim()
+      : action === "CANCEL"
+        ? window.prompt("Reason for cancelling this purchase requisition:")?.trim()
+        : "";
+    if ((action === "REJECT" || action === "CANCEL") && !reason) return;
+    if (reason && reason.length < 3) {
+      show("Please enter at least three characters of review evidence.", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      await apiRequest("/api/purchase-requisitions", {
+        method: "PATCH",
+        body: JSON.stringify({ id: requisition._id, expectedVersion: requisition.version, action, ...(reason ? { reason } : {}) }),
+      });
+      show(action === "APPROVE" ? "Purchase requisition approved." : action === "REJECT" ? "Purchase requisition rejected with evidence." : "Purchase requisition cancelled.");
+      await load(false);
+    } catch (reasonValue) {
+      show(reasonValue instanceof Error ? reasonValue.message : "Could not update the purchase requisition.", "error");
+    } finally { setBusy(false); }
+  }
+
+  function beginOrderFromRequisition(requisition: PurchaseRequisition) {
+    const supplier = activeSuppliers.find((item) => item._id === requisition.suggestedSupplierId) || activeSuppliers[0];
+    setSourceRequisitionId(requisition._id);
+    setSupplierId(supplier?._id || "");
+    setLocationId(requisition.locationId);
+    setExpectedDate(requisition.requiredDate.slice(0, 10) < isoDate(profile.timeZone) ? isoDate(profile.timeZone) : requisition.requiredDate.slice(0, 10));
+    setTaxRate(purchase.business.taxRate);
+    setTaxMode(purchase.business.taxMode);
+    setDraftLines(requisition.items.map((line) => ({
+      productId: line.productId,
+      quantity: line.quantity,
+      unitCost: supplierCost(purchase.products.find((product) => product._id === line.productId), supplier),
+    })));
     setOrderOpen(true);
   }
 
@@ -574,6 +690,7 @@ export function ProcurementView({
         method: "POST",
         body: JSON.stringify({
           clientRequestId: crypto.randomUUID(),
+          ...(sourceRequisitionId ? { sourceRequisitionId } : {}),
           supplierId,
           locationId,
           expectedDate,
@@ -586,6 +703,7 @@ export function ProcurementView({
       });
       show("Purchase order draft created.");
       setOrderOpen(false);
+      setSourceRequisitionId("");
       await load(false);
     } catch (reason) {
       show(
@@ -745,7 +863,10 @@ export function ProcurementView({
         description="Plan replenishment, approve commitments, receive stock and settle supplier bills without breaking the audit trail."
         action={
           canWrite ? (
-            <AddButton onClick={beginOrder}>New purchase order</AddButton>
+            <div className="row-actions">
+              <button className="button button-secondary" onClick={beginOrder}><FilePlus2 size={16} />New purchase order</button>
+              <AddButton onClick={beginRequisition}>New requisition</AddButton>
+            </div>
           ) : undefined
         }
       />
@@ -807,6 +928,12 @@ export function ProcurementView({
       </section>
       <div className="procurement-tabs" role="tablist">
         <button
+          className={tab === "REQUISITIONS" ? "active" : ""}
+          onClick={() => setTab("REQUISITIONS")}
+        >
+          Requisitions
+        </button>
+        <button
           className={tab === "ORDERS" ? "active" : ""}
           onClick={() => setTab("ORDERS")}
         >
@@ -828,6 +955,40 @@ export function ProcurementView({
 
       {loading ? (
         <LoadingPanel label="Opening the purchase ledger…" />
+      ) : tab === "REQUISITIONS" ? (
+        <section className="panel procurement-ledger">
+          <div className="panel-header">
+            <div><span className="eyebrow">REQUEST TO BUY</span><h2>Purchase requisitions</h2></div>
+            {canWrite ? <AddButton onClick={beginRequisition}>New requisition</AddButton> : null}
+          </div>
+          {requisitions.length ? <div className="requisition-list">
+            {requisitions.map((requisition) => {
+              const makerCanApprove = allowSelfApproval || !requisition.createdBy || requisition.createdBy !== currentUserId;
+              return <article key={requisition._id} className={requisition.priority === "URGENT" && requisition.status === "SUBMITTED" ? "urgent" : ""}>
+                <header>
+                  <div className="requisition-stamp"><FilePlus2 /></div>
+                  <span><strong>{requisition.requisitionNo}</strong><small>{requisition.createdByName} · {shortDate.format(new Date(requisition.createdAt))}</small></span>
+                  <span><small>REQUIRED</small><strong>{dateOnly.format(new Date(requisition.requiredDate))}</strong></span>
+                  <span><small>DESTINATION</small><strong>{requisition.locationCode} · {requisition.locationName}</strong></span>
+                  <span><small>PRIORITY</small><strong>{requisition.priority}</strong></span>
+                  <StatusPill value={requisition.status} />
+                </header>
+                <div className="requisition-body">
+                  <div><span className="eyebrow">BUSINESS JUSTIFICATION</span><p>{requisition.justification}</p>{requisition.notes ? <small>{requisition.notes}</small> : null}</div>
+                  <div className="requisition-items">{requisition.items.map((line) => <span key={line.productId}><strong>{line.sku} · {line.productName}</strong><b>{line.quantity} {line.unit}</b></span>)}</div>
+                  <footer>
+                    <span>{requisition.suggestedSupplierName ? `Suggested supplier · ${requisition.suggestedSupplierCode} · ${requisition.suggestedSupplierName}` : "Supplier to be selected during purchase-order preparation"}{requisition.convertedPurchaseOrderNo ? ` · Converted to ${requisition.convertedPurchaseOrderNo}` : ""}{requisition.rejectionReason ? ` · Rejected: ${requisition.rejectionReason}` : ""}{requisition.cancellationReason ? ` · Cancelled: ${requisition.cancellationReason}` : ""}</span>
+                    <div className="row-actions">
+                      {canWrite && requisition.status === "SUBMITTED" ? <button className="button button-quiet" disabled={busy} onClick={() => void requisitionAction(requisition, "CANCEL")}><XCircle size={14} />Cancel</button> : null}
+                      {canApprove && makerCanApprove && requisition.status === "SUBMITTED" ? <><button className="button button-quiet" disabled={busy} onClick={() => void requisitionAction(requisition, "REJECT")}><XCircle size={14} />Reject</button><button className="button button-secondary" disabled={busy} onClick={() => void requisitionAction(requisition, "APPROVE")}><ClipboardCheck size={14} />Approve</button></> : null}
+                      {canWrite && requisition.status === "APPROVED" ? <button className="button button-primary" disabled={busy} onClick={() => beginOrderFromRequisition(requisition)}><FilePlus2 size={14} />Create purchase order</button> : null}
+                    </div>
+                  </footer>
+                </div>
+              </article>;
+            })}
+          </div> : <EmptyState title="No purchase requisitions" detail="Submit an internal request for products before committing to a supplier purchase order." action={canWrite ? <AddButton onClick={beginRequisition}>New requisition</AddButton> : undefined} />}
+        </section>
       ) : tab === "ORDERS" ? (
         <section className="panel procurement-ledger">
           <div className="panel-header">
@@ -1262,6 +1423,40 @@ export function ProcurementView({
       )}
 
       <Modal
+        open={requisitionOpen}
+        onClose={() => setRequisitionOpen(false)}
+        title="New purchase requisition"
+        kicker="INTERNAL REQUEST · MAKER-CHECKER"
+      >
+        <form className="modal-form wide-form" onSubmit={createRequisition}>
+          <div className="receipt-control-note">
+            <ClipboardCheck />
+            <span><strong>Request first, commit after approval</strong><small>The approved location, products and quantities are locked into the converted purchase order.</small></span>
+          </div>
+          <div className="form-grid three">
+            <label className="field"><span>Receiving location</span><select value={requisitionLocationId} onChange={(event) => setRequisitionLocationId(event.target.value)} required><option value="">Choose location</option>{purchase.locations.map((location) => <option key={location._id} value={location._id}>{location.code} · {location.name}</option>)}</select></label>
+            <label className="field"><span>Suggested supplier · optional</span><select value={requisitionSupplierId} onChange={(event) => setRequisitionSupplierId(event.target.value)}><option value="">Select during purchase order</option>{activeSuppliers.map((supplier) => <option key={supplier._id} value={supplier._id}>{supplier.code} · {supplier.name}</option>)}</select></label>
+            <label className="field"><span>Required date</span><input type="date" min={isoDate(profile.timeZone)} value={requisitionRequiredDate} onChange={(event) => setRequisitionRequiredDate(event.target.value)} required /></label>
+          </div>
+          <div className="form-grid two">
+            <label className="field"><span>Priority</span><select name="priority" defaultValue="NORMAL"><option value="NORMAL">Normal</option><option value="URGENT">Urgent</option></select></label>
+            <label className="field"><span>Business justification</span><input name="justification" minLength={3} maxLength={500} required placeholder="Why these products are needed" /></label>
+          </div>
+          <div className="requisition-line-editor">
+            <header><span>Product</span><span>Requested quantity</span><span /></header>
+            {requisitionLines.map((line, index) => <div key={index}>
+              <select value={line.productId} onChange={(event) => setRequisitionLines((current) => current.map((item, lineIndex) => lineIndex === index ? { ...item, productId: event.target.value } : item))} required><option value="">Choose product</option>{purchase.products.map((product) => <option key={product._id} value={product._id}>{product.sku} · {product.name} · stock {product.stock}</option>)}</select>
+              <input type="number" min="1" max="1000000" step="1" value={line.quantity} onChange={(event) => setRequisitionLines((current) => current.map((item, lineIndex) => lineIndex === index ? { ...item, quantity: Number(event.target.value) } : item))} required />
+              <button type="button" disabled={requisitionLines.length === 1} onClick={() => setRequisitionLines((current) => current.filter((_, lineIndex) => lineIndex !== index))}><XCircle size={15} /></button>
+            </div>)}
+            <button type="button" className="add-line" onClick={() => setRequisitionLines((current) => [...current, { productId: "", quantity: 1 }])}><Plus size={15} />Add product</button>
+          </div>
+          <label className="field"><span>Request notes</span><textarea name="notes" rows={3} maxLength={500} placeholder="Specification, preferred pack size or operational context" /></label>
+          <footer><button type="button" className="button button-secondary" onClick={() => setRequisitionOpen(false)}>Cancel</button><button className="button button-primary" disabled={busy || !requisitionLocationId}>{busy ? "Submitting…" : "Submit for approval"}</button></footer>
+        </form>
+      </Modal>
+
+      <Modal
         open={supplierOpen}
         onClose={() => {
           setSupplierOpen(false);
@@ -1437,6 +1632,7 @@ export function ProcurementView({
         kicker="CONTROLLED COMMITMENT"
       >
         <form className="modal-form wide-form" onSubmit={createOrder}>
+          {sourceRequisitionId ? <div className="receipt-control-note"><ClipboardCheck /><span><strong>Converting an approved requisition</strong><small>Destination, products and quantities are locked. Select the supplier, confirm costs and create the purchase-order draft.</small></span></div> : null}
           <div className="purchase-draft-top">
             <div className="form-grid three">
               <label className="field">
@@ -1459,6 +1655,7 @@ export function ProcurementView({
                 <select
                   value={locationId}
                   onChange={(event) => setLocationId(event.target.value)}
+                  disabled={Boolean(sourceRequisitionId)}
                   required
                 >
                   <option value="">Choose location</option>
@@ -1480,20 +1677,22 @@ export function ProcurementView({
                 />
               </label>
             </div>
-            <button
-              type="button"
-              className="smart-reorder-button"
-              onClick={applySmartReorder}
-            >
-              <Sparkles />
-              <span>
-                <strong>Build from replenishment queue</strong>
-                <small>
-                  {purchase.reorderSuggestions.length} low-stock recommendations
-                  use recent 30-day demand
-                </small>
-              </span>
-            </button>
+            {!sourceRequisitionId ? (
+              <button
+                type="button"
+                className="smart-reorder-button"
+                onClick={applySmartReorder}
+              >
+                <Sparkles />
+                <span>
+                  <strong>Build from replenishment queue</strong>
+                  <small>
+                    {purchase.reorderSuggestions.length} low-stock recommendations
+                    use recent 30-day demand
+                  </small>
+                </span>
+              </button>
+            ) : null}
           </div>
           <div className="form-grid three">
             <label className="field">
@@ -1539,6 +1738,7 @@ export function ProcurementView({
               <div key={index}>
                 <select
                   value={line.productId}
+                  disabled={Boolean(sourceRequisitionId)}
                   onChange={(event) => {
                     const product = purchase.products.find(
                       (item) => item._id === event.target.value,
@@ -1562,6 +1762,7 @@ export function ProcurementView({
                   min="1"
                   step="1"
                   value={line.quantity}
+                  disabled={Boolean(sourceRequisitionId)}
                   onChange={(event) =>
                     updateDraftLine(index, {
                       quantity: Number(event.target.value),
@@ -1598,6 +1799,7 @@ export function ProcurementView({
                       current.filter((_, lineIndex) => lineIndex !== index),
                     )
                   }
+                  hidden={Boolean(sourceRequisitionId)}
                 >
                   <XCircle size={15} />
                 </button>
@@ -1606,6 +1808,7 @@ export function ProcurementView({
             <button
               type="button"
               className="add-line"
+              hidden={Boolean(sourceRequisitionId)}
               onClick={() =>
                 setDraftLines((current) => [
                   ...current,

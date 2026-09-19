@@ -4,12 +4,13 @@ import { writeAudit } from "@/lib/audit";
 import { AccountingPeriodClosedError } from "@/lib/accounting-periods";
 import { assertAccountingPeriodOpen } from "@/lib/accounting-period-lock";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
+import { businessKeyLockId, touchBusinessKeyLock } from "@/lib/business-key-lock";
 import { dateKeyInTimeZone } from "@/lib/dates";
 import { getDb, getMongoClient } from "@/lib/db";
 import { readExchangeRate } from "@/lib/exchange-rates";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { currencyMinorUnits, roundCurrency } from "@/lib/international";
-import { approvalRequiresDifferentMaker, ensureProcurementAccounts, purchaseOrderActionSchema, purchaseOrderInputSchema, suggestedReorderAfterInbound, weightedAverageInventoryCost } from "@/lib/procurement";
+import { approvalRequiresDifferentMaker, ensureProcurementAccounts, purchaseOrderActionSchema, purchaseOrderInputSchema, requisitionMatchesOrder, suggestedReorderAfterInbound, weightedAverageInventoryCost } from "@/lib/procurement";
 import { calculateTaxTotals } from "@/lib/tax";
 import { addInventoryBatchQuantity, lotKey, normaliseLotNo } from "@/lib/inventory-batches";
 import { applyDimensionAllocation, dimensionRuleAuditId, resolveDimensionAllocation } from "@/lib/dimension-allocation";
@@ -101,10 +102,15 @@ export async function POST(request: Request) {
   try {
     const input = purchaseOrderInputSchema.safeParse(body.value);
     if (!input.success) return fail("Check the purchase order.", 422, input.error.flatten().fieldErrors);
-    if (!ObjectId.isValid(input.data.supplierId) || !ObjectId.isValid(input.data.locationId) || input.data.items.some((item) => !ObjectId.isValid(item.productId))) return fail("A supplier, location or product reference is invalid.", 422);
+    if (!ObjectId.isValid(input.data.supplierId) || !ObjectId.isValid(input.data.locationId) || input.data.items.some((item) => !ObjectId.isValid(item.productId)) || (input.data.sourceRequisitionId && !ObjectId.isValid(input.data.sourceRequisitionId))) return fail("A supplier, location, product or requisition reference is invalid.", 422);
     const db = await getDb();
     const existing = await db.collection("purchaseOrders").findOne({ clientRequestId: input.data.clientRequestId });
-    if (existing) return ok(serialise(existing));
+    if (existing) {
+      const existingSource = String(existing.sourceRequisitionId || "");
+      const requestedSource = input.data.sourceRequisitionId || "";
+      if (existingSource !== requestedSource) return fail("This request key is already attached to a different purchase-order source.", 409);
+      return ok(serialise(existing));
+    }
     const productIds = input.data.items.map((item) => new ObjectId(item.productId));
     const [supplier, location, products, settings] = await Promise.all([
       db.collection("suppliers").findOne({ _id: new ObjectId(input.data.supplierId), active: { $ne: false } }),
@@ -175,6 +181,32 @@ export async function POST(request: Request) {
       createdAt: now,
       updatedAt: now,
     };
+    if (input.data.sourceRequisitionId) {
+      const client = await getMongoClient();
+      const mongoSession = client.startSession();
+      const requisitionId = new ObjectId(input.data.sourceRequisitionId);
+      let converted: Record<string, unknown> | null = null;
+      try {
+        await mongoSession.withTransaction(async () => {
+          await touchBusinessKeyLock(db, businessKeyLockId("PURCHASE_REQUISITION_CONVERSION", input.data.sourceRequisitionId!), mongoSession, now);
+          const requisition = await db.collection("purchaseRequisitions").findOne({ _id: requisitionId, status: "APPROVED" }, { session: mongoSession });
+          if (!requisition) throw new PurchaseConflictError("Only a current approved purchase requisition can be converted.");
+          if (!requisitionMatchesOrder({ locationId: requisition.locationId, items: Array.isArray(requisition.items) ? requisition.items : [] }, { locationId: input.data.locationId, items: input.data.items })) throw new PurchaseConflictError("The purchase order must keep the approved requisition location, products and quantities.");
+          const purchaseOrderId = new ObjectId();
+          converted = { _id: purchaseOrderId, ...document, sourceRequisitionId: requisitionId, sourceRequisitionNo: requisition.requisitionNo };
+          await db.collection("purchaseOrders").insertOne(converted, { session: mongoSession });
+          const updated = await db.collection("purchaseRequisitions").updateOne(
+            { _id: requisitionId, status: "APPROVED", version: requisition.version },
+            { $set: { status: "CONVERTED", convertedAt: now, convertedBy: new ObjectId(auth.session.id), convertedByName: auth.session.fullName, convertedPurchaseOrderId: purchaseOrderId, convertedPurchaseOrderNo: document.purchaseOrderNo, updatedAt: now }, $inc: { version: 1 }, $push: { history: { action: "CONVERTED", purchaseOrderId, purchaseOrderNo: document.purchaseOrderNo, by: new ObjectId(auth.session.id), byName: auth.session.fullName, at: now } } as never },
+            { session: mongoSession },
+          );
+          if (!updated.modifiedCount) throw new PurchaseConflictError("The requisition changed while it was being converted. Reload and try again.");
+          await writeAudit(db, auth.session, "purchase_order.create", "purchaseOrder", purchaseOrderId.toHexString(), { purchaseOrderNo: document.purchaseOrderNo, supplierCode: supplier.code, total: document.total, currency: document.currency, sourceRequisitionNo: requisition.requisitionNo }, mongoSession);
+          await writeAudit(db, auth.session, "purchase_requisition.convert", "purchaseRequisition", requisitionId.toHexString(), { requisitionNo: requisition.requisitionNo, purchaseOrderNo: document.purchaseOrderNo }, mongoSession);
+        });
+      } finally { await mongoSession.endSession(); }
+      return created(serialise(converted));
+    }
     const result = await db.collection("purchaseOrders").insertOne(document);
     await writeAudit(db, auth.session, "purchase_order.create", "purchaseOrder", result.insertedId.toHexString(), { purchaseOrderNo: document.purchaseOrderNo, supplierCode: supplier.code, total: document.total, currency: document.currency });
     return created(serialise({ _id: result.insertedId, ...document }));

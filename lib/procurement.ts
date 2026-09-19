@@ -34,6 +34,7 @@ const purchaseLineSchema = z.object({
 
 export const purchaseOrderInputSchema = z.object({
   clientRequestId: z.string().uuid(),
+  sourceRequisitionId: z.string().length(24).optional(),
   supplierId: z.string().length(24),
   locationId: z.string().length(24),
   expectedDate: z.coerce.date(),
@@ -46,6 +47,45 @@ export const purchaseOrderInputSchema = z.object({
   const ids = value.items.map((item) => item.productId);
   if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", path: ["items"], message: "Each product can appear only once on a purchase order." });
 });
+
+const requisitionLineSchema = z.object({
+  productId: z.string().length(24),
+  quantity: z.coerce.number().int().min(1).max(1_000_000),
+});
+
+export const purchaseRequisitionInputSchema = z.object({
+  clientRequestId: z.string().uuid(),
+  locationId: z.string().length(24),
+  suggestedSupplierId: z.union([z.string().length(24), z.literal("")]).default(""),
+  requiredDate: z.coerce.date(),
+  priority: z.enum(["NORMAL", "URGENT"]).default("NORMAL"),
+  justification: z.string().trim().min(3).max(500),
+  notes: z.string().trim().max(500).default(""),
+  items: z.array(requisitionLineSchema).min(1).max(100),
+}).superRefine((value, context) => {
+  const ids = value.items.map((item) => item.productId);
+  if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", path: ["items"], message: "Each product can appear only once on a purchase requisition." });
+});
+
+export const purchaseRequisitionActionSchema = z.discriminatedUnion("action", [
+  z.object({ id: z.string().length(24), expectedVersion: z.coerce.number().int().min(1), action: z.literal("APPROVE") }),
+  z.object({ id: z.string().length(24), expectedVersion: z.coerce.number().int().min(1), action: z.literal("REJECT"), reason: z.string().trim().min(3).max(300) }),
+  z.object({ id: z.string().length(24), expectedVersion: z.coerce.number().int().min(1), action: z.literal("CANCEL"), reason: z.string().trim().min(3).max(300) }),
+]);
+
+export function requisitionMatchesOrder(requisition: {
+  locationId?: unknown;
+  items?: Array<{ productId?: unknown; quantity?: unknown }>;
+}, order: {
+  locationId?: unknown;
+  items?: Array<{ productId?: unknown; quantity?: unknown }>;
+}) {
+  if (String(requisition.locationId || "") !== String(order.locationId || "")) return false;
+  const requested = new Map((requisition.items || []).map((line) => [String(line.productId || ""), Number(line.quantity || 0)]));
+  const ordered = new Map((order.items || []).map((line) => [String(line.productId || ""), Number(line.quantity || 0)]));
+  if (requested.size !== (requisition.items || []).length || ordered.size !== (order.items || []).length || requested.size !== ordered.size) return false;
+  return [...requested].every(([productId, quantity]) => productId && quantity > 0 && ordered.get(productId) === quantity);
+}
 
 const actionBase = z.object({ id: z.string().length(24) });
 export const purchaseOrderActionSchema = z.discriminatedUnion("action", [

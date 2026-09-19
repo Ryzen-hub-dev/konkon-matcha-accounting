@@ -39,6 +39,7 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Multi-country headquarters, branch, warehouse and franchise hierarchy with cycle/archive safeguards
 - Administrator-defined payment methods with reference/provider controls, settlement currencies and ledger-account routing
 - Supplier master data with country/currency, commercial terms, archive/restore and protected historical references
+- Purchase requisitions with location/date/priority/justification evidence, maker-checker approval, reasoned rejection/cancellation, optimistic versions and one-time transactional purchase-order conversion
 - Purchase order draft, maker-checker approval, cancellation, partial receiving, audited outstanding-balance short-close and location/supplier/product/time-zone snapshots
 - Transactional goods receipts that update stock, weighted-average cost, AP, input tax, journals and audit history together
 - Supplier bills, base-currency AP aging buckets, seven-day maturity and supplier-exposure views, safe CSV export, partial/full settlement, duplicate-post protection and realised foreign-exchange gain/loss posting
@@ -77,7 +78,7 @@ This count is a delivery benchmark, not a claim of AutoCount parity. Accounting,
 
 ## Next accounting modules
 
-- Purchase requisitions, RFQs, quotation comparison, purchase returns, landed cost and three-way matching exceptions
+- RFQs, quotation comparison, purchase returns, landed cost and three-way matching exceptions
 - Recurring invoices
 - Live bank feeds, reusable matching rules, controlled voucher creation and cash-flow forecast
 - Batched expense payment runs, mileage/per-diem policies and corporate-card feeds

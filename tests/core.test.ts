@@ -45,6 +45,7 @@ import {
 import { locationParentChainIsValid } from "../lib/locations";
 import {
   allocateSupplierPayment, approvalRequiresDifferentMaker, payableAge, purchaseOrderActionSchema, purchaseOrderInputSchema,
+  purchaseRequisitionActionSchema, purchaseRequisitionInputSchema, requisitionMatchesOrder,
   suggestedReorderAfterInbound, suggestedReorderQuantity, summarisePayableAging, supplierInputSchema,
   supplierPulse, weightedAverageInventoryCost,
 } from "../lib/procurement";
@@ -213,6 +214,21 @@ test("smart replenishment combines thresholds, demand and supplier lead time", (
   assert.equal(suggestedReorderQuantity(6, 5, 600, 30), 0);
   assert.equal(suggestedReorderAfterInbound(4, 5, 60, 14, 20), 9);
   assert.equal(suggestedReorderAfterInbound(4, 5, 60, 14, 29), 0);
+});
+
+test("purchase requisitions require controlled evidence and convert without scope drift", () => {
+  const items = [{ productId: "a".repeat(24), quantity: 8 }, { productId: "b".repeat(24), quantity: 3 }];
+  const input = { clientRequestId: "11111111-1111-4111-8111-111111111111", locationId: "c".repeat(24), requiredDate: "2026-10-01", priority: "URGENT", justification: "Replenish launch inventory", items };
+  assert.equal(purchaseRequisitionInputSchema.safeParse(input).success, true);
+  assert.equal(purchaseRequisitionInputSchema.safeParse({ ...input, justification: "x" }).success, false);
+  assert.equal(purchaseRequisitionInputSchema.safeParse({ ...input, items: [items[0], items[0]] }).success, false);
+  assert.equal(purchaseRequisitionActionSchema.safeParse({ id: "d".repeat(24), expectedVersion: 1, action: "APPROVE" }).success, true);
+  assert.equal(purchaseRequisitionActionSchema.safeParse({ id: "d".repeat(24), expectedVersion: 1, action: "REJECT", reason: "" }).success, false);
+  const requisition = { locationId: "c".repeat(24), items };
+  assert.equal(requisitionMatchesOrder(requisition, { locationId: "c".repeat(24), items: [...items].reverse() }), true);
+  assert.equal(requisitionMatchesOrder(requisition, { locationId: "e".repeat(24), items }), false);
+  assert.equal(requisitionMatchesOrder(requisition, { locationId: "c".repeat(24), items: [{ ...items[0], quantity: 7 }, items[1]] }), false);
+  assert.equal(requisitionMatchesOrder(requisition, { locationId: "c".repeat(24), items: [items[0], items[0]] }), false);
 });
 
 test("purchase controls use business dates and maker-checker approval", () => {
