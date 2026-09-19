@@ -35,6 +35,7 @@ const purchaseLineSchema = z.object({
 export const purchaseOrderInputSchema = z.object({
   clientRequestId: z.string().uuid(),
   sourceRequisitionId: z.string().length(24).optional(),
+  sourceRfqId: z.string().length(24).optional(),
   supplierId: z.string().length(24),
   locationId: z.string().length(24),
   expectedDate: z.coerce.date(),
@@ -46,6 +47,7 @@ export const purchaseOrderInputSchema = z.object({
 }).superRefine((value, context) => {
   const ids = value.items.map((item) => item.productId);
   if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", path: ["items"], message: "Each product can appear only once on a purchase order." });
+  if (value.sourceRfqId && !value.sourceRequisitionId) context.addIssue({ code: "custom", path: ["sourceRequisitionId"], message: "An RFQ purchase order must retain its source requisition." });
 });
 
 const requisitionLineSchema = z.object({
@@ -73,6 +75,39 @@ export const purchaseRequisitionActionSchema = z.discriminatedUnion("action", [
   z.object({ id: z.string().length(24), expectedVersion: z.coerce.number().int().min(1), action: z.literal("CANCEL"), reason: z.string().trim().min(3).max(300) }),
 ]);
 
+export const requestForQuotationInputSchema = z.object({
+  clientRequestId: z.string().uuid(),
+  sourceRequisitionId: z.string().length(24),
+  supplierIds: z.array(z.string().length(24)).min(2).max(10),
+  responseDueDate: z.coerce.date(),
+  notes: z.string().trim().max(500).default(""),
+}).superRefine((value, context) => {
+  if (new Set(value.supplierIds).size !== value.supplierIds.length) context.addIssue({ code: "custom", path: ["supplierIds"], message: "Invite each supplier only once." });
+});
+
+const supplierQuoteLineSchema = z.object({
+  productId: z.string().length(24),
+  unitCost: z.coerce.number().positive().max(100_000_000),
+});
+
+export const requestForQuotationActionSchema = z.discriminatedUnion("action", [
+  z.object({
+    id: z.string().length(24),
+    expectedVersion: z.coerce.number().int().min(1),
+    action: z.literal("SUBMIT_QUOTE"),
+    supplierId: z.string().length(24),
+    supplierReference: z.string().trim().min(2).max(80),
+    expectedDeliveryDate: z.coerce.date(),
+    notes: z.string().trim().max(500).default(""),
+    items: z.array(supplierQuoteLineSchema).min(1).max(100),
+  }).superRefine((value, context) => {
+    const ids = value.items.map((item) => item.productId);
+    if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", path: ["items"], message: "Quote each requested product only once." });
+  }),
+  z.object({ id: z.string().length(24), expectedVersion: z.coerce.number().int().min(1), action: z.literal("AWARD"), quoteId: z.string().length(24), reason: z.string().trim().min(3).max(300) }),
+  z.object({ id: z.string().length(24), expectedVersion: z.coerce.number().int().min(1), action: z.literal("CANCEL"), reason: z.string().trim().min(3).max(300) }),
+]);
+
 export function requisitionMatchesOrder(requisition: {
   locationId?: unknown;
   items?: Array<{ productId?: unknown; quantity?: unknown }>;
@@ -85,6 +120,32 @@ export function requisitionMatchesOrder(requisition: {
   const ordered = new Map((order.items || []).map((line) => [String(line.productId || ""), Number(line.quantity || 0)]));
   if (requested.size !== (requisition.items || []).length || ordered.size !== (order.items || []).length || requested.size !== ordered.size) return false;
   return [...requested].every(([productId, quantity]) => productId && quantity > 0 && ordered.get(productId) === quantity);
+}
+
+export function quoteMatchesPurchaseOrder(rfq: {
+  sourceRequisitionId?: unknown;
+  locationId?: unknown;
+  winningQuoteId?: unknown;
+  items?: Array<{ productId?: unknown; quantity?: unknown }>;
+  quotes?: Array<{ _id?: unknown; supplierId?: unknown; expectedDeliveryDate?: unknown; items?: Array<{ productId?: unknown; unitCost?: unknown }> }>;
+}, order: {
+  sourceRequisitionId?: unknown;
+  supplierId?: unknown;
+  locationId?: unknown;
+  expectedDate?: unknown;
+  items?: Array<{ productId?: unknown; quantity?: unknown; unitCost?: unknown }>;
+}) {
+  if (String(rfq.sourceRequisitionId || "") !== String(order.sourceRequisitionId || "") || String(rfq.locationId || "") !== String(order.locationId || "")) return false;
+  const quote = (rfq.quotes || []).find((item) => String(item._id || "") === String(rfq.winningQuoteId || ""));
+  if (!quote || String(quote.supplierId || "") !== String(order.supplierId || "")) return false;
+  const quoteDate = new Date(quote.expectedDeliveryDate as string | number | Date);
+  const orderDate = new Date(order.expectedDate as string | number | Date);
+  if (Number.isNaN(quoteDate.getTime()) || Number.isNaN(orderDate.getTime()) || quoteDate.toISOString().slice(0, 10) !== orderDate.toISOString().slice(0, 10)) return false;
+  const requested = new Map((rfq.items || []).map((line) => [String(line.productId || ""), Number(line.quantity || 0)]));
+  const quoted = new Map((quote.items || []).map((line) => [String(line.productId || ""), Number(line.unitCost || 0)]));
+  const ordered = new Map((order.items || []).map((line) => [String(line.productId || ""), { quantity: Number(line.quantity || 0), unitCost: Number(line.unitCost || 0) }]));
+  if (requested.size !== (rfq.items || []).length || quoted.size !== (quote.items || []).length || ordered.size !== (order.items || []).length || requested.size !== quoted.size || requested.size !== ordered.size) return false;
+  return [...requested].every(([productId, quantity]) => productId && quantity > 0 && ordered.get(productId)?.quantity === quantity && ordered.get(productId)?.unitCost === quoted.get(productId));
 }
 
 const actionBase = z.object({ id: z.string().length(24) });

@@ -45,7 +45,7 @@ import {
 import { locationParentChainIsValid } from "../lib/locations";
 import {
   allocateSupplierPayment, approvalRequiresDifferentMaker, payableAge, purchaseOrderActionSchema, purchaseOrderInputSchema,
-  purchaseRequisitionActionSchema, purchaseRequisitionInputSchema, requisitionMatchesOrder,
+  purchaseRequisitionActionSchema, purchaseRequisitionInputSchema, quoteMatchesPurchaseOrder, requestForQuotationActionSchema, requestForQuotationInputSchema, requisitionMatchesOrder,
   suggestedReorderAfterInbound, suggestedReorderQuantity, summarisePayableAging, supplierInputSchema,
   supplierPulse, weightedAverageInventoryCost,
 } from "../lib/procurement";
@@ -229,6 +229,37 @@ test("purchase requisitions require controlled evidence and convert without scop
   assert.equal(requisitionMatchesOrder(requisition, { locationId: "e".repeat(24), items }), false);
   assert.equal(requisitionMatchesOrder(requisition, { locationId: "c".repeat(24), items: [{ ...items[0], quantity: 7 }, items[1]] }), false);
   assert.equal(requisitionMatchesOrder(requisition, { locationId: "c".repeat(24), items: [items[0], items[0]] }), false);
+});
+
+test("RFQ comparison requires competition and locks the awarded commercial scope", () => {
+  const productA = "a".repeat(24);
+  const productB = "b".repeat(24);
+  const supplierA = "c".repeat(24);
+  const supplierB = "d".repeat(24);
+  const sourceRequisitionId = "e".repeat(24);
+  const locationId = "f".repeat(24);
+  const input = { clientRequestId: "22222222-2222-4222-8222-222222222222", sourceRequisitionId, supplierIds: [supplierA, supplierB], responseDueDate: "2026-10-01" };
+  assert.equal(requestForQuotationInputSchema.safeParse(input).success, true);
+  assert.equal(requestForQuotationInputSchema.safeParse({ ...input, supplierIds: [supplierA] }).success, false);
+  assert.equal(requestForQuotationInputSchema.safeParse({ ...input, supplierIds: [supplierA, supplierA] }).success, false);
+  const quoteAction = { id: "1".repeat(24), expectedVersion: 1, action: "SUBMIT_QUOTE", supplierId: supplierA, supplierReference: "QT-001", expectedDeliveryDate: "2026-10-05", items: [{ productId: productA, unitCost: 12 }, { productId: productB, unitCost: 8 }] };
+  assert.equal(requestForQuotationActionSchema.safeParse(quoteAction).success, true);
+  assert.equal(requestForQuotationActionSchema.safeParse({ ...quoteAction, items: [quoteAction.items[0], quoteAction.items[0]] }).success, false);
+  assert.equal(requestForQuotationActionSchema.safeParse({ id: "1".repeat(24), expectedVersion: 2, action: "AWARD", quoteId: "2".repeat(24), reason: "" }).success, false);
+  const winningQuoteId = "2".repeat(24);
+  const rfq = {
+    sourceRequisitionId,
+    locationId,
+    winningQuoteId,
+    items: [{ productId: productA, quantity: 5 }, { productId: productB, quantity: 2 }],
+    quotes: [{ _id: winningQuoteId, supplierId: supplierA, expectedDeliveryDate: "2026-10-05", items: [{ productId: productB, unitCost: 8 }, { productId: productA, unitCost: 12 }] }],
+  };
+  const order = { sourceRequisitionId, supplierId: supplierA, locationId, expectedDate: "2026-10-05", items: [{ productId: productA, quantity: 5, unitCost: 12 }, { productId: productB, quantity: 2, unitCost: 8 }] };
+  assert.equal(quoteMatchesPurchaseOrder(rfq, order), true);
+  assert.equal(quoteMatchesPurchaseOrder(rfq, { ...order, supplierId: supplierB }), false);
+  assert.equal(quoteMatchesPurchaseOrder(rfq, { ...order, expectedDate: "2026-10-06" }), false);
+  assert.equal(quoteMatchesPurchaseOrder(rfq, { ...order, items: [{ ...order.items[0], unitCost: 11 }, order.items[1]] }), false);
+  assert.equal(purchaseOrderInputSchema.safeParse({ clientRequestId: "33333333-3333-4333-8333-333333333333", sourceRfqId: winningQuoteId, supplierId: supplierA, locationId, expectedDate: "2026-10-05", items: order.items }).success, false);
 });
 
 test("purchase controls use business dates and maker-checker approval", () => {

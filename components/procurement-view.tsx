@@ -129,13 +129,55 @@ type PurchaseRequisition = {
   suggestedSupplierId?: string | null;
   suggestedSupplierCode?: string;
   suggestedSupplierName?: string;
-  status: "SUBMITTED" | "APPROVED" | "REJECTED" | "CANCELLED" | "CONVERTED";
+  status: "SUBMITTED" | "APPROVED" | "SOURCING" | "REJECTED" | "CANCELLED" | "CONVERTED";
   version: number;
   createdBy?: string;
   createdByName: string;
   createdAt: string;
   approvedByName?: string;
   rejectionReason?: string;
+  cancellationReason?: string;
+  sourceRfqNo?: string;
+  convertedPurchaseOrderNo?: string;
+};
+type SupplierQuote = {
+  _id: string;
+  supplierId: string;
+  supplierCode: string;
+  supplierName: string;
+  currency: string;
+  supplierReference: string;
+  expectedDeliveryDate: string;
+  notes: string;
+  items: Array<RequisitionLine & { unitCost: number; lineTotal: number }>;
+  subtotal: number;
+  baseCurrency: string;
+  baseSubtotal: number;
+  recordedByName: string;
+  recordedAt: string;
+};
+type RequestForQuotation = {
+  _id: string;
+  rfqNo: string;
+  sourceRequisitionId: string;
+  sourceRequisitionNo: string;
+  locationId: string;
+  locationCode: string;
+  locationName: string;
+  requiredDate: string;
+  justification: string;
+  items: RequisitionLine[];
+  invitedSuppliers: Array<{ supplierId: string; supplierCode: string; supplierName: string; currency: string }>;
+  responseDueDate: string;
+  notes: string;
+  quotes: SupplierQuote[];
+  status: "OPEN" | "AWARDED" | "CANCELLED" | "CONVERTED";
+  version: number;
+  createdBy?: string;
+  createdByName: string;
+  createdAt: string;
+  winningQuoteId?: string;
+  awardReason?: string;
   cancellationReason?: string;
   convertedPurchaseOrderNo?: string;
 };
@@ -248,9 +290,10 @@ export function ProcurementView({
   allowSelfApproval: boolean;
 }) {
   const { profile, money, shortDate } = useBusiness();
-  const [tab, setTab] = useState<"REQUISITIONS" | "ORDERS" | "SUPPLIERS" | "PAYABLES">("REQUISITIONS");
+  const [tab, setTab] = useState<"REQUISITIONS" | "RFQS" | "ORDERS" | "SUPPLIERS" | "PAYABLES">("REQUISITIONS");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [requisitions, setRequisitions] = useState<PurchaseRequisition[]>([]);
+  const [rfqs, setRfqs] = useState<RequestForQuotation[]>([]);
   const [purchase, setPurchase] = useState<PurchaseBundle>({
     orders: [],
     products: [],
@@ -294,12 +337,21 @@ export function ProcurementView({
   const [supplierOpen, setSupplierOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [requisitionOpen, setRequisitionOpen] = useState(false);
+  const [rfqOpen, setRfqOpen] = useState(false);
+  const [rfqSource, setRfqSource] = useState<PurchaseRequisition | null>(null);
+  const [rfqSupplierIds, setRfqSupplierIds] = useState<string[]>([]);
+  const [rfqResponseDueDate, setRfqResponseDueDate] = useState(isoDate(profile.timeZone, 3));
+  const [quoteRfq, setQuoteRfq] = useState<RequestForQuotation | null>(null);
+  const [quoteSupplierId, setQuoteSupplierId] = useState("");
+  const [quoteExpectedDate, setQuoteExpectedDate] = useState(isoDate(profile.timeZone, 7));
+  const [quoteLines, setQuoteLines] = useState<Array<{ productId: string; unitCost: number }>>([]);
   const [orderOpen, setOrderOpen] = useState(false);
   const [receiveOrder, setReceiveOrder] = useState<PurchaseOrder | null>(null);
   const [payBill, setPayBill] = useState<Bill | null>(null);
   const [supplierId, setSupplierId] = useState("");
   const [locationId, setLocationId] = useState("");
   const [sourceRequisitionId, setSourceRequisitionId] = useState("");
+  const [sourceRfqId, setSourceRfqId] = useState("");
   const [requisitionLocationId, setRequisitionLocationId] = useState("");
   const [requisitionSupplierId, setRequisitionSupplierId] = useState("");
   const [requisitionRequiredDate, setRequisitionRequiredDate] = useState(isoDate(profile.timeZone, 7));
@@ -323,7 +375,7 @@ export function ProcurementView({
   async function load(showLoading = true) {
     if (showLoading) setLoading(true);
     try {
-      const [supplierData, purchaseData, payableData, exchangeData, requisitionData] =
+      const [supplierData, purchaseData, payableData, exchangeData, requisitionData, rfqData] =
         await Promise.all([
           apiRequest<Supplier[]>(
             `/api/suppliers${canWrite ? "?includeArchived=1" : ""}`,
@@ -332,12 +384,14 @@ export function ProcurementView({
           apiRequest<PayablesBundle>("/api/accounts-payable"),
           apiRequest<ExchangeData>("/api/exchange-rates"),
           apiRequest<PurchaseRequisition[]>("/api/purchase-requisitions"),
+          apiRequest<RequestForQuotation[]>("/api/request-for-quotations"),
         ]);
       setSuppliers(supplierData);
       setPurchase(purchaseData);
       setPayables(payableData);
       setExchange(exchangeData);
       setRequisitions(requisitionData);
+      setRfqs(rfqData);
       setSupplierId((current) =>
         supplierData.some(
           (supplier) => supplier._id === current && supplier.active !== false,
@@ -370,6 +424,9 @@ export function ProcurementView({
   );
   const selectedSupplier = activeSuppliers.find(
     (supplier) => supplier._id === supplierId,
+  );
+  const selectedQuoteSupplier = activeSuppliers.find(
+    (supplier) => supplier._id === quoteSupplierId,
   );
   function rateForSupplier(supplier?: Supplier) {
     return !supplier || supplier.currency === exchange.baseCurrency
@@ -533,6 +590,7 @@ export function ProcurementView({
   function beginOrder() {
     const supplier = activeSuppliers[0];
     setSourceRequisitionId("");
+    setSourceRfqId("");
     setSupplierId(supplier?._id || "");
     setLocationId(purchase.locations[0]?._id || "");
     setExpectedDate(isoDate(profile.timeZone, supplier?.leadTimeDays || 7));
@@ -603,6 +661,7 @@ export function ProcurementView({
   function beginOrderFromRequisition(requisition: PurchaseRequisition) {
     const supplier = activeSuppliers.find((item) => item._id === requisition.suggestedSupplierId) || activeSuppliers[0];
     setSourceRequisitionId(requisition._id);
+    setSourceRfqId("");
     setSupplierId(supplier?._id || "");
     setLocationId(requisition.locationId);
     setExpectedDate(requisition.requiredDate.slice(0, 10) < isoDate(profile.timeZone) ? isoDate(profile.timeZone) : requisition.requiredDate.slice(0, 10));
@@ -613,6 +672,103 @@ export function ProcurementView({
       quantity: line.quantity,
       unitCost: supplierCost(purchase.products.find((product) => product._id === line.productId), supplier),
     })));
+    setOrderOpen(true);
+  }
+
+  function beginRfq(requisition: PurchaseRequisition) {
+    if (activeSuppliers.length < 2) return show("Create at least two active suppliers before opening an RFQ.", "error");
+    const preferred = activeSuppliers.find((supplier) => supplier._id === requisition.suggestedSupplierId);
+    const selected = [preferred, ...activeSuppliers.filter((supplier) => supplier._id !== preferred?._id)].filter(Boolean).slice(0, 2) as Supplier[];
+    const suggestedDeadline = isoDate(profile.timeZone, 3);
+    const requiredDate = requisition.requiredDate.slice(0, 10);
+    setRfqSource(requisition);
+    setRfqSupplierIds(selected.map((supplier) => supplier._id));
+    setRfqResponseDueDate(suggestedDeadline < requiredDate ? suggestedDeadline : requiredDate);
+    setRfqOpen(true);
+  }
+
+  function toggleRfqSupplier(id: string) {
+    setRfqSupplierIds((current) => current.includes(id) ? current.filter((supplierId) => supplierId !== id) : [...current, id]);
+  }
+
+  async function createRfq(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!rfqSource) return;
+    const data = new FormData(event.currentTarget);
+    setBusy(true);
+    try {
+      await apiRequest("/api/request-for-quotations", {
+        method: "POST",
+        body: JSON.stringify({ clientRequestId: crypto.randomUUID(), sourceRequisitionId: rfqSource._id, supplierIds: rfqSupplierIds, responseDueDate: rfqResponseDueDate, notes: data.get("notes") }),
+      });
+      show("RFQ opened and the approved requisition moved into sourcing.");
+      setRfqOpen(false);
+      setRfqSource(null);
+      setTab("RFQS");
+      await load(false);
+    } catch (reason) {
+      show(reason instanceof Error ? reason.message : "Could not open the RFQ.", "error");
+    } finally { setBusy(false); }
+  }
+
+  function chooseQuoteSupplier(rfq: RequestForQuotation, id: string) {
+    const supplier = activeSuppliers.find((item) => item._id === id);
+    setQuoteSupplierId(id);
+    setQuoteExpectedDate(isoDate(profile.timeZone, supplier?.leadTimeDays || 7));
+    setQuoteLines(rfq.items.map((line) => ({ productId: line.productId, unitCost: supplierCost(purchase.products.find((product) => product._id === line.productId), supplier) })));
+  }
+
+  function beginQuote(rfq: RequestForQuotation) {
+    const recorded = new Set(rfq.quotes.map((quote) => quote.supplierId));
+    const supplier = activeSuppliers.find((item) => rfq.invitedSuppliers.some((invited) => invited.supplierId === item._id) && !recorded.has(item._id));
+    if (!supplier) return show("Every invited supplier already has a recorded quote.", "error");
+    setQuoteRfq(rfq);
+    chooseQuoteSupplier(rfq, supplier._id);
+  }
+
+  async function submitQuote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!quoteRfq) return;
+    const data = new FormData(event.currentTarget);
+    setBusy(true);
+    try {
+      await apiRequest("/api/request-for-quotations", {
+        method: "PATCH",
+        body: JSON.stringify({ id: quoteRfq._id, expectedVersion: quoteRfq.version, action: "SUBMIT_QUOTE", supplierId: quoteSupplierId, supplierReference: data.get("supplierReference"), expectedDeliveryDate: quoteExpectedDate, notes: data.get("notes"), items: quoteLines }),
+      });
+      show("Supplier quote recorded with a base-currency comparison snapshot.");
+      setQuoteRfq(null);
+      await load(false);
+    } catch (reason) {
+      show(reason instanceof Error ? reason.message : "Could not record the supplier quote.", "error");
+    } finally { setBusy(false); }
+  }
+
+  async function rfqAction(rfq: RequestForQuotation, action: "AWARD" | "CANCEL", quoteId = "") {
+    const reason = window.prompt(action === "AWARD" ? "Reason for awarding this supplier quote:" : "Reason for cancelling this RFQ:")?.trim();
+    if (!reason) return;
+    if (reason.length < 3) return show("Please enter at least three characters of decision evidence.", "error");
+    setBusy(true);
+    try {
+      await apiRequest("/api/request-for-quotations", { method: "PATCH", body: JSON.stringify({ id: rfq._id, expectedVersion: rfq.version, action, reason, ...(quoteId ? { quoteId } : {}) }) });
+      show(action === "AWARD" ? "Supplier quote awarded with decision evidence." : "RFQ cancelled and the requisition returned to approved status.");
+      await load(false);
+    } catch (reasonValue) {
+      show(reasonValue instanceof Error ? reasonValue.message : "Could not update the RFQ.", "error");
+    } finally { setBusy(false); }
+  }
+
+  function beginOrderFromRfq(rfq: RequestForQuotation) {
+    const quote = rfq.quotes.find((item) => item._id === rfq.winningQuoteId);
+    if (!quote) return show("The awarded supplier quote is unavailable.", "error");
+    setSourceRequisitionId(rfq.sourceRequisitionId);
+    setSourceRfqId(rfq._id);
+    setSupplierId(quote.supplierId);
+    setLocationId(rfq.locationId);
+    setExpectedDate(quote.expectedDeliveryDate.slice(0, 10));
+    setTaxRate(purchase.business.taxRate);
+    setTaxMode(purchase.business.taxMode);
+    setDraftLines(quote.items.map((line) => ({ productId: line.productId, quantity: line.quantity, unitCost: line.unitCost })));
     setOrderOpen(true);
   }
 
@@ -691,6 +847,7 @@ export function ProcurementView({
         body: JSON.stringify({
           clientRequestId: crypto.randomUUID(),
           ...(sourceRequisitionId ? { sourceRequisitionId } : {}),
+          ...(sourceRfqId ? { sourceRfqId } : {}),
           supplierId,
           locationId,
           expectedDate,
@@ -704,6 +861,7 @@ export function ProcurementView({
       show("Purchase order draft created.");
       setOrderOpen(false);
       setSourceRequisitionId("");
+      setSourceRfqId("");
       await load(false);
     } catch (reason) {
       show(
@@ -934,6 +1092,12 @@ export function ProcurementView({
           Requisitions
         </button>
         <button
+          className={tab === "RFQS" ? "active" : ""}
+          onClick={() => setTab("RFQS")}
+        >
+          RFQ comparison
+        </button>
+        <button
           className={tab === "ORDERS" ? "active" : ""}
           onClick={() => setTab("ORDERS")}
         >
@@ -977,17 +1141,59 @@ export function ProcurementView({
                   <div><span className="eyebrow">BUSINESS JUSTIFICATION</span><p>{requisition.justification}</p>{requisition.notes ? <small>{requisition.notes}</small> : null}</div>
                   <div className="requisition-items">{requisition.items.map((line) => <span key={line.productId}><strong>{line.sku} · {line.productName}</strong><b>{line.quantity} {line.unit}</b></span>)}</div>
                   <footer>
-                    <span>{requisition.suggestedSupplierName ? `Suggested supplier · ${requisition.suggestedSupplierCode} · ${requisition.suggestedSupplierName}` : "Supplier to be selected during purchase-order preparation"}{requisition.convertedPurchaseOrderNo ? ` · Converted to ${requisition.convertedPurchaseOrderNo}` : ""}{requisition.rejectionReason ? ` · Rejected: ${requisition.rejectionReason}` : ""}{requisition.cancellationReason ? ` · Cancelled: ${requisition.cancellationReason}` : ""}</span>
+                    <span>{requisition.suggestedSupplierName ? `Suggested supplier · ${requisition.suggestedSupplierCode} · ${requisition.suggestedSupplierName}` : "Supplier to be selected during purchase-order preparation"}{requisition.sourceRfqNo ? ` · Sourcing through ${requisition.sourceRfqNo}` : ""}{requisition.convertedPurchaseOrderNo ? ` · Converted to ${requisition.convertedPurchaseOrderNo}` : ""}{requisition.rejectionReason ? ` · Rejected: ${requisition.rejectionReason}` : ""}{requisition.cancellationReason ? ` · Cancelled: ${requisition.cancellationReason}` : ""}</span>
                     <div className="row-actions">
                       {canWrite && requisition.status === "SUBMITTED" ? <button className="button button-quiet" disabled={busy} onClick={() => void requisitionAction(requisition, "CANCEL")}><XCircle size={14} />Cancel</button> : null}
                       {canApprove && makerCanApprove && requisition.status === "SUBMITTED" ? <><button className="button button-quiet" disabled={busy} onClick={() => void requisitionAction(requisition, "REJECT")}><XCircle size={14} />Reject</button><button className="button button-secondary" disabled={busy} onClick={() => void requisitionAction(requisition, "APPROVE")}><ClipboardCheck size={14} />Approve</button></> : null}
-                      {canWrite && requisition.status === "APPROVED" ? <button className="button button-primary" disabled={busy} onClick={() => beginOrderFromRequisition(requisition)}><FilePlus2 size={14} />Create purchase order</button> : null}
+                      {canWrite && requisition.status === "APPROVED" ? <><button className="button button-secondary" disabled={busy || activeSuppliers.length < 2} onClick={() => beginRfq(requisition)}><Factory size={14} />Request quotes</button><button className="button button-primary" disabled={busy} onClick={() => beginOrderFromRequisition(requisition)}><FilePlus2 size={14} />Create purchase order</button></> : null}
                     </div>
                   </footer>
                 </div>
               </article>;
             })}
           </div> : <EmptyState title="No purchase requisitions" detail="Submit an internal request for products before committing to a supplier purchase order." action={canWrite ? <AddButton onClick={beginRequisition}>New requisition</AddButton> : undefined} />}
+        </section>
+      ) : tab === "RFQS" ? (
+        <section className="panel procurement-ledger">
+          <div className="panel-header">
+            <div><span className="eyebrow">COMPETITIVE SOURCING</span><h2>RFQ supplier comparison</h2></div>
+            <span className="muted-copy">Base-currency snapshots make cross-currency offers comparable.</span>
+          </div>
+          {rfqs.length ? <div className="rfq-list">
+            {rfqs.map((rfq) => {
+              const makerCanAward = allowSelfApproval || !rfq.createdBy || rfq.createdBy !== currentUserId;
+              const rankedQuotes = [...rfq.quotes].sort((left, right) => left.baseSubtotal - right.baseSubtotal);
+              const recordedSupplierIds = new Set(rfq.quotes.map((quote) => quote.supplierId));
+              const canAddQuote = rfq.invitedSuppliers.some((supplier) => !recordedSupplierIds.has(supplier.supplierId));
+              return <article key={rfq._id}>
+                <header>
+                  <div className="requisition-stamp"><Factory /></div>
+                  <span><strong>{rfq.rfqNo}</strong><small>{rfq.sourceRequisitionNo} · {rfq.createdByName}</small></span>
+                  <span><small>RESPONSE DUE</small><strong>{dateOnly.format(new Date(rfq.responseDueDate))}</strong></span>
+                  <span><small>SUPPLIERS / QUOTES</small><strong>{rfq.invitedSuppliers.length} / {rfq.quotes.length}</strong></span>
+                  <span><small>NEED DATE</small><strong>{dateOnly.format(new Date(rfq.requiredDate))}</strong></span>
+                  <StatusPill value={rfq.status} />
+                </header>
+                <div className="rfq-body">
+                  <div className="rfq-scope"><span><small>Destination</small><strong>{rfq.locationCode} · {rfq.locationName}</strong></span><span><small>Invited</small><strong>{rfq.invitedSuppliers.map((supplier) => supplier.supplierCode).join(" · ")}</strong></span><span><small>Reason</small><strong>{rfq.justification}</strong></span></div>
+                  {rankedQuotes.length ? <div className="quote-comparison">
+                    {rankedQuotes.map((quote, index) => {
+                      const winning = quote._id === rfq.winningQuoteId;
+                      const late = quote.expectedDeliveryDate.slice(0, 10) > rfq.requiredDate.slice(0, 10);
+                      return <article key={quote._id} className={winning ? "winner" : ""}>
+                        <header><span><b>{quote.supplierCode} · {quote.supplierName}</b><small>{quote.supplierReference}</small></span>{winning ? <StatusPill value="AWARDED" /> : index === 0 ? <span className="comparison-badge">LOWEST BASE</span> : null}</header>
+                        <strong>{currencyFormatter(profile.locale, quote.currency).format(quote.subtotal)}</strong>
+                        <small>{money.format(quote.baseSubtotal)} comparison · delivery {dateOnly.format(new Date(quote.expectedDeliveryDate))}{late ? " · after need date" : ""}</small>
+                        <div>{quote.items.map((line) => <span key={line.productId}>{line.sku} · {line.quantity} × {currencyFormatter(profile.locale, quote.currency).format(line.unitCost)}</span>)}</div>
+                        {canApprove && makerCanAward && rfq.status === "OPEN" ? <button className="button button-secondary" disabled={busy} onClick={() => void rfqAction(rfq, "AWARD", quote._id)}><ClipboardCheck size={14} />Award quote</button> : null}
+                      </article>;
+                    })}
+                  </div> : <div className="empty-inline">No supplier quotes recorded yet.</div>}
+                  <footer><span>{rfq.awardReason ? `Award evidence · ${rfq.awardReason}` : rfq.cancellationReason ? `Cancelled · ${rfq.cancellationReason}` : `${rfq.quotes.length} of ${rfq.invitedSuppliers.length} invited suppliers recorded`}{rfq.convertedPurchaseOrderNo ? ` · Converted to ${rfq.convertedPurchaseOrderNo}` : ""}</span><div className="row-actions">{canWrite && ["OPEN", "AWARDED"].includes(rfq.status) ? <button className="button button-quiet" disabled={busy} onClick={() => void rfqAction(rfq, "CANCEL")}><XCircle size={14} />Cancel RFQ</button> : null}{canWrite && rfq.status === "OPEN" && canAddQuote ? <button className="button button-secondary" disabled={busy} onClick={() => beginQuote(rfq)}><Plus size={14} />Record quote</button> : null}{canWrite && rfq.status === "AWARDED" ? <button className="button button-primary" disabled={busy} onClick={() => beginOrderFromRfq(rfq)}><FilePlus2 size={14} />Create purchase order</button> : null}</div></footer>
+                </div>
+              </article>;
+            })}
+          </div> : <EmptyState title="No requests for quotation" detail="Approve a purchase requisition, then invite at least two suppliers for a controlled price comparison." />}
         </section>
       ) : tab === "ORDERS" ? (
         <section className="panel procurement-ledger">
@@ -1457,6 +1663,42 @@ export function ProcurementView({
       </Modal>
 
       <Modal
+        open={rfqOpen}
+        onClose={() => { setRfqOpen(false); setRfqSource(null); }}
+        title={rfqSource ? `Open RFQ for ${rfqSource.requisitionNo}` : "Open request for quotation"}
+        kicker="COMPETITIVE SOURCING"
+      >
+        <form className="modal-form wide-form" onSubmit={createRfq}>
+          <div className="receipt-control-note"><Factory /><span><strong>Invite at least two suppliers</strong><small>The approved destination, products and quantities become the fixed comparison scope.</small></span></div>
+          {rfqSource ? <div className="rfq-scope"><span><small>Destination</small><strong>{rfqSource.locationCode} · {rfqSource.locationName}</strong></span><span><small>Required</small><strong>{dateOnly.format(new Date(rfqSource.requiredDate))}</strong></span><span><small>Products</small><strong>{rfqSource.items.length}</strong></span></div> : null}
+          <label className="field"><span>Supplier response deadline</span><input type="date" min={isoDate(profile.timeZone)} max={rfqSource?.requiredDate.slice(0, 10)} value={rfqResponseDueDate} onChange={(event) => setRfqResponseDueDate(event.target.value)} required /></label>
+          <div className="field"><span>Invited suppliers · {rfqSupplierIds.length} selected</span><div className="supplier-choice-grid">{activeSuppliers.map((supplier) => <label key={supplier._id} className={rfqSupplierIds.includes(supplier._id) ? "selected" : ""}><input type="checkbox" checked={rfqSupplierIds.includes(supplier._id)} onChange={() => toggleRfqSupplier(supplier._id)} /><span><strong>{supplier.code} · {supplier.name}</strong><small>{supplier.currency} · lead {supplier.leadTimeDays} days</small></span></label>)}</div></div>
+          <label className="field"><span>RFQ instructions</span><textarea name="notes" rows={3} maxLength={500} placeholder="Pack size, specification, warranty or commercial conditions" /></label>
+          <footer><button type="button" className="button button-secondary" onClick={() => { setRfqOpen(false); setRfqSource(null); }}>Cancel</button><button className="button button-primary" disabled={busy || rfqSupplierIds.length < 2}>{busy ? "Opening…" : "Open RFQ"}</button></footer>
+        </form>
+      </Modal>
+
+      <Modal
+        open={Boolean(quoteRfq)}
+        onClose={() => setQuoteRfq(null)}
+        title={quoteRfq ? `Record quote · ${quoteRfq.rfqNo}` : "Record supplier quote"}
+        kicker="SUPPLIER OFFER SNAPSHOT"
+      >
+        <form className="modal-form wide-form" onSubmit={submitQuote} key={quoteRfq?._id || "quote"}>
+          <div className="receipt-control-note"><ClipboardCheck /><span><strong>Record the supplier document exactly</strong><small>Prices are preserved in supplier currency and compared using a frozen base-currency rate.</small></span></div>
+          <div className="form-grid three">
+            <label className="field"><span>Invited supplier</span><select value={quoteSupplierId} onChange={(event) => quoteRfq && chooseQuoteSupplier(quoteRfq, event.target.value)} required>{quoteRfq?.invitedSuppliers.filter((invited) => !quoteRfq.quotes.some((quote) => quote.supplierId === invited.supplierId)).map((invited) => <option key={invited.supplierId} value={invited.supplierId}>{invited.supplierCode} · {invited.supplierName} · {invited.currency}</option>)}</select></label>
+            <label className="field"><span>Supplier quotation reference</span><input name="supplierReference" minLength={2} maxLength={80} required placeholder="QT-2026-001" /></label>
+            <label className="field"><span>Promised delivery</span><input type="date" min={isoDate(profile.timeZone)} value={quoteExpectedDate} onChange={(event) => setQuoteExpectedDate(event.target.value)} required /></label>
+          </div>
+          <div className="quote-line-editor"><header><span>Requested product</span><span>Quantity</span><span>Quoted unit cost · {selectedQuoteSupplier?.currency || "—"}</span><span>Line total</span></header>{quoteRfq?.items.map((line, index) => { const price = quoteLines[index]?.unitCost || 0; return <div key={line.productId}><span><strong>{line.sku} · {line.productName}</strong><small>{line.unit}</small></span><b>{line.quantity}</b><input type="number" min={currencyStep(selectedQuoteSupplier?.currency || profile.currency)} step={currencyStep(selectedQuoteSupplier?.currency || profile.currency)} value={price || ""} onChange={(event) => setQuoteLines((current) => current.map((item, lineIndex) => lineIndex === index ? { ...item, unitCost: Number(event.target.value) } : item))} required /><strong>{currencyFormatter(profile.locale, selectedQuoteSupplier?.currency || profile.currency).format(line.quantity * price)}</strong></div>; })}</div>
+          <label className="field"><span>Quote notes</span><textarea name="notes" rows={3} maxLength={500} placeholder="Validity, freight, pack size or exclusions" /></label>
+          <div className="purchase-draft-total"><span>Quoted subtotal · before PO tax treatment</span><strong>{currencyFormatter(profile.locale, selectedQuoteSupplier?.currency || profile.currency).format((quoteRfq?.items || []).reduce((sum, line, index) => sum + line.quantity * Number(quoteLines[index]?.unitCost || 0), 0))}</strong></div>
+          <footer><button type="button" className="button button-secondary" onClick={() => setQuoteRfq(null)}>Cancel</button><button className="button button-primary" disabled={busy || !quoteSupplierId}>{busy ? "Recording…" : "Record supplier quote"}</button></footer>
+        </form>
+      </Modal>
+
+      <Modal
         open={supplierOpen}
         onClose={() => {
           setSupplierOpen(false);
@@ -1627,12 +1869,12 @@ export function ProcurementView({
 
       <Modal
         open={orderOpen}
-        onClose={() => setOrderOpen(false)}
+        onClose={() => { setOrderOpen(false); setSourceRequisitionId(""); setSourceRfqId(""); }}
         title="Draft purchase order"
         kicker="CONTROLLED COMMITMENT"
       >
         <form className="modal-form wide-form" onSubmit={createOrder}>
-          {sourceRequisitionId ? <div className="receipt-control-note"><ClipboardCheck /><span><strong>Converting an approved requisition</strong><small>Destination, products and quantities are locked. Select the supplier, confirm costs and create the purchase-order draft.</small></span></div> : null}
+          {sourceRfqId ? <div className="receipt-control-note"><ClipboardCheck /><span><strong>Converting an awarded supplier quote</strong><small>Supplier, delivery date, destination, products, quantities and quoted unit costs are locked to the sourcing decision.</small></span></div> : sourceRequisitionId ? <div className="receipt-control-note"><ClipboardCheck /><span><strong>Converting an approved requisition</strong><small>Destination, products and quantities are locked. Select the supplier, confirm costs and create the purchase-order draft.</small></span></div> : null}
           <div className="purchase-draft-top">
             <div className="form-grid three">
               <label className="field">
@@ -1640,6 +1882,7 @@ export function ProcurementView({
                 <select
                   value={supplierId}
                   onChange={(event) => chooseSupplier(event.target.value)}
+                  disabled={Boolean(sourceRfqId)}
                   required
                 >
                   <option value="">Choose supplier</option>
@@ -1673,6 +1916,7 @@ export function ProcurementView({
                   min={isoDate(profile.timeZone)}
                   value={expectedDate}
                   onChange={(event) => setExpectedDate(event.target.value)}
+                  disabled={Boolean(sourceRfqId)}
                   required
                 />
               </label>
@@ -1779,6 +2023,7 @@ export function ProcurementView({
                     selectedSupplier?.currency || profile.currency,
                   )}
                   value={line.unitCost || ""}
+                  disabled={Boolean(sourceRfqId)}
                   onChange={(event) =>
                     updateDraftLine(index, {
                       unitCost: Number(event.target.value),
@@ -1832,7 +2077,7 @@ export function ProcurementView({
             <button
               type="button"
               className="button button-secondary"
-              onClick={() => setOrderOpen(false)}
+              onClick={() => { setOrderOpen(false); setSourceRequisitionId(""); setSourceRfqId(""); }}
             >
               Cancel
             </button>

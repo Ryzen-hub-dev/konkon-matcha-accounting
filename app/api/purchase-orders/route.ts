@@ -10,7 +10,7 @@ import { getDb, getMongoClient } from "@/lib/db";
 import { readExchangeRate } from "@/lib/exchange-rates";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { currencyMinorUnits, roundCurrency } from "@/lib/international";
-import { approvalRequiresDifferentMaker, ensureProcurementAccounts, purchaseOrderActionSchema, purchaseOrderInputSchema, requisitionMatchesOrder, suggestedReorderAfterInbound, weightedAverageInventoryCost } from "@/lib/procurement";
+import { approvalRequiresDifferentMaker, ensureProcurementAccounts, purchaseOrderActionSchema, purchaseOrderInputSchema, quoteMatchesPurchaseOrder, requisitionMatchesOrder, suggestedReorderAfterInbound, weightedAverageInventoryCost } from "@/lib/procurement";
 import { calculateTaxTotals } from "@/lib/tax";
 import { addInventoryBatchQuantity, lotKey, normaliseLotNo } from "@/lib/inventory-batches";
 import { applyDimensionAllocation, dimensionRuleAuditId, resolveDimensionAllocation } from "@/lib/dimension-allocation";
@@ -102,13 +102,15 @@ export async function POST(request: Request) {
   try {
     const input = purchaseOrderInputSchema.safeParse(body.value);
     if (!input.success) return fail("Check the purchase order.", 422, input.error.flatten().fieldErrors);
-    if (!ObjectId.isValid(input.data.supplierId) || !ObjectId.isValid(input.data.locationId) || input.data.items.some((item) => !ObjectId.isValid(item.productId)) || (input.data.sourceRequisitionId && !ObjectId.isValid(input.data.sourceRequisitionId))) return fail("A supplier, location, product or requisition reference is invalid.", 422);
+    if (!ObjectId.isValid(input.data.supplierId) || !ObjectId.isValid(input.data.locationId) || input.data.items.some((item) => !ObjectId.isValid(item.productId)) || (input.data.sourceRequisitionId && !ObjectId.isValid(input.data.sourceRequisitionId)) || (input.data.sourceRfqId && !ObjectId.isValid(input.data.sourceRfqId))) return fail("A supplier, location, product, requisition or RFQ reference is invalid.", 422);
     const db = await getDb();
     const existing = await db.collection("purchaseOrders").findOne({ clientRequestId: input.data.clientRequestId });
     if (existing) {
       const existingSource = String(existing.sourceRequisitionId || "");
       const requestedSource = input.data.sourceRequisitionId || "";
-      if (existingSource !== requestedSource) return fail("This request key is already attached to a different purchase-order source.", 409);
+      const existingRfq = String(existing.sourceRfqId || "");
+      const requestedRfq = input.data.sourceRfqId || "";
+      if (existingSource !== requestedSource || existingRfq !== requestedRfq) return fail("This request key is already attached to a different purchase-order source.", 409);
       return ok(serialise(existing));
     }
     const productIds = input.data.items.map((item) => new ObjectId(item.productId));
@@ -181,6 +183,43 @@ export async function POST(request: Request) {
       createdAt: now,
       updatedAt: now,
     };
+    if (input.data.sourceRfqId) {
+      const client = await getMongoClient();
+      const mongoSession = client.startSession();
+      const rfqId = new ObjectId(input.data.sourceRfqId);
+      const requisitionId = new ObjectId(input.data.sourceRequisitionId!);
+      let converted: Record<string, unknown> | null = null;
+      try {
+        await mongoSession.withTransaction(async () => {
+          await touchBusinessKeyLock(db, businessKeyLockId("RFQ_CONVERSION", input.data.sourceRfqId!), mongoSession, now);
+          const rfq = await db.collection("requestForQuotations").findOne({ _id: rfqId, status: "AWARDED", sourceRequisitionId: requisitionId }, { session: mongoSession });
+          if (!rfq) throw new PurchaseConflictError("Only a current awarded RFQ can be converted.");
+          if (!quoteMatchesPurchaseOrder({ sourceRequisitionId: rfq.sourceRequisitionId, locationId: rfq.locationId, winningQuoteId: rfq.winningQuoteId, items: Array.isArray(rfq.items) ? rfq.items : [], quotes: Array.isArray(rfq.quotes) ? rfq.quotes : [] }, { sourceRequisitionId: input.data.sourceRequisitionId, supplierId: input.data.supplierId, locationId: input.data.locationId, expectedDate: input.data.expectedDate, items: input.data.items })) throw new PurchaseConflictError("The purchase order must keep the awarded supplier, delivery date, products, quantities and quoted unit costs.");
+          const requisition = await db.collection("purchaseRequisitions").findOne({ _id: requisitionId, status: "SOURCING", sourceRfqId: rfqId }, { session: mongoSession });
+          if (!requisition) throw new PurchaseConflictError("The source requisition changed or is no longer in sourcing.");
+          const winningQuote = Array.isArray(rfq.quotes) ? rfq.quotes.find((quote) => String(quote._id) === String(rfq.winningQuoteId)) : null;
+          if (!winningQuote) throw new PurchaseConflictError("The awarded supplier quote is no longer available.");
+          const purchaseOrderId = new ObjectId();
+          converted = { _id: purchaseOrderId, ...document, supplierReference: winningQuote.supplierReference || document.supplierReference, sourceRfqId: rfqId, sourceRfqNo: rfq.rfqNo, sourceRequisitionId: requisitionId, sourceRequisitionNo: requisition.requisitionNo };
+          await db.collection("purchaseOrders").insertOne(converted, { session: mongoSession });
+          const updatedRfq = await db.collection("requestForQuotations").updateOne(
+            { _id: rfqId, status: "AWARDED", version: rfq.version },
+            { $set: { status: "CONVERTED", convertedAt: now, convertedBy: new ObjectId(auth.session.id), convertedByName: auth.session.fullName, convertedPurchaseOrderId: purchaseOrderId, convertedPurchaseOrderNo: document.purchaseOrderNo, updatedAt: now }, $inc: { version: 1 }, $push: { history: { action: "CONVERTED", purchaseOrderId, purchaseOrderNo: document.purchaseOrderNo, by: new ObjectId(auth.session.id), byName: auth.session.fullName, at: now } } as never },
+            { session: mongoSession },
+          );
+          const updatedRequisition = await db.collection("purchaseRequisitions").updateOne(
+            { _id: requisitionId, status: "SOURCING", sourceRfqId: rfqId, version: requisition.version },
+            { $set: { status: "CONVERTED", convertedAt: now, convertedBy: new ObjectId(auth.session.id), convertedByName: auth.session.fullName, convertedPurchaseOrderId: purchaseOrderId, convertedPurchaseOrderNo: document.purchaseOrderNo, updatedAt: now }, $inc: { version: 1 }, $push: { history: { action: "CONVERTED", rfqId, rfqNo: rfq.rfqNo, purchaseOrderId, purchaseOrderNo: document.purchaseOrderNo, by: new ObjectId(auth.session.id), byName: auth.session.fullName, at: now } } as never },
+            { session: mongoSession },
+          );
+          if (!updatedRfq.modifiedCount || !updatedRequisition.modifiedCount) throw new PurchaseConflictError("The sourcing documents changed while the purchase order was being created.");
+          await writeAudit(db, auth.session, "purchase_order.create", "purchaseOrder", purchaseOrderId.toHexString(), { purchaseOrderNo: document.purchaseOrderNo, supplierCode: supplier.code, total: document.total, currency: document.currency, sourceRfqNo: rfq.rfqNo, sourceRequisitionNo: requisition.requisitionNo }, mongoSession);
+          await writeAudit(db, auth.session, "rfq.convert", "requestForQuotation", rfqId.toHexString(), { rfqNo: rfq.rfqNo, purchaseOrderNo: document.purchaseOrderNo }, mongoSession);
+          await writeAudit(db, auth.session, "purchase_requisition.convert", "purchaseRequisition", requisitionId.toHexString(), { requisitionNo: requisition.requisitionNo, rfqNo: rfq.rfqNo, purchaseOrderNo: document.purchaseOrderNo }, mongoSession);
+        });
+      } finally { await mongoSession.endSession(); }
+      return created(serialise(converted));
+    }
     if (input.data.sourceRequisitionId) {
       const client = await getMongoClient();
       const mongoSession = client.startSession();
@@ -211,6 +250,7 @@ export async function POST(request: Request) {
     await writeAudit(db, auth.session, "purchase_order.create", "purchaseOrder", result.insertedId.toHexString(), { purchaseOrderNo: document.purchaseOrderNo, supplierCode: supplier.code, total: document.total, currency: document.currency });
     return created(serialise({ _id: result.insertedId, ...document }));
   } catch (error) {
+    if (error instanceof PurchaseConflictError) return fail(error.message, 409);
     if ((error as { code?: number }).code === 11000) return fail("This purchase request was already created. Refresh the list before trying again.", 409);
     return publicError(error);
   }

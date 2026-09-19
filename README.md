@@ -108,6 +108,7 @@ User training: [完整中文使用手册](docs/user-manual-zh.md) · [Complete E
 
 - Auditable supplier master records with country, currency, tax/registration details, terms, lead time and archive/restore controls.
 - Internal purchase requisitions with required-date/priority evidence, maker-checker approval or reasoned rejection, optimistic versions and one-time transactional conversion into a purchase-order draft. Conversion locks the approved destination, products and quantities while supplier pricing remains a purchasing decision.
+- Controlled RFQs from approved requisitions: invite 2–10 active suppliers, record one offer per supplier, compare frozen base-currency subtotals and promised dates, document the award reason, then convert the winning supplier, unit prices and delivery date into one purchase-order draft. Cancelling restores the source requisition without deleting sourcing history.
 - Draft, maker-checker approve, cancel and partially receive purchase orders with immutable supplier, product, location, time-zone, tax and exchange-rate snapshots. A controlled short-close records why an outstanding balance will not be delivered without altering receipts already posted.
 - Atomic goods receipt posting: stock, weighted-average cost, stock movement, supplier bill, input tax, accounts payable, journal and audit event succeed or roll back together.
 - Duplicate-request and duplicate-supplier-invoice protection prevents double receipts, duplicate inventory and repeated payables.
@@ -145,7 +146,7 @@ Core endpoints:
 - `/api/sales`, `/api/refunds`, `/api/receipt-templates`, `/api/payment-intents`, `/api/payment-confirmations`, `/api/local-payment-events`
 - `/api/receipt-lookup`, `/api/public-receipts`, `/api/member-cards`, `/api/member-cards/lookup`
 - `/api/invoices`, `/api/invoice-templates`, `/api/customer-accounts`, `/api/quotations`, `/api/delivery-orders`, `/api/journals`, `/api/bank-reconciliations`, `/api/accounting-periods`, `/api/fixed-assets`, `/api/reports`, `/api/e-invoices`
-- `/api/suppliers`, `/api/purchase-requisitions`, `/api/purchase-orders`, `/api/accounts-payable`, `/api/expense-claims`, `/api/expense-attachments`, `/api/budgets`, `/api/accounting-dimensions`, `/api/dimension-rules`
+- `/api/suppliers`, `/api/purchase-requisitions`, `/api/request-for-quotations`, `/api/purchase-orders`, `/api/accounts-payable`, `/api/expense-claims`, `/api/expense-attachments`, `/api/budgets`, `/api/accounting-dimensions`, `/api/dimension-rules`
 - `/api/settings`, `/api/settings/history`, `/api/locations`, `/api/counters`, `/api/register-shifts`, `/api/maintenance`
 
 Workspace writes require a same-origin browser request and authenticated role permission. Initial setup, private owner recovery and token-restricted phone scan submission have their own authorization rules. Customer receipt retrieval is a read-only POST requiring the signed receipt token; it never authorizes refunds. Public errors do not include stack traces, secrets or database internals.

@@ -201,7 +201,20 @@ When a shop or department needs internal approval before committing:
 
 Cancellation, rejection, approval and conversion retain version, operator, time and reason. A requisition alone does not move stock, create a payable or post accounting.
 
-### 5.4 Purchase order
+### 5.4 RFQ and supplier quotation comparison
+
+When price competition is useful:
+
+1. On an approved requisition, choose **Request quotes**.
+2. Invite 2–10 active suppliers and set a response deadline no later than the required date.
+3. Open **RFQ comparison** and use **Record quote** for each received supplier document. Enter its reference, promised delivery and every requested unit price.
+4. The workspace preserves supplier-currency values and a frozen accounting-currency comparison subtotal. A late promised date is visibly flagged.
+5. A different authorised user awards one recorded offer and writes the decision reason. The lowest price is highlighted but is never selected automatically.
+6. Choose **Create purchase order**. Supplier, quoted unit costs, delivery date, location, products and quantities remain locked; tax treatment is confirmed on the purchase order.
+
+Cancelling before conversion restores the source requisition to approved status while retaining the RFQ trail. The record proves an internal comparison only; it does not prove supplier transmission, signature or acceptance.
+
+### 5.5 Purchase order
 
 1. Create a purchase-order draft.
 2. Choose supplier, receiving location and expected date.
@@ -210,7 +223,7 @@ Cancellation, rejection, approval and conversion retain version, operator, time 
 5. Save and obtain authorised approval. Except for the Owner small-business override, a maker cannot approve their own order.
 6. A draft or approved order with no receipt can be cancelled with a reason.
 
-### 5.5 Goods receipt
+### 5.6 Goods receipt
 
 1. Receive only an `APPROVED` or `PARTIALLY_RECEIVED` order.
 2. Enter only quantity physically received now, not the expected remainder.
@@ -219,7 +232,7 @@ Cancellation, rejection, approval and conversion retain version, operator, time 
 5. Submission updates inventory, weighted cost, supplier performance, payable, general ledger and audit in one database transaction.
 6. If the supplier will not deliver the outstanding quantity, use **Close remainder** on a partially received order and record a permanent reason. This does not reverse received stock or bills.
 
-### 5.6 AP aging
+### 5.7 AP aging
 
 Open **Bills & payments** to review:
 
@@ -234,7 +247,7 @@ Open **Bills & payments** to review:
 
 Use **Export aging CSV** to give management or an external accountant the open-bill position as of the displayed date.
 
-### 5.7 Supplier payment
+### 5.8 Supplier payment
 
 1. Select an open bill.
 2. Enter a payment amount. A partial payment is allowed but cannot exceed the balance.
