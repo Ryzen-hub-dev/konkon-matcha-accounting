@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isValidDateKey } from "@/lib/dates";
+import { normaliseCarrierSelection, shippingProviderIdSchema, shippingTrackingReferenceSchema } from "@/lib/shipping-providers";
 
 const objectIdSchema = z.string().regex(/^[a-fA-F0-9]{24}$/, "Choose a valid record.").transform(value => value.toLowerCase());
 
@@ -21,10 +22,30 @@ export const deliveryOrderEditSchema = z.object({
   deliveryAddress: z.string().trim().max(300).default(""),
   contactName: z.string().trim().max(120).default(""),
   contactPhone: z.string().trim().max(40).default(""),
+  contactEmail: z.union([z.literal(""), z.string().trim().email().max(160)]).default(""),
+  deliveryAddress1: z.string().trim().max(120).default(""),
+  deliveryAddress2: z.string().trim().max(120).default(""),
+  deliveryArea: z.string().trim().max(80).default(""),
+  deliveryCity: z.string().trim().max(80).default(""),
+  deliveryState: z.string().trim().max(80).default(""),
+  deliveryCountryCode: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).default("SG"),
+  deliveryPostcode: z.string().trim().max(20).default(""),
+  serviceLevel: z.enum(["Standard", "Express", "Sameday", "Nextday"]).default("Standard"),
+  pickupRequired: z.boolean().default(true),
+  parcelWeight: z.coerce.number().finite().positive().max(1_000).default(1),
+  carrierCode: shippingProviderIdSchema.default("OTHER"),
   carrier: z.string().trim().max(80).default(""),
   trackingReference: z.string().trim().max(100).default(""),
   instructions: z.string().trim().max(500).default(""),
+}).superRefine((value, context) => {
+  if (value.carrierCode !== "OTHER" && value.trackingReference && !shippingTrackingReferenceSchema.safeParse(value.trackingReference).success) {
+    context.addIssue({ code: "custom", path: ["trackingReference"], message: "Enter a valid carrier tracking reference." });
+  }
 });
+
+export function deliveryOrderCarrier(providerValue: unknown, carrierValue: unknown) {
+  return normaliseCarrierSelection(providerValue, carrierValue);
+}
 
 export const deliveryOrderActionSchema = z.object({
   action: z.enum(["DISPATCH", "DELIVER", "CANCEL"]),

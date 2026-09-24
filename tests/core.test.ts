@@ -44,7 +44,7 @@ import {
 } from "../lib/payment-verification";
 import { locationParentChainIsValid } from "../lib/locations";
 import {
-  allocateSupplierPayment, approvalRequiresDifferentMaker, payableAge, purchaseOrderActionSchema, purchaseOrderInputSchema,
+  allocateSupplierPayment, approvalRequiresDifferentMaker, payableAge, payableDisplayStatus, purchaseOrderActionSchema, purchaseOrderInputSchema,
   purchaseRequisitionActionSchema, purchaseRequisitionInputSchema, quoteMatchesPurchaseOrder, requestForQuotationActionSchema, requestForQuotationInputSchema, requisitionMatchesOrder,
   suggestedReorderAfterInbound, suggestedReorderQuantity, summarisePayableAging, supplierInputSchema,
   supplierPulse, weightedAverageInventoryCost,
@@ -293,6 +293,8 @@ test("payable aging uses calendar-day buckets and excludes settled balances", ()
   assert.deepEqual(summary.buckets["90_PLUS"], { count: 1, baseAmount: 25 });
   const zeroDecimal = summarisePayableAging([{ dueDate: "2026-09-01", baseBalance: 10.6, status: "OPEN" }], "2026-09-19", "JPY");
   assert.equal(zeroDecimal.totalBase, 11);
+  assert.equal(payableDisplayStatus("OPEN", 10, 4), "OVERDUE");
+  assert.equal(payableDisplayStatus("CREDITED", 0, 4), "CREDITED");
 });
 
 test("supplier Supply Pulse is deterministic and explains delivery risk", () => {

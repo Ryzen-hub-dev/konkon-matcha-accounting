@@ -14,7 +14,7 @@ import { dateKeyInTimeZone } from "@/lib/dates";
 import {
   assertInvoiceDraftEditable, assertInvoiceStatusTransition, assertInvoiceVersion,
   calculateInvoiceAmounts, invoiceEditSchema, invoiceInputSchema, invoiceStatusSchema,
-  InvoiceWorkflowError, nextInvoiceUpdatedAt,
+  invoiceBusinessSnapshot, InvoiceWorkflowError, nextInvoiceUpdatedAt,
 } from "@/lib/invoices";
 
 export const runtime = "nodejs";
@@ -89,14 +89,7 @@ export async function POST(request: Request) {
           templateName: templateSnapshot.name,
           templateSnapshot,
           dimensionSelection,
-          businessSnapshot: {
-            businessName: business.businessName, legalEntityName: business.legalEntityName,
-            registrationNo: business.registrationNo, email: business.email, phone: business.phone,
-            address: business.address, countryCode: business.countryCode, timeZone: business.timeZone,
-            locale: business.locale, currency: business.currency, taxName: business.taxName,
-            organizationType: business.organizationType, franchiseBrand: business.franchiseBrand,
-            franchiseCode: business.franchiseCode,
-          },
+          businessSnapshot: invoiceBusinessSnapshot(business),
           ...amounts,
           paidAmount: 0, status: "DRAFT",
           createdBy: new ObjectId(auth.session.id), createdAt: now, updatedAt: now,

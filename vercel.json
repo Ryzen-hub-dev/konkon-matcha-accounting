@@ -2,5 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "fluid": true,
   "regions": ["sin1"],
-  "crons": [{ "path": "/api/maintenance", "schedule": "0 19 * * *" }]
+  "crons": [
+    { "path": "/api/maintenance", "schedule": "0 19 * * *" },
+    { "path": "/api/recurring-invoices/run", "schedule": "0 20 * * *" }
+  ]
 }

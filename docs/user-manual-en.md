@@ -118,6 +118,27 @@ Never rewrite an issued sale; create a refund to preserve reversal evidence. Con
 5. Planned, dispatched and delivered states are internal operations. They do not move stock, record payment or prove customer receipt.
 6. In **Invoices**, review a draft before sending. Use allowed void or new-document workflows for corrections.
 
+### 3.5 Online orders and private customer chat
+
+Owner setup:
+
+1. Open **Online orders → Store & email**. Set the storefront title, request notice, controlled-item questions and personal-data retention period.
+2. Connect a Google Workspace/Gmail address with an App Password. The connection is tested before the encrypted credential is saved.
+3. Configure private GitHub evidence storage in **Workspace** before customers or staff share images/PDFs.
+4. In **Online catalogue**, enable only products customers may request and mark controlled products where additional answers are required.
+
+Daily workflow:
+
+1. A customer uses `/shop` to choose products and submit email, phone and delivery address. This is a request only; it does not reserve stock or charge the customer.
+2. Manager/Admin/Owner opens **Online orders**, reviews the request and accepts or rejects it. Acceptance creates the private chat link and attempts to email it.
+3. Adjust quantity/discount and send the reviewed offer. Stock is rechecked by the server.
+4. Send payment instructions only after the offer. Never treat that message as proof of payment.
+5. Create a normal invoice or complete a normal POS sale, then select the matching document in the order. A completed receipt with the exact accepted total is the current payment-confirmation evidence.
+6. Add controlled-item or fulfilment steps and update shipment preparation, dispatch, transit and delivery. A tracking reference can be entered manually or copied from a connected carrier result.
+7. The customer keeps using the same private link for chat, files, receipt/invoice information and tracking.
+
+Do not paste passwords, card numbers or government identifiers into chat. Rejected, cancelled and abandoned requests are cleared according to the Owner's retention setting; financial documents are not part of that cleanup.
+
 ## 4. Inventory
 
 ### 4.1 Product master
@@ -227,12 +248,32 @@ Cancelling before conversion restores the source requisition to approved status 
 
 1. Receive only an `APPROVED` or `PARTIALLY_RECEIVED` order.
 2. Enter only quantity physically received now, not the expected remainder.
-3. Enter supplier invoice number, invoice date, receipt date and notes.
-4. A batch-tracked product requires lot and expiry.
-5. Submission updates inventory, weighted cost, supplier performance, payable, general ledger and audit in one database transaction.
-6. If the supplier will not deliver the outstanding quantity, use **Close remainder** on a partially received order and record a permanent reason. This does not reverse received stock or bills.
+3. Enter supplier invoice number, invoice date, receipt date, supplier invoice total, supplier invoice tax and notes.
+4. Check the live PO-derived receipt value shown beside the supplier values. If total or tax differs, write clear difference evidence before submitting.
+5. A difference creates an approval request only. It does not update stock, payables or journals. A different authorised non-Owner approves or rejects it from the purchase order.
+6. After approval, receiving must re-enter the exact invoice number, date, quantities, total and tax. One successful posting consumes the approval; changed evidence requires another review.
+7. A batch-tracked product requires lot and expiry.
+8. An exact or approved submission updates inventory at the actual supplier-invoice net value, supplier performance, payable, general ledger and audit in one database transaction.
+9. If the supplier will not deliver the outstanding quantity, use **Close remainder** on a partially received order and record a permanent reason. This does not reverse received stock or bills.
 
-### 5.7 AP aging
+### 5.7 Landed cost
+
+1. Open **Bills & payments** and choose **Add landed cost** on the original goods-receipt bill.
+2. Choose the freight, customs, insurance or service supplier and enter its invoice number, invoice date, accounting date, total, recoverable tax and evidence reference.
+3. Choose allocation by received inventory value or received quantity. Value is normally appropriate for insurance or ad-valorem duty; quantity is useful for weight/volume charges when units are comparable.
+4. Posting creates a separate payable bill. Cost for units still represented in live inventory increases moving-average inventory cost; consumed, returned or indivisible rounding residue posts to cost of goods sold. Tax remains recoverable input tax.
+5. The allocation, product cost, receipt, payable, journal, period lock and audit update together. Pay the resulting landed-cost bill through the normal supplier-payment action.
+
+### 5.8 Purchase return
+
+1. Open **Bills & payments** and choose **Return goods** on an unpaid open bill.
+2. Enter the supplier's unique credit-note number and the actual return date.
+3. Enter only quantities physically leaving the original receipt location. The screen limits each line by the remaining returnable quantity and live stock; batch-tracked products retain the receipt lot.
+4. Record a clear reason and post once. Inventory, supplier balance, tax, purchase-return variance, general ledger and audit evidence update in one database transaction.
+
+A bill with any payment cannot use this workflow. Record a post-payment supplier credit/refund through its dedicated workflow when available; do not conceal it as an inventory adjustment.
+
+### 5.9 AP aging
 
 Open **Bills & payments** to review:
 
@@ -247,7 +288,7 @@ Open **Bills & payments** to review:
 
 Use **Export aging CSV** to give management or an external accountant the open-bill position as of the displayed date.
 
-### 5.8 Supplier payment
+### 5.10 Supplier payment
 
 1. Select an open bill.
 2. Enter a payment amount. A partial payment is allowed but cannot exceed the balance.
@@ -288,7 +329,9 @@ Reports read `POSTED` journals only.
 4. Review every suggestion and confirm manually; no suggestion auto-confirms.
 5. Complete and lock the working paper only at zero difference.
 
-This is not a live bank feed and does not prove settlement. Completion freezes the cleared and uncleared snapshot reviewed at that time.
+Reconciliation never treats a feed event as proof of settlement. Completion freezes the cleared and uncleared snapshot reviewed at that time.
+
+The Owner can create a provider-neutral interface in **Live bank feeds**, map it to a bank ledger account and copy the one-time signing secret. Creating the interface does not contact a bank. Give the URL, connection ID and secret only to an approved bank, aggregator or private middleware sender. Rotate or disable the secret immediately when access changes.
 
 ### 7.3 Month-end close
 
@@ -335,11 +378,17 @@ A budget is not a journal, statutory return or guaranteed forecast.
 
 Dimension analysis does not change ledger balance, period locks or statutory financial statements.
 
+### 7.7 Payroll and Malaysia statutory review
+
+Create employee payroll profiles, then create a monthly draft run. For every Malaysia employee in a MYR run, open **Set statutory**, enter the reviewed EPF, SOCSO, EIS, PCB, Zakat and CP38 values, record the calculation source and confirm the review. Changing bonus, overtime or deductions clears that confirmation. Approval remains blocked until all Malaysia employees are reviewed. The generated payslip shows the statutory breakdown; government submission and an automatic official calculator are not connected.
+
 ## 8. Reports and electronic files
 
 ### 8.1 Financial and operating reports
 
 Choose a period in **Reports** to view and export profit and loss, balance sheet, trial balance, cash flow, inventory, sales and other operating analysis. Record the covered period on CSV or PDF exports and reconcile summaries to their detail.
+
+Accountants and Admins can save report layouts for profit and loss, balance sheet, cash flow, trial balance and aging. A layout changes title, supporting line, visible sections, zero rows, account codes, accent and print orientation; it never changes posted amounts.
 
 ### 8.2 Country reports
 
@@ -347,12 +396,13 @@ The Country report desk prepares management working papers across selectable cou
 
 ### 8.3 Electronic-invoice files
 
-The system prepares, encrypts and retains UBL XML, accounting JSON and limited MyInvois files. It currently does not provide:
+The system prepares, encrypts and retains UBL XML, accounting JSON and MyInvois 1.0 types 01–04 and self-billed types 11–14. Completed receipts can be prepared as consolidated General Public documents; supplier bills are the source for self-billed documents. A separate Owner-controlled connector can submit a reviewed MYR artifact to the fixed official sandbox or production host and refresh the authority's real validation status. Generation by itself still does not provide:
 
-- tax-authority submission;
 - a digital signature;
-- official acceptance status;
+- acceptance unless that status was returned by MyInvois;
 - proof of completed statutory filing.
+
+Other countries remain working-paper exports without a national filing connection.
 
 Never describe “file generated” as “submitted to government”.
 

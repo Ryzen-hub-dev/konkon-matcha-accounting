@@ -28,7 +28,7 @@ The application makes no runtime calls for country configuration. `lib/country-d
 
 The extraction date is pinned to 2026-09-12. `scripts/country-data.mjs` prints the reproducible extracted rows and licence; it never reads deployment secrets. Updates to legal currencies or time zones require a reviewed catalogue update. Do not present these reference defaults as certified country packs.
 
-Payroll, e-invoicing-network connections, tax-return exports, consolidation and complete per-location stock accounting are not implemented by this regional-settings release.
+Regional selection does not automatically create a certified country rules pack. Payroll and fully controlled entity consolidation are available as reviewed accounting workflows; Malaysia also has an explicit Owner-controlled MyInvois connector. Statutory payroll formulas, automatic tax-return filing, other national e-invoice networks and every jurisdiction-specific disclosure remain outside the generic regional profile.
 
 ## Reproducible acceptance checks
 

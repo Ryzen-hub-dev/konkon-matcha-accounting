@@ -26,17 +26,27 @@ Available formats:
 
 - **General UBL 2.1 XML**: structured invoice interchange; no false Peppol customization/profile identifiers. Representative MYR, JPY, KWD and EUR documents are release-tested against the official OASIS UBL 2.1 XSD. This is not validation of every invoice against national business rules.
 - **Accounting JSON**: explicitly versioned Kōn-Kōn structured invoice data, with original document ID, dates, parties, currency, lines and totals.
-- **MyInvois 1.0 JSON preparation**: domestic Malaysian business-to-business MYR documents, BRN identity type, one classification and one tax type. Enter TINs, MSIC, activity, classification, state codes, phone numbers and SST registrations. `NA` must be entered explicitly when appropriate. The adapter preserves the original reference and uses current UTC generation time as MyInvois issue time. It does not verify TINs or external MSIC/classification code registries, and does not sign or submit. Verify version availability before use; v1.0 has different signature behavior from v1.1.
+- **MyInvois 1.0 JSON**: Malaysian MYR document structures for standard types 01–04 and self-billed types 11–14. Completed receipts can use the consolidated General Public identity and classification 004; credit, debit and refund notes require the original document number and authority UUID. Supplier bills provide the source for self-billed documents. Enter and review TINs, MSIC, activity, classification, state codes, phone numbers and SST registrations. `NA` must be entered explicitly when appropriate. The adapter preserves source evidence and uses current UTC generation time as MyInvois issue time. It does not verify TINs or external MSIC/classification registries. Generation alone does not submit anything.
 
-Generation is restricted to `invoices.write`, with source-specific read access for downloads. Only sent/paid invoices and completed, unrefunded receipts are supported. Drafts, voids and refunded receipts are rejected. Credit/debit/refund notes, consolidated invoices, foreign-currency MyInvois, consumer identity types, mixed-rate/classification documents, PINT-SG/InvoiceNow transport, national signatures and tax-authority submission are **not implemented** by this release.
+Generation is restricted to the source-specific write permission, with source-specific read access for downloads. Only final invoices, completed unrefunded receipts and posted supplier bills are supported. Drafts, voids and reversed sources are rejected. Foreign-currency MyInvois, mixed-rate/classification documents, signed MyInvois v1.1 and PINT-SG/InvoiceNow transport are **not implemented** by this release.
 
 The original transaction supplies all amounts. Integer minor-unit allocation reconciles discounts and inclusive tax into net lines. Supplier country must match the historical snapshot. Missing/unsafe source data and inconsistent totals are blocked. Generating a file does not post another sale or journal.
 
-Every saved file has status `GENERATED_NOT_SUBMITTED` and validation `LOCAL_STRUCTURE_AND_TOTALS_ONLY`. There is no fabricated tax authority UUID, QR acceptance code or successful-submission state. A historical generated invoice remains in history after a later refund; it is **not** a credit note and must not be reused as proof that the refund was reported.
+Every saved file starts with status `GENERATED_NOT_SUBMITTED` and validation `LOCAL_STRUCTURE_AND_TOTALS_ONLY`. There is no fabricated authority UUID, QR acceptance code or successful state. A historical generated invoice remains in history after a later refund; it is **not** a credit note and must not be reused as proof that the refund was reported.
 
 Files are AES-256-GCM encrypted with per-artifact authenticated context under the existing application encryption key, and SHA-256 is checked at download. Only metadata is listed. Keep `AUTH_SECRET` stable and backed up securely; replacing it without migrating encrypted data makes existing encrypted cards, scan events and documents unreadable. Rotation requires an explicit migration plan. Audits record generation/download without tax IDs or addresses.
 
-Generation + source locking + audit run in a MongoDB transaction. A unique operator/request key makes retries idempotent and rejects changed details under a reused key. Each source is limited to 50 snapshots; each output is limited to 1 MB. No external provider credentials are requested or stored in this flow.
+Generation + source locking + audit run in a MongoDB transaction. A unique operator/request key makes retries idempotent and rejects changed details under a reused key. Each source is limited to 50 snapshots; each output is limited to 1 MB. No external provider credentials are requested or stored in the generation flow.
+
+## MyInvois direct submission
+
+The Owner can open **Workspace → Malaysia MyInvois**, choose the official pre-production sandbox or production environment, and verify ERP Client ID/Client Secret credentials. Credentials and the one-hour access token are encrypted; the browser receives only last-four-character indicators. Sandbox and production credentials are separate.
+
+For a reviewed `MYINVOIS_JSON` history item, **Submit MyInvois** performs a real external action only after Owner confirmation. The server minifies the saved immutable JSON, enforces the official 300 KB per-document limit, hashes the exact bytes with SHA-256, Base64-encodes them and calls `POST /api/v1.0/documentsubmissions/` on the fixed authority host. A successful synchronous response stores the submission UID and returned document UUID and changes the local state to pending validation. **Refresh status** calls Get Submission and stores the authority's overall/document status and long ID when available. The UI never changes a status to valid unless MyInvois returned that status.
+
+Submission uses an atomic local claim so two browser sessions cannot send the same artifact concurrently. If the connection ends after the external request and the authority result is unknown, the artifact enters **review required** and blind resubmission is blocked. The Owner must verify the document in the MyInvois portal, then use **Link authority result** with the submission UID; the server calls Get Submission and links it only when that submission contains the exact local document number.
+
+The connector does not silently retry a structurally rejected or duplicate submission, does not invent a production approval and does not treat synchronous acceptance as final validation. Use sandbox acceptance first, ensure the document issue time remains within the current authority window, confirm the issuer TIN matches the connected ERP taxpayer, and have a Malaysian tax professional review production use. Cancelling/rejecting an accepted e-Invoice and issuing credit/debit/refund notes remain outside this workflow.
 
 ## Use another phone for NFC binding
 
@@ -69,6 +79,7 @@ The smoke harness creates a random isolated database and prefix, checks emptines
 
 - [OASIS UBL 2.1](https://docs.oasis-open.org/ubl/os-UBL-2.1/UBL-2.1.html)
 - [LHDN invoice v1.0](https://sdk.myinvois.hasil.gov.my/documents/invoice-v1-0/) and [official sample payloads](https://sdk.myinvois.hasil.gov.my/sample/)
+- [MyInvois taxpayer login](https://sdk.myinvois.hasil.gov.my/api/07-login-as-taxpayer-system/), [Submit Documents](https://sdk.myinvois.hasil.gov.my/einvoicingapi/02-submit-documents/) and [Get Submission](https://sdk.myinvois.hasil.gov.my/einvoicingapi/06-get-submission/)
 - [Peppol current post-award specifications](https://peppol.org/documentation/technical-documentation/post-award-documentation/)
 - [IRAS GST return guidance](https://www.iras.gov.sg/taxes/goods-services-tax-(gst)/filing-gst/completing-gst-returns)
 - [MySST forms](https://mysst.customs.gov.my/sst-forms/)

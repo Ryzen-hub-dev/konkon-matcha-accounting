@@ -9,7 +9,7 @@ import { dateKeyInTimeZone } from "@/lib/dates";
 import { readExchangeRate } from "@/lib/exchange-rates";
 import { makeDocumentNo, serialise } from "@/lib/format";
 import { currencyMinorUnits, roundCurrency } from "@/lib/international";
-import { allocateSupplierPayment, ensureProcurementAccounts, payableAge, summarisePayableAging, supplierPaymentSchema } from "@/lib/procurement";
+import { allocateSupplierPayment, ensureProcurementAccounts, payableAge, payableDisplayStatus, summarisePayableAging, supplierPaymentSchema } from "@/lib/procurement";
 
 export const runtime = "nodejs";
 
@@ -55,7 +55,10 @@ export async function GET(request: Request) {
       supplierMap.set(key, current);
     }
     return ok(serialise({
-      bills: agedBills.map((bill) => ({ ...bill, displayStatus: bill.status !== "PAID" && bill.daysOverdue > 0 ? "OVERDUE" : bill.status })),
+      bills: agedBills.map((bill) => ({
+        ...bill,
+        displayStatus: payableDisplayStatus(bill.status, bill.baseBalance, bill.daysOverdue),
+      })),
       payments,
       accounts,
       aging,

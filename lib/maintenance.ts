@@ -2,6 +2,7 @@ import { type Db } from "mongodb";
 import { EXPIRING_AUDIT_ACTIONS, auditExpiry } from "./data-retention";
 import { clearArchivedMember, clearArchivedUser } from "./record-deletion";
 import { packDocument, unpackDocument } from "./document-storage";
+import { normaliseCommerceSettings, orderMessage } from "./online-orders";
 
 // Only temporary records are eligible for physical deletion. No ledger,
 // sale/refund/payment evidence, stock movement or settings history is listed.
@@ -9,11 +10,12 @@ const expiringCollections = {
   scannerEvents: "expiresAt", scannerSessions: "expiresAt", paymentDisplaySessions: "expiresAt",
   authThrottle: "expiresAt", sensitiveLookupEvents: "expiresAt", localPaymentEvents: "expireAt",
   paymentWebhookEvents: "createdAt", auditLogs: "expiresAt", memberCards: "deletedAt",
+  onlineOrderThrottle: "expiresAt",
 } as const;
 
 export async function maintainData(db: Db, dryRun = true, now = new Date()) {
   const deadline = Date.now() + 20_000;
-  const summary = { dryRun, expiredRecords: 0, clearedProfiles: 0, expiringLogs: 0, packedDocuments: 0, savedBytes: 0, invalidDocuments: 0, budgetReached: false };
+  const summary = { dryRun, expiredRecords: 0, clearedProfiles: 0, clearedOnlineOrders: 0, expiringLogs: 0, packedDocuments: 0, savedBytes: 0, invalidDocuments: 0, budgetReached: false };
   for (const [name, field] of Object.entries(expiringCollections)) {
     if (Date.now() >= deadline) { summary.budgetReached = true; return summary; }
     const days = name === "memberCards" ? 90 : name === "paymentWebhookEvents" ? 30 : 0;
@@ -27,6 +29,74 @@ export async function maintainData(db: Db, dryRun = true, now = new Date()) {
     for (const row of rows) {
       if (Date.now() >= deadline) { summary.budgetReached = true; return summary; }
       if (dryRun || await (name === "members" ? clearArchivedMember(db, row._id, now) : clearArchivedUser(db, row._id, now))) summary.clearedProfiles++;
+    }
+  }
+  if (Date.now() < deadline) {
+    const commerce = normaliseCommerceSettings(
+      await db.collection("settings").findOne({ key: "commerce" }),
+    );
+    const cutoff = new Date(
+      now.getTime() - commerce.abandonedRetentionDays * 86_400_000,
+    );
+    const abandoned = await db
+      .collection("onlineOrders")
+      .find(
+        {
+          status: { $in: ["REQUESTED", "REJECTED", "CANCELLED"] },
+          updatedAt: { $type: "date", $lte: cutoff },
+          personalDataClearedAt: { $exists: false },
+          linkedInvoice: { $exists: false },
+          linkedReceipt: { $exists: false },
+        },
+        { projection: { _id: 1 }, maxTimeMS: 2500 },
+      )
+      .limit(25)
+      .toArray();
+    for (const order of abandoned) {
+      if (Date.now() >= deadline) {
+        summary.budgetReached = true;
+        return summary;
+      }
+      if (!dryRun) {
+        const redacted = await db.collection("onlineOrders").updateOne(
+          { _id: order._id, personalDataClearedAt: { $exists: false } },
+          {
+            $set: {
+              customer: {
+                name: "Expired customer request",
+                email: "",
+                phone: "",
+                address: "",
+              },
+              note: "",
+              sensitiveAnswers: [],
+              messages: [
+                orderMessage(
+                  "SYSTEM",
+                  "Customer contact details and conversation were cleared under the online-order retention policy.",
+                ),
+              ],
+              messageCount: 1,
+              attachmentCount: 0,
+              personalDataClearedAt: now,
+              updatedAt: now,
+            },
+            $unset: {
+              publicTokenHash: "",
+              encryptedPublicToken: "",
+              lastEmailError: "",
+            },
+          },
+          { maxTimeMS: 2500 },
+        );
+        if (!redacted.modifiedCount) continue;
+        await db.collection("onlineOrderAttachments").updateMany(
+          { orderId: order._id, status: "ACTIVE" },
+          { $set: { status: "ORPHANED", expiresAt: now } },
+          { maxTimeMS: 2500 },
+        );
+      }
+      summary.clearedOnlineOrders++;
     }
   }
   const logs = await db.collection("auditLogs").find({ action: { $in: EXPIRING_AUDIT_ACTIONS }, expiresAt: { $exists: false }, createdAt: { $type: "date" } }, { projection: { action: 1, createdAt: 1 }, maxTimeMS: 2500 }).limit(100).toArray();

@@ -36,6 +36,7 @@ const settingsSchema = z.object({
   franchiseBrand: z.string().trim().max(100).default(""),
   franchiseCode: z.string().trim().toUpperCase().max(40).regex(/^$|^[A-Z0-9_-]+$/).default(""),
   parentOrganizationCode: z.string().trim().toUpperCase().max(40).regex(/^$|^[A-Z0-9_-]+$/).default(""),
+  workspaceTheme: z.enum(["MATCHA", "PROFESSIONAL", "FOCUS"]).default("MATCHA"),
 }).superRefine((value, context) => {
   if (!value.acceptedCurrencies.includes(value.currency)) {
     context.addIssue({ code: "custom", path: ["acceptedCurrencies"], message: "Accepted currencies must include the workspace base currency." });
@@ -46,6 +47,7 @@ const settingsSchema = z.object({
 });
 
 class CurrencyChangeConflict extends Error {}
+class ThemeChangeForbidden extends Error {}
 
 export async function GET() {
   const auth = await authorize("settings.read");
@@ -76,6 +78,9 @@ export async function PATCH(request: Request) {
     try {
       await mongoSession.withTransaction(async () => {
         const current = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }, { session: mongoSession }));
+        if (auth.session.role !== "OWNER" && input.data.workspaceTheme !== current.workspaceTheme) {
+          throw new ThemeChangeForbidden("Only the Owner can change the workspace interface theme.");
+        }
         const currencyError = ledgerCurrencyChangeError(current.currency, input.data.currency);
         if (currencyError) throw new CurrencyChangeConflict(currencyError);
         const changedFields = Object.keys(input.data).filter((field) => JSON.stringify(current[field as keyof typeof current]) !== JSON.stringify(input.data[field as keyof typeof input.data]));
@@ -123,6 +128,7 @@ export async function PATCH(request: Request) {
     return ok(serialise(settings));
   } catch (error) {
     if (error instanceof CurrencyChangeConflict) return fail(error.message, 409, { currency: [error.message] });
+    if (error instanceof ThemeChangeForbidden) return fail(error.message, 403);
     return publicError(error);
   }
 }

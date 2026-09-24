@@ -2,6 +2,7 @@ import { authorize, fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { attachmentStorageInputSchema, getAttachmentStorageConfig, safeAttachmentStorage, saveAttachmentStorageConfig } from "@/lib/attachment-storage";
 import { writeAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
+import { getManagedStorageUsage } from "@/lib/storage-control";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -9,7 +10,14 @@ export const maxDuration = 60;
 export async function GET() {
   const auth = await authorize("owner.control");
   if (auth.error) return auth.error;
-  try { return ok(safeAttachmentStorage(await getAttachmentStorageConfig(await getDb()))); }
+  try {
+    const db = await getDb();
+    const [config, usage] = await Promise.all([
+      getAttachmentStorageConfig(db),
+      getManagedStorageUsage(db),
+    ]);
+    return ok({ ...safeAttachmentStorage(config), usage });
+  }
   catch (error) { return publicError(error); }
 }
 
@@ -23,7 +31,7 @@ export async function PATCH(request: Request) {
     const db = await getDb();
     const saved = await saveAttachmentStorageConfig(db, input.data);
     await writeAudit(db, auth.session, "attachment_storage.configure", "attachmentStorage", "github-private-v1", { owner: saved.owner, repository: saved.repository, branch: saved.branch, basePath: saved.basePath, tokenLast4: saved.tokenLast4 });
-    return ok(saved);
+    return ok({ ...saved, usage: await getManagedStorageUsage(db) });
   } catch (error) {
     if (error instanceof Error && /GitHub|private repository|fine-grained/.test(error.message)) return fail(error.message, 422);
     return publicError(error);

@@ -22,6 +22,7 @@ export type BusinessSettings = {
   franchiseBrand: string;
   franchiseCode: string;
   parentOrganizationCode: string;
+  workspaceTheme: "MATCHA" | "PROFESSIONAL" | "FOCUS";
   updatedAt?: string | Date;
 };
 
@@ -47,6 +48,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   franchiseBrand: "",
   franchiseCode: "",
   parentOrganizationCode: "",
+  workspaceTheme: "MATCHA",
 };
 
 export function normaliseBusinessSettings(value?: Record<string, unknown> | null): BusinessSettings {
@@ -81,5 +83,10 @@ export function normaliseBusinessSettings(value?: Record<string, unknown> | null
     franchiseBrand: String(value?.franchiseBrand || ""),
     franchiseCode: String(value?.franchiseCode || ""),
     parentOrganizationCode: String(value?.parentOrganizationCode || ""),
+    workspaceTheme: ["MATCHA", "PROFESSIONAL", "FOCUS"].includes(
+      String(value?.workspaceTheme || ""),
+    )
+      ? (String(value?.workspaceTheme) as BusinessSettings["workspaceTheme"])
+      : "MATCHA",
   };
 }

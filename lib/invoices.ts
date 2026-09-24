@@ -3,6 +3,7 @@ import { isValidDateKey } from "@/lib/dates";
 import { documentDimensionSelectionSchema } from "@/lib/dimension-selection";
 import { currencyFractionDigits, roundCurrency } from "@/lib/international";
 import { calculateTaxTotals, type TaxMode } from "@/lib/tax";
+import type { BusinessSettings } from "@/lib/business-settings";
 
 const objectIdSchema = z.string().regex(/^[a-fA-F0-9]{24}$/, "Choose a valid invoice reference.").transform(value => value.toLowerCase());
 
@@ -75,6 +76,25 @@ export function calculateInvoiceAmounts(
     throw new InvoiceWorkflowError("The invoice amount is too large to represent safely. Reduce its quantity or amount.", 422);
   }
   return { items, subtotal, taxRate: totals.taxRate, taxMode: totals.taxMode, tax: totals.tax, netSales: totals.netSales, total: totals.total };
+}
+
+export function invoiceBusinessSnapshot(business: BusinessSettings) {
+  return {
+    businessName: business.businessName,
+    legalEntityName: business.legalEntityName,
+    registrationNo: business.registrationNo,
+    email: business.email,
+    phone: business.phone,
+    address: business.address,
+    countryCode: business.countryCode,
+    timeZone: business.timeZone,
+    locale: business.locale,
+    currency: business.currency,
+    taxName: business.taxName,
+    organizationType: business.organizationType,
+    franchiseBrand: business.franchiseBrand,
+    franchiseCode: business.franchiseCode,
+  };
 }
 
 export function assertInvoiceDraftEditable(invoice: { status: unknown; paidAmount?: unknown }) {

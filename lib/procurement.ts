@@ -157,6 +157,9 @@ export const purchaseOrderActionSchema = z.discriminatedUnion("action", [
     action: z.literal("RECEIVE"),
     clientRequestId: z.string().uuid(),
     supplierInvoiceNo: z.string().trim().min(2).max(80),
+    supplierInvoiceTotal: z.coerce.number().positive().max(100_000_000),
+    supplierInvoiceTax: z.coerce.number().min(0).max(100_000_000),
+    matchNote: z.string().trim().max(300).default(""),
     invoiceDate: z.coerce.date(),
     receivedAt: z.coerce.date().default(() => new Date()),
     notes: z.string().trim().max(300).default(""),
@@ -169,6 +172,7 @@ export const purchaseOrderActionSchema = z.discriminatedUnion("action", [
   }).superRefine((value, context) => {
     const ids = value.lines.map((line) => line.productId);
     if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", path: ["lines"], message: "Each received product can appear only once." });
+    if (value.supplierInvoiceTax > value.supplierInvoiceTotal) context.addIssue({ code: "custom", path: ["supplierInvoiceTax"], message: "Invoice tax cannot exceed the invoice total." });
   }),
 ]);
 
@@ -195,6 +199,12 @@ export function payableAge(dueDateValue: unknown, asOfValue: unknown = new Date(
           ? "61_90"
           : "90_PLUS";
   return { dueDate, asOf, daysOverdue: Math.max(0, daysOverdue), bucket };
+}
+
+export function payableDisplayStatus(status: string, baseBalance: unknown, daysOverdue: unknown) {
+  return ["OPEN", "PARTIALLY_PAID"].includes(status) && Number(baseBalance || 0) > 0 && Number(daysOverdue || 0) > 0
+    ? "OVERDUE"
+    : status;
 }
 
 type PayableForAging = {
@@ -325,6 +335,7 @@ export function allocateSupplierPayment(input: {
 export const PROCUREMENT_ACCOUNTS = [
   { code: "1300", name: "Input tax recoverable", type: "ASSET" },
   { code: "4100", name: "Foreign exchange gain", type: "REVENUE" },
+  { code: "5200", name: "Purchase return variance", type: "EXPENSE" },
   { code: "6200", name: "Foreign exchange loss", type: "EXPENSE" },
 ] as const;
 

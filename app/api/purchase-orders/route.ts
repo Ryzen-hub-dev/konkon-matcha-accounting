@@ -9,11 +9,14 @@ import { dateKeyInTimeZone } from "@/lib/dates";
 import { getDb, getMongoClient } from "@/lib/db";
 import { readExchangeRate } from "@/lib/exchange-rates";
 import { makeDocumentNo, serialise } from "@/lib/format";
-import { currencyMinorUnits, roundCurrency } from "@/lib/international";
+import { currencyFractionDigits, currencyMinorUnits, roundCurrency } from "@/lib/international";
 import { approvalRequiresDifferentMaker, ensureProcurementAccounts, purchaseOrderActionSchema, purchaseOrderInputSchema, quoteMatchesPurchaseOrder, requisitionMatchesOrder, suggestedReorderAfterInbound, weightedAverageInventoryCost } from "@/lib/procurement";
 import { calculateTaxTotals } from "@/lib/tax";
 import { addInventoryBatchQuantity, lotKey, normaliseLotNo } from "@/lib/inventory-batches";
 import { applyDimensionAllocation, dimensionRuleAuditId, resolveDimensionAllocation } from "@/lib/dimension-allocation";
+import { allocatePurchaseReceiptLineFinancials } from "@/lib/purchase-returns";
+import { allocateMinorUnits } from "@/lib/minor-unit-allocation";
+import { purchaseInvoiceMatch } from "@/lib/purchase-matching";
 
 export const runtime = "nodejs";
 
@@ -36,16 +39,17 @@ export async function GET(request: Request) {
     if (id) {
       if (!ObjectId.isValid(id)) return fail("The purchase order reference is invalid.", 422);
       const orderId = new ObjectId(id);
-      const [order, receipts, bills] = await Promise.all([
+      const [order, receipts, bills, matchExceptions] = await Promise.all([
         db.collection("purchaseOrders").findOne({ _id: orderId }),
         db.collection("goodsReceipts").find({ purchaseOrderId: orderId }).sort({ receivedAt: -1 }).toArray(),
         db.collection("accountsPayableBills").find({ purchaseOrderId: orderId }).sort({ createdAt: -1 }).toArray(),
+        db.collection("purchaseMatchExceptions").find({ purchaseOrderId: orderId }).sort({ createdAt: -1 }).toArray(),
       ]);
       if (!order) return fail("This purchase order could not be found.", 404);
-      return ok(serialise({ order, receipts, bills }));
+      return ok(serialise({ order, receipts, bills, matchExceptions }));
     }
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
-    const [orders, products, locations, settings, salesVelocity, inboundStock] = await Promise.all([
+    const [orders, products, locations, settings, salesVelocity, inboundStock, matchExceptions] = await Promise.all([
       db.collection("purchaseOrders").find({}).sort({ createdAt: -1 }).limit(300).toArray(),
       db.collection("products").find({ active: { $ne: false } }).sort({ category: 1, name: 1 }).limit(500).toArray(),
       db.collection("locations").find({ active: { $ne: false } }).sort({ type: 1, code: 1 }).limit(300).toArray(),
@@ -61,6 +65,7 @@ export async function GET(request: Request) {
         { $project: { productId: "$items.productId", outstanding: { $max: [0, { $subtract: ["$items.quantity", { $ifNull: ["$items.receivedQuantity", 0] }] }] } } },
         { $group: { _id: "$productId", quantity: { $sum: "$outstanding" } } },
       ]).toArray(),
+      db.collection("purchaseMatchExceptions").find({ status: { $in: ["PENDING", "APPROVED", "REJECTED", "CONSUMED"] } }).sort({ createdAt: -1 }).limit(300).toArray(),
     ]);
     const business = normaliseBusinessSettings(settings);
     const velocity = new Map(salesVelocity.map((row) => [String(row._id), Number(row.units || 0)]));
@@ -87,6 +92,7 @@ export async function GET(request: Request) {
       orders: orders.map((order) => ({ ...order, isOverdue: ["APPROVED", "PARTIALLY_RECEIVED"].includes(String(order.status)) && documentDateKey(order.expectedDate) < dateKeyInTimeZone(new Date(), String(order.timeZone || business.timeZone)) })),
       products,
       locations,
+      matchExceptions,
       reorderSuggestions,
       business: { currency: business.currency, taxName: business.taxName, taxRate: business.taxRate, taxMode: business.taxMode, locale: business.locale, timeZone: business.timeZone },
     }));
@@ -315,6 +321,11 @@ export async function PATCH(request: Request) {
       ]);
       return ok(serialise({ order, receipt: duplicate, bill }));
     }
+    const duplicateMatchRequest = await db.collection("purchaseMatchExceptions").findOne({
+      clientRequestId: receiveInput.clientRequestId,
+      status: "PENDING",
+    });
+    if (duplicateMatchRequest) return ok(serialise({ pendingMatch: true, matchException: duplicateMatchRequest }));
     const client = await getMongoClient();
     const mongoSession = client.startSession();
     const receiptId = new ObjectId();
@@ -325,6 +336,14 @@ export async function PATCH(request: Request) {
     let result: Record<string, unknown> | null = null;
     try {
       await mongoSession.withTransaction(async () => {
+        await touchBusinessKeyLock(db, businessKeyLockId("PURCHASE_RECEIPT_REQUEST", receiveInput.clientRequestId), mongoSession);
+        const repeatedReceipt = await db.collection("goodsReceipts").findOne({ clientRequestId: receiveInput.clientRequestId }, { session: mongoSession });
+        if (repeatedReceipt) {
+          const repeatedBill = await db.collection("accountsPayableBills").findOne({ goodsReceiptId: repeatedReceipt._id }, { session: mongoSession });
+          const repeatedOrder = await db.collection("purchaseOrders").findOne({ _id: repeatedReceipt.purchaseOrderId }, { session: mongoSession });
+          result = { order: repeatedOrder, receipt: repeatedReceipt, bill: repeatedBill };
+          return;
+        }
         const order = await db.collection("purchaseOrders").findOne({ _id: orderId, status: { $in: ["APPROVED", "PARTIALLY_RECEIVED"] } }, { session: mongoSession });
         if (!order) throw new PurchaseConflictError("Only an approved order with outstanding quantities can be received.");
         const orderTimeZone = String(order.timeZone || "UTC");
@@ -373,16 +392,80 @@ export async function PATCH(request: Request) {
         });
         const receiptSubtotal = roundCurrency(receiptLines.reduce((sum: number, line: Record<string, unknown>) => sum + Number(line.lineTotal), 0), String(order.currency));
         const totals = calculateTaxTotals(receiptSubtotal, 0, Number(order.taxRate || 0), order.taxMode === "INCLUSIVE" ? "INCLUSIVE" : "EXCLUSIVE", String(order.currency));
-        const baseTotal = roundCurrency(totals.total / Number(order.exchangeRate), String(order.baseCurrency));
-        const targetBaseInventoryValue = roundCurrency(totals.netSales / Number(order.exchangeRate), String(order.baseCurrency));
-        const lineBaseInventoryValue = roundCurrency(receiptLines.reduce((sum: number, line: Record<string, unknown>) => sum + Number(line.baseInventoryValue), 0), String(order.baseCurrency));
-        const allocationDifference = roundCurrency(targetBaseInventoryValue - lineBaseInventoryValue, String(order.baseCurrency));
-        if (allocationDifference && receiptLines.length) {
-          const lastIndex = receiptLines.length - 1;
-          receiptLines = receiptLines.map((line: Record<string, unknown>, index: number) => index === lastIndex ? { ...line, baseInventoryValue: roundCurrency(Number(line.baseInventoryValue) + allocationDifference, String(order.baseCurrency)), baseUnitCost: roundCurrency((Number(line.baseInventoryValue) + allocationDifference) / Number(line.quantity), String(order.baseCurrency)) } : line);
+        const match = purchaseInvoiceMatch({
+          purchaseOrderId: String(order._id), supplierInvoiceNo: receiveInput.supplierInvoiceNo,
+          invoiceDate: receiveInput.invoiceDate, expectedTotal: totals.total, expectedTax: totals.tax,
+          invoiceTotal: receiveInput.supplierInvoiceTotal, invoiceTax: receiveInput.supplierInvoiceTax,
+          currency: String(order.currency),
+          lines: receiveInput.lines.map(line => ({ productId: line.productId, quantity: line.quantity })),
+        });
+        await touchBusinessKeyLock(db, businessKeyLockId("PURCHASE_INVOICE_MATCH", String(order.supplierId), match.supplierInvoiceNoNormalized), mongoSession);
+        let matchException = match.matched ? null : await db.collection("purchaseMatchExceptions").findOne({
+          purchaseOrderId: order._id,
+          supplierInvoiceNoNormalized: match.supplierInvoiceNoNormalized,
+          fingerprint: match.fingerprint,
+          status: "APPROVED",
+        }, { session: mongoSession });
+        if (!match.matched && !matchException) {
+          if (receiveInput.matchNote.length < 3) throw new PurchaseConflictError("Explain the supplier invoice difference before requesting approval.");
+          const activeException = await db.collection("purchaseMatchExceptions").findOne({
+            purchaseOrderId: order._id,
+            supplierInvoiceNoNormalized: match.supplierInvoiceNoNormalized,
+            status: { $in: ["PENDING", "APPROVED"] },
+          }, { session: mongoSession });
+          if (activeException && activeException.fingerprint !== match.fingerprint) throw new PurchaseConflictError("This supplier invoice already has a different pending or approved variance. Review it before changing the receipt.");
+          if (activeException) {
+            result = { pendingMatch: activeException.status === "PENDING", matchException: activeException };
+            return;
+          }
+          const requestedAt = new Date();
+          matchException = {
+            _id: receiptId, clientRequestId: receiveInput.clientRequestId,
+            purchaseOrderId: order._id, purchaseOrderNo: order.purchaseOrderNo,
+            supplierId: order.supplierId, supplierCode: order.supplierCode, supplierName: order.supplierName,
+            supplierInvoiceNo: receiveInput.supplierInvoiceNo,
+            supplierInvoiceNoNormalized: match.supplierInvoiceNoNormalized,
+            invoiceDate: receiveInput.invoiceDate, currency: order.currency,
+            expectedTotal: match.expectedTotal, expectedTax: match.expectedTax,
+            invoiceTotal: match.invoiceTotal, invoiceTax: match.invoiceTax,
+            totalVariance: match.totalVariance, taxVariance: match.taxVariance,
+            items: match.lines.map(line => ({ productId: new ObjectId(line.productId), quantity: line.quantity })),
+            fingerprint: match.fingerprint, requestNote: receiveInput.matchNote,
+            status: "PENDING", version: 1,
+            requestedBy: new ObjectId(auth.session.id), requestedByName: auth.session.fullName,
+            requestedAt, createdAt: requestedAt, updatedAt: requestedAt,
+          };
+          await db.collection("purchaseMatchExceptions").insertOne(matchException, { session: mongoSession });
+          await writeAudit(db, auth.session, "purchase_match.request", "purchaseMatchException", String(receiptId), {
+            purchaseOrderNo: order.purchaseOrderNo, supplierInvoiceNo: receiveInput.supplierInvoiceNo,
+            expectedTotal: match.expectedTotal, invoiceTotal: match.invoiceTotal,
+            expectedTax: match.expectedTax, invoiceTax: match.invoiceTax, currency: order.currency,
+            note: receiveInput.matchNote,
+          }, mongoSession);
+          result = { pendingMatch: true, matchException };
+          return;
         }
+        const baseTotal = roundCurrency(match.invoiceTotal / Number(order.exchangeRate), String(order.baseCurrency));
+        const targetBaseInventoryValue = roundCurrency(match.invoiceNet / Number(order.exchangeRate), String(order.baseCurrency));
+        const weights = receiptLines.map((line: Record<string, unknown>) => currencyMinorUnits(line.lineTotal, String(order.currency)));
+        const baseScale = 10 ** currencyFractionDigits(String(order.baseCurrency));
+        const baseInventoryParts = allocateMinorUnits(
+          currencyMinorUnits(targetBaseInventoryValue, String(order.baseCurrency)),
+          weights,
+          "Supplier invoice amounts cannot be allocated to the received products.",
+        );
+        receiptLines = receiptLines.map((line: Record<string, unknown>, index: number) => ({
+          ...line,
+          allocationWeight: line.lineTotal,
+          baseInventoryValue: baseInventoryParts[index] / baseScale,
+          baseUnitCost: roundCurrency((baseInventoryParts[index] / baseScale) / Number(line.quantity), String(order.baseCurrency)),
+        }));
         const baseInventoryValue = targetBaseInventoryValue;
         const baseTax = roundCurrency(Math.max(0, baseTotal - baseInventoryValue), String(order.baseCurrency));
+        receiptLines = allocatePurchaseReceiptLineFinancials(receiptLines, {
+          netSales: match.invoiceNet, tax: match.invoiceTax, total: match.invoiceTotal, baseTax,
+        }, String(order.currency), String(order.baseCurrency));
+        receiptLines = receiptLines.map((line: Record<string, unknown>) => ({ ...line, netLineTotal: line.lineNetAmount }));
         const transactionDate = receiveInput.receivedAt;
         const postedAt = new Date();
         for (const line of receiptLines) {
@@ -435,7 +518,7 @@ export async function PATCH(request: Request) {
           { returnDocument: "after", session: mongoSession },
         );
         if (!updatedOrder) throw new PurchaseConflictError("The purchase order changed during receiving. Reload before trying again.");
-        const supplierInvoiceNoNormalized = receiveInput.supplierInvoiceNo.trim().toUpperCase();
+        const supplierInvoiceNoNormalized = match.supplierInvoiceNoNormalized;
         const dueDate = new Date(receiveInput.invoiceDate.getTime() + Number(order.supplierSnapshot?.paymentTermsDays || 0) * 86_400_000);
         const dimensionAllocation = await resolveDimensionAllocation(db, "PURCHASE_LOCATION", String(order.locationId), mongoSession);
         const receipt = {
@@ -443,21 +526,39 @@ export async function PATCH(request: Request) {
           supplierId: order.supplierId, supplierCode: order.supplierCode, supplierName: order.supplierName,
           locationId: order.locationId, locationCode: order.locationCode, locationName: order.locationName,
           supplierInvoiceNo: receiveInput.supplierInvoiceNo, items: receiptLines, currency: order.currency, baseCurrency: order.baseCurrency,
-          exchangeRate: order.exchangeRate, exchangeRateSource: order.exchangeRateSource, subtotal: receiptSubtotal, taxRate: totals.taxRate,
-          taxMode: totals.taxMode, tax: totals.tax, total: totals.total, baseInventoryValue, baseTax, baseTotal,
+          exchangeRate: order.exchangeRate, exchangeRateSource: order.exchangeRateSource,
+          subtotal: match.invoiceNet, purchaseOrderSubtotal: receiptSubtotal, taxRate: totals.taxRate,
+          taxMode: totals.taxMode, tax: match.invoiceTax, total: match.invoiceTotal, baseInventoryValue, baseTax, baseTotal,
+          invoiceMatch: {
+            status: match.matched ? "MATCHED" : "APPROVED_EXCEPTION",
+            expectedTotal: match.expectedTotal, expectedTax: match.expectedTax,
+            totalVariance: match.totalVariance, taxVariance: match.taxVariance,
+            fingerprint: match.fingerprint,
+            ...(matchException ? { exceptionId: matchException._id } : {}),
+          },
           notes: receiveInput.notes, ...(dimensionAllocation ? { dimensionAllocation } : {}), receivedAt: transactionDate, receivedBy: new ObjectId(auth.session.id), receivedByName: auth.session.fullName, createdAt: postedAt,
         };
         const bill = {
           _id: billId, billNo, supplierId: order.supplierId, supplierCode: order.supplierCode, supplierName: order.supplierName,
           supplierInvoiceNo: receiveInput.supplierInvoiceNo, supplierInvoiceNoNormalized, purchaseOrderId: order._id, purchaseOrderNo: order.purchaseOrderNo,
           goodsReceiptId: receiptId, receiptNo, invoiceDate: receiveInput.invoiceDate, dueDate,
-          currency: order.currency, baseCurrency: order.baseCurrency, timeZone: order.timeZone || "UTC", exchangeRate: order.exchangeRate, total: totals.total, baseTotal,
-          paidAmount: 0, balance: totals.total, baseSettledAmount: 0, baseBalance: baseTotal, status: "OPEN",
+          currency: order.currency, baseCurrency: order.baseCurrency, timeZone: order.timeZone || "UTC", exchangeRate: order.exchangeRate,
+          total: match.invoiceTotal, tax: match.invoiceTax, baseTotal,
+          invoiceMatch: receipt.invoiceMatch,
+          paidAmount: 0, balance: match.invoiceTotal, baseSettledAmount: 0, baseBalance: baseTotal, status: "OPEN",
           ...(dimensionAllocation ? { dimensionAllocation } : {}), createdBy: new ObjectId(auth.session.id), createdAt: postedAt, updatedAt: postedAt,
         };
         await ensureProcurementAccounts(db, new ObjectId(auth.session.id), mongoSession);
         await db.collection("goodsReceipts").insertOne(receipt, { session: mongoSession });
         await db.collection("accountsPayableBills").insertOne(bill, { session: mongoSession });
+        if (matchException) {
+          const consumed = await db.collection("purchaseMatchExceptions").updateOne(
+            { _id: matchException._id, status: "APPROVED", version: matchException.version },
+            { $set: { status: "CONSUMED", consumedReceiptId: receiptId, consumedReceiptNo: receiptNo, consumedAt: postedAt, updatedAt: postedAt }, $inc: { version: 1 } },
+            { session: mongoSession },
+          );
+          if (!consumed.modifiedCount) throw new PurchaseConflictError("The invoice variance approval changed before receipt posting. Refresh and try again.");
+        }
         const journalLines = [
           { accountCode: "1200", accountName: "Inventory", debit: baseInventoryValue, credit: 0 },
           ...(baseTax > 0 ? [{ accountCode: "1300", accountName: "Input tax recoverable", debit: baseTax, credit: 0 }] : []),
@@ -474,7 +575,14 @@ export async function PATCH(request: Request) {
           { $inc: { receiptCount: 1, onTimeReceiptCount: lateDays === 0 ? 1 : 0, lateDaysTotal: lateDays, receivedBaseValue: baseTotal }, $set: { lastReceiptAt: transactionDate, updatedAt: postedAt } },
           { session: mongoSession },
         );
-        await writeAudit(db, auth.session, "purchase_order.receive", "purchaseOrder", receiveInput.id, { purchaseOrderNo: order.purchaseOrderNo, receiptNo, billNo, supplierInvoiceNo: receiveInput.supplierInvoiceNo, baseTotal, fullyReceived, dimensionRuleId: dimensionRuleAuditId(dimensionAllocation) }, mongoSession);
+        await writeAudit(db, auth.session, "purchase_order.receive", "purchaseOrder", receiveInput.id, {
+          purchaseOrderNo: order.purchaseOrderNo, receiptNo, billNo,
+          supplierInvoiceNo: receiveInput.supplierInvoiceNo,
+          invoiceMatchStatus: receipt.invoiceMatch.status,
+          expectedTotal: match.expectedTotal, invoiceTotal: match.invoiceTotal,
+          expectedTax: match.expectedTax, invoiceTax: match.invoiceTax,
+          baseTotal, fullyReceived, dimensionRuleId: dimensionRuleAuditId(dimensionAllocation),
+        }, mongoSession);
         result = { order: updatedOrder, receipt, bill };
       });
     } finally { await mongoSession.endSession(); }

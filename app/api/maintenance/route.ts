@@ -1,21 +1,13 @@
-import { timingSafeEqual } from "node:crypto";
 import { authorize, fail, ok, publicError, sameOrigin } from "@/lib/api";
+import { validCronRequest } from "@/lib/cron-auth";
 import { getDb } from "@/lib/db";
 import { maintainData } from "@/lib/maintenance";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-function validCron(request: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret || secret.length < 32) return false;
-  const provided = Buffer.from(request.headers.get("authorization") || "");
-  const expected = Buffer.from(`Bearer ${secret}`);
-  return provided.length === expected.length && timingSafeEqual(provided, expected);
-}
-
 export async function GET(request: Request) {
-  const cron = validCron(request);
+  const cron = validCronRequest(request);
   if (!cron) {
     const auth = await authorize("owner.control");
     if (auth.error) return auth.error;

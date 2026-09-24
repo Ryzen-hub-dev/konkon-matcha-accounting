@@ -4,8 +4,10 @@ import { writeAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { serialise } from "@/lib/format";
 import { getSystemControl } from "@/lib/system-control";
+import { broadcastNotification } from "@/lib/notification-connectors";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 const controlSchema = z.object({
   mode: z.enum(["OPEN", "READ_ONLY", "CLOSED"]),
@@ -55,11 +57,18 @@ export async function PATCH(request: Request) {
       update,
       { upsert: true, returnDocument: "after" },
     );
+    const delivery = await broadcastNotification(db, [
+      `Workspace mode changed to ${input.data.mode.replace("_", " ")}.`,
+      input.data.reason ? `Reason: ${input.data.reason}` : "",
+      reopenAt ? `Automatic reopen: ${reopenAt.toISOString()}` : "",
+      `Changed by: ${auth.session.fullName}`,
+    ].filter(Boolean).join("\n"));
     await writeAudit(db, auth.session, "system.mode_change", "workspace", "default", {
       mode: input.data.mode,
       reason: input.data.reason,
       reopenAt,
       scannerLinksRevoked: input.data.revokeScannerLinks,
+      notificationDelivery: delivery,
     });
     return ok(serialise(control));
   } catch (error) {

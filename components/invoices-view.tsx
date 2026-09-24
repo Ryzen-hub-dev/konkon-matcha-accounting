@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { CircleDollarSign, Clock3, Copy, Eye, FileText, Palette, Pencil, Search, ShieldCheck } from "lucide-react";
+import { CalendarClock, CircleDollarSign, Clock3, Copy, Eye, FileText, Palette, Pencil, Search, ShieldCheck } from "lucide-react";
 import { InvoiceTemplateStudio } from "@/components/invoice-template-studio";
 import { InvoiceDraftEditor, type EditableInvoice } from "@/components/invoice-draft-editor";
 import { AddButton, apiRequest, EmptyState, LoadingPanel, Modal, Notice, PageHeader, StatusPill, useNotice } from "@/components/ui";
@@ -65,7 +65,7 @@ export function InvoicesView() {
   const amount = (invoice: EditableInvoice) => new Intl.NumberFormat(invoice.businessSnapshot?.locale || profile.locale, { style: "currency", currency: invoice.businessSnapshot?.currency || profile.currency }).format(invoice.total);
 
   return <div className="page page-enter invoice-workspace">
-    <PageHeader eyebrow="ACCOUNTS RECEIVABLE" title="Invoices" description="Prepare a draft, review the details, and preserve the paper you issue." action={<div className="invoice-page-actions"><button className="button button-secondary" onClick={() => setStudioOpen(true)}><Palette size={17} />Template studio</button><AddButton onClick={() => setEditor({ mode: "NEW" })}>New invoice</AddButton></div>} />
+    <PageHeader eyebrow="ACCOUNTS RECEIVABLE" title="Invoices" description="Prepare a draft, review the details, and preserve the paper you issue." action={<div className="invoice-page-actions"><Link className="button button-secondary" href="/invoices/recurring"><CalendarClock size={17} />Recurring</Link><button className="button button-secondary" onClick={() => setStudioOpen(true)}><Palette size={17} />Template studio</button><AddButton onClick={() => setEditor({ mode: "NEW" })}>New invoice</AddButton></div>} />
     {notice ? <Notice {...notice} /> : null}
     <section className="mini-stat-row"><article><FileText /><span>Loaded invoices</span><strong>{invoices.length}</strong></article><article><Clock3 /><span>Outstanding incl. drafts</span><strong>{money.format(outstanding)}</strong></article><article><CircleDollarSign /><span>Recorded payments</span><strong>{money.format(baseInvoices.reduce((sum, invoice) => sum + invoice.paidAmount, 0))}</strong></article></section>
     <section className="invoice-template-ribbon"><div><ShieldCheck size={20} /><span><strong>Drafts can change. Issued documents stay intact.</strong><small>Edit an unpaid draft or copy an invoice into a new draft for review.</small></span></div><button className="button button-secondary invoice-paper-button" onClick={() => setStudioOpen(true)}><Palette size={16} />{templates.length} paper styles</button></section>

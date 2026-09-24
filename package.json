@@ -1,9 +1,11 @@
 {
   "name": "konkon-matcha-accounting",
   "version": "1.0.0",
+  "description": "Connected commerce, accounting, POS, inventory and member operations for Kōn-Kōn Matchā.",
+  "author": "Ryzen Hub Dev",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
     "typecheck": "tsc --noEmit",

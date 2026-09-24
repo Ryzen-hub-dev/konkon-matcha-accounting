@@ -15,8 +15,11 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Product-level batch/lot/expiry activation, supplier-lot receipt provenance, FEFO sales, exact refund/transfer lot restoration, expiry quarantine and optimistic batch counts
 - Thirty-day location demand forecasting for FEFO lots, at-risk freshness queues, advisory transfer suggestions, and controlled expiry/damage/recall disposal with inventory write-off journals
 - POS, tenders, trusted coupons/manual discounts, tax calculation and transactional posting
+- Public online catalogue and order-request intake with address/contact validation, rate limiting, controlled-goods questions, review/accept/reject, counter-style quantity and discount offers, purpose-hashed private customer links, bounded two-way chat, Google SMTP notifications, encrypted private-GitHub image/PDF sharing, invoice/verified-receipt linking, custom fulfilment steps and manual/API-reference shipment tracking
+- Owner-selectable Matcha, Professional and Focus workspace themes, plus a neutral professional public index independent of the matcha workspace theme
 - Custom invoice and receipt templates, print/reprint, refund and historical snapshots
 - Invoice register search/status filters, copy-as-new-draft, idempotent draft creation, unpaid-draft editing with optimistic version checks, explicit payment/void confirmation and immutable issued/paid documents
+- Controlled recurring invoices with active-customer linkage, weekly/monthly/quarterly/yearly cadence, month-end-safe dates, optional end dates, templates and dimensions, idempotent occurrence generation, visible failure state, pause/resume/end controls and daily Vercel-compatible draft runs
 - Manual journals, chart of accounts and core management reports
 - Local CSV bank-statement import, confirmed matching to posted ledger lines, zero-difference completion and immutable prior/current uncleared-item working papers
 - Month-end integrity/bank checklist, immutable close evidence, direct-ledger drift warning and transactional back-date locks across every journal-posting workflow
@@ -43,13 +46,24 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Requisition-linked RFQs with 2–10 invited suppliers, one recorded offer per supplier, cross-currency base-value comparison, delivery-date visibility, reasoned maker-checker award/cancellation and one-time locked purchase-order conversion
 - Purchase order draft, maker-checker approval, cancellation, partial receiving, audited outstanding-balance short-close and location/supplier/product/time-zone snapshots
 - Transactional goods receipts that update stock, weighted-average cost, AP, input tax, journals and audit history together
+- Exact three-way receipt matching with supplier total/tax evidence, versioned maker-checker exception approval, no posting while pending or rejected, one-time consumption and immutable expected/actual variance snapshots
+- Freight/duty/insurance/handling landed-cost invoices with supplier currency and tax evidence, value/quantity allocation, currency-minor-unit reconciliation, current inventory versus consumed-goods split, moving-average cost updates, AP bills, period locks and balanced journals
+- Controlled partial/full purchase returns against unpaid bills with exact receipt-value/tax allocation, batch and location stock validation, supplier credit-note protection, AP reduction, carrying-value variance journals, period locks and audit history
 - Supplier bills, base-currency AP aging buckets, seven-day maturity and supplier-exposure views, safe CSV export, partial/full settlement, duplicate-post protection and realised foreign-exchange gain/loss posting
 - Customer accounts with optional credit limits, default terms, explicit holds, server-enforced invoice exposure checks and chronological statements
 - Customer quotation drafts, printable snapshots, forward-only customer-decision states and one-time conversion of accepted terms into an invoice draft
-- Quote-linked customer delivery orders with destination, carrier and tracking details, forward-only operational states and printable full-delivery snapshots
+- Quote-linked customer delivery orders with destination, canonical GDEX/ABX/Ninja Van carrier identities, official tracking/developer handoffs, forward-only operational states and printable full-delivery snapshots
+- Live Ninja Van sandbox/production order creation using stable references, cached encrypted OAuth tokens, one-time cached PDF waybills, HMAC-verified status Webhooks and an ordered signed-event timeline; production still requires Ninja Van account approval and physical operational acceptance
+- Owner-only Telegram, Feishu/Lark and Discord notification routes with official-host allow-lists, encrypted secrets and visible connection tests
+- Monthly payroll profiles, frozen runs, reasoned bonus/overtime/deduction adjustments, independent maker-checker approval, printable payslips, safe CSV summaries, accrual posting and controlled net-pay journals; Malaysia MYR runs require reviewed EPF/SOCSO/EIS/PCB/Zakat/CP38 values and post separate liabilities
+- Owner-managed signed live-bank receiving interfaces with account mapping, one-time encrypted secrets, rotation/disable controls, timestamp/HMAC verification, currency precision and idempotent event inbox; provider onboarding remains external
+- Saved financial-report layouts for profit and loss, balance sheet, cash flow, trial balance and AR/AP aging, with controlled headings, sections, zero rows, account codes, accent and print orientation
+- Fully controlled entity trial-balance consolidation with closing/average FX translation, CTA balancing, reporting-currency elimination journals and immutable prepared runs
+- MyInvois 1.0 preparation for standard types 01–04, self-billed types 11–14, consolidated General Public receipts and adjustment references, plus Owner-controlled sandbox/production submission and authority status refresh for reviewed MYR artifacts
 - Smart Replenishment recommendations using stock thresholds, 30-day demand, supplier lead time and open inbound quantities
 - Supply Pulse supplier-performance scoring using delivery punctuality and overdue commitments
 - Searchable and printable in-app bilingual learning centre plus complete standalone Chinese and English user manuals
+- Retention-based personal-data clearing for abandoned/rejected/cancelled online requests, plus expiry of request throttles and orphaned attachment metadata in the bounded daily maintenance job
 
 ## AutoCount comparison baseline (reviewed 22 August 2026)
 
@@ -79,19 +93,17 @@ This count is a delivery benchmark, not a claim of AutoCount parity. Accounting,
 
 ## Next accounting modules
 
-- Purchase returns, landed cost and three-way matching exceptions
-- Recurring invoices
-- Live bank feeds, reusable matching rules, controlled voucher creation and cash-flow forecast
+- Named-bank/aggregator onboarding, reusable bank matching rules, controlled voucher creation and cash-flow forecast
 - Batched expense payment runs, mileage/per-diem policies and corporate-card feeds
 - Serial-number tracking
-- Multi-company consolidation, intercompany journals and elimination entries
-- Payroll, leave, statutory contribution and employee self-service
+- Automated intercompany matching, minority interests, goodwill and purchase-price allocation
+- Leave, automatic country statutory payroll formula packs, government payroll submission and employee self-service
 - Overrides on additional non-invoice document types and balance-sheet tracking reports
 - Year-end adjustment workflow, retained-earnings transfer and accountant close pack
 
 ## Country packs
 
-Delivered preparation tools (not filing-ready country packs): the country report desk exports financial statements and reviewed working figures for all 249 selectable countries, with SG/MY/AU/GB working-paper layouts. Invoices/receipts can generate encrypted, immutable general UBL XML / accounting JSON and limited domestic MYR MyInvois 1.0 preparation files. No national tax network, signing certificate, authority acceptance or completed statutory return is claimed. Details and test boundaries: [country documents](country-documents.md).
+Delivered preparation tools: the country report desk exports financial statements and reviewed working figures for all 249 selectable countries, with SG/MY/AU/GB working-paper layouts and saved presentation designs. Invoices, receipts and supplier bills generate encrypted, immutable general UBL XML / accounting JSON and MyInvois 1.0 document structures for types 01–04 and 11–14. Malaysia alone has an official sandbox/production submission and validation-status connector; authority acceptance is shown only from MyInvois responses. No other national filing network, signed v1.1 document or completed statutory return is claimed. Details: [country documents](country-documents.md).
 
 A filing-ready country pack must include versioned tax codes/rates, chart templates, fiscal-calendar rules, rounding, statutory report layouts, e-invoice schemas, export validation and official-source metadata. It must also include regression fixtures and a qualified local-accountant sign-off date.
 

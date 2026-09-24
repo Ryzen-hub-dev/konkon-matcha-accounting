@@ -1,6 +1,7 @@
 import { applyDimensionAllocation, type ResolvedDimensionAllocation } from "@/lib/dimension-allocation";
 import { applyDocumentDimensions, type DocumentDimensionSelection } from "@/lib/dimension-selection";
 import { currencyFractionDigits, currencyMinorUnits } from "@/lib/international";
+import { allocateMinorUnits, sliceMinorUnits } from "@/lib/minor-unit-allocation";
 
 type SaleFinancialItem = {
   quantity: number;
@@ -34,26 +35,6 @@ export type BuiltPosJournalLine = {
   dimensionSplit?: { percentage: number; index: number; count: number };
 };
 
-function allocateMinorUnits(total: number, weights: number[]) {
-  if (!Number.isSafeInteger(total) || total < 0 || !weights.length || weights.some(weight => !Number.isSafeInteger(weight) || weight < 0)) {
-    throw new Error("POS amounts exceed the safe accounting range.");
-  }
-  const weightTotal = weights.reduce((sum, weight) => sum + BigInt(weight), BigInt(0));
-  if (!weightTotal) {
-    if (total) throw new Error("POS item totals cannot be reconciled.");
-    return weights.map(() => 0);
-  }
-  const parts = weights.map((weight, index) => ({
-    index,
-    value: Number(BigInt(total) * BigInt(weight) / weightTotal),
-    remainder: BigInt(total) * BigInt(weight) % weightTotal,
-  }));
-  const remaining = total - parts.reduce((sum, part) => sum + part.value, 0);
-  const priority = [...parts].sort((left, right) => left.remainder === right.remainder ? left.index - right.index : left.remainder > right.remainder ? -1 : 1);
-  for (let index = 0; index < remaining; index++) priority[index].value++;
-  return parts.map(part => part.value);
-}
-
 export function allocateSaleItemFinancials<T extends SaleFinancialItem>(
   items: T[],
   totals: { discount: number; netSales: number; tax: number; total: number; taxMode?: "INCLUSIVE" | "EXCLUSIVE" },
@@ -62,14 +43,14 @@ export function allocateSaleItemFinancials<T extends SaleFinancialItem>(
   if (!items.length) throw new Error("A POS sale needs at least one item.");
   const scale = 10 ** currencyFractionDigits(currency);
   const subtotalWeights = items.map(item => currencyMinorUnits(item.lineTotal, currency));
-  const discounts = allocateMinorUnits(currencyMinorUnits(totals.discount, currency), subtotalWeights);
+  const discounts = allocateMinorUnits(currencyMinorUnits(totals.discount, currency), subtotalWeights, "POS amounts exceed the safe accounting range.");
   const discountedWeights = subtotalWeights.map((amount, index) => Math.max(0, amount - discounts[index]));
   const inclusive = totals.taxMode === "INCLUSIVE";
   const gross = inclusive ? discountedWeights : null;
   const nets = inclusive
     ? []
-    : allocateMinorUnits(currencyMinorUnits(totals.netSales, currency), discountedWeights);
-  const taxes = allocateMinorUnits(currencyMinorUnits(totals.tax, currency), inclusive ? gross! : nets);
+    : allocateMinorUnits(currencyMinorUnits(totals.netSales, currency), discountedWeights, "POS amounts exceed the safe accounting range.");
+  const taxes = allocateMinorUnits(currencyMinorUnits(totals.tax, currency), inclusive ? gross! : nets, "POS amounts exceed the safe accounting range.");
   const resolvedNets = inclusive ? gross!.map((amount, index) => amount - taxes[index]) : nets;
   const resolvedGross = inclusive ? gross! : resolvedNets.map((amount, index) => amount + taxes[index]);
   const grossTarget = currencyMinorUnits(totals.total, currency);
@@ -86,15 +67,6 @@ export function allocateSaleItemFinancials<T extends SaleFinancialItem>(
   }));
 }
 
-function cumulativeMinorUnits(total: number, quantity: number, cumulativeQuantity: number) {
-  if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(quantity) || quantity < 1 || !Number.isSafeInteger(cumulativeQuantity) || cumulativeQuantity < 0 || cumulativeQuantity > quantity) {
-    throw new Error("POS refund amounts cannot be reconciled.");
-  }
-  const base = Math.floor(total / quantity);
-  const remainder = total % quantity;
-  return base * cumulativeQuantity + Math.min(remainder, cumulativeQuantity);
-}
-
 export function sliceRefundItemFinancials(
   item: SaleFinancialItem & { lineDiscount?: unknown; lineNetSales?: unknown; lineTax?: unknown; lineGross?: unknown },
   refundedQuantity: number,
@@ -103,12 +75,8 @@ export function sliceRefundItemFinancials(
   taxMode: "INCLUSIVE" | "EXCLUSIVE" = "EXCLUSIVE",
 ) {
   if (![item.lineDiscount, item.lineNetSales, item.lineTax, item.lineGross].every(value => typeof value === "number" && Number.isFinite(value))) return null;
-  const nextQuantity = refundedQuantity + refundQuantity;
   const scale = 10 ** currencyFractionDigits(currency);
-  const sliceUnits = (value: unknown) => {
-    const total = currencyMinorUnits(value, currency);
-    return cumulativeMinorUnits(total, item.quantity, nextQuantity) - cumulativeMinorUnits(total, item.quantity, refundedQuantity);
-  };
+  const sliceUnits = (value: unknown) => sliceMinorUnits(currencyMinorUnits(value, currency), item.quantity, refundedQuantity, refundQuantity, "POS refund amounts cannot be reconciled.");
   const lineSubtotal = sliceUnits(item.lineTotal);
   const lineTax = sliceUnits(item.lineTax);
   const lineNetSales = taxMode === "INCLUSIVE" ? lineSubtotal - sliceUnits(item.lineDiscount) - lineTax : sliceUnits(item.lineNetSales);

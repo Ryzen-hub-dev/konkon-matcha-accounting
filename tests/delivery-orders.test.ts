@@ -20,8 +20,9 @@ test("delivery-order creation validates its source, retry key and calendar date"
 });
 
 test("delivery-order draft edits require logistics data and an optimistic version", () => {
-  const edit = { action: "EDIT_DRAFT", id, expectedUpdatedAt: version, scheduledDate: "2026-10-01", deliveryAddress: "1 Matcha Lane", contactName: "Aiko", contactPhone: "", carrier: "", trackingReference: "", instructions: "" };
+  const edit = { action: "EDIT_DRAFT", id, expectedUpdatedAt: version, scheduledDate: "2026-10-01", deliveryAddress: "1 Matcha Lane", contactName: "Aiko", contactPhone: "", carrierCode: "GDEX", carrier: "", trackingReference: "", instructions: "" };
   assert.equal(deliveryOrderEditSchema.safeParse(edit).success, true);
+  assert.equal(deliveryOrderEditSchema.safeParse({ ...edit, trackingReference: "../../admin" }).success, false);
   for (const field of ["id", "expectedUpdatedAt", "scheduledDate"]) {
     const missing: Record<string, unknown> = { ...edit };
     delete missing[field];
