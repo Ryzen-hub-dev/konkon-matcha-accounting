@@ -1,7 +1,9 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Db } from "mongodb";
 import { z } from "zod";
+import { writeAudit } from "@/lib/audit";
 import { decryptMemberToken, encryptMemberToken } from "@/lib/member-cards";
+import { orderMessage } from "@/lib/online-orders";
 
 export const NOTIFICATION_PROVIDERS = ["TELEGRAM", "FEISHU", "DISCORD"] as const;
 export type NotificationProvider = (typeof NOTIFICATION_PROVIDERS)[number];
@@ -26,9 +28,11 @@ type NotificationConnectionRecord = {
   encryptedEndpoint: string;
   encryptedDestination?: string;
   encryptedSigningSecret?: string;
+  encryptedWebhookSecret?: string;
   endpointLast4: string;
   destinationLast4: string;
   signingSecretLast4: string;
+  webhookSecretLast4?: string;
   validatedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -36,11 +40,11 @@ type NotificationConnectionRecord = {
 
 type ResolvedConnection = { provider: NotificationProvider; endpoint: string; destination: string; signingSecret: string };
 
-function context(provider: NotificationProvider, field: "endpoint" | "destination" | "signing-secret") {
+function context(provider: NotificationProvider, field: "endpoint" | "destination" | "signing-secret" | "webhook-secret") {
   return `notification:${provider.toLowerCase()}:${field}:v1`;
 }
 
-function decryptOptional(value: string | undefined, provider: NotificationProvider, field: "destination" | "signing-secret") {
+function decryptOptional(value: string | undefined, provider: NotificationProvider, field: "destination" | "signing-secret" | "webhook-secret") {
   return value ? decryptMemberToken(value, context(provider, field)) : "";
 }
 
@@ -123,8 +127,15 @@ export function safeNotificationConnection(record?: Partial<NotificationConnecti
     endpointLast4: String(record?.endpointLast4 || ""),
     destinationLast4: String(record?.destinationLast4 || ""),
     signingSecretLast4: String(record?.signingSecretLast4 || ""),
+    inboundEnabled: id === "TELEGRAM" && Boolean(record?.encryptedWebhookSecret) && /^-?\d+$/.test(String(record?.destinationLast4 ? decryptSafeDestination(record) : "")),
     validatedAt: record?.validatedAt || null,
   };
+}
+
+function decryptSafeDestination(record: Partial<NotificationConnectionRecord>) {
+  if (!record.encryptedDestination || !record._id) return "";
+  try { return decryptOptional(record.encryptedDestination, record._id, "destination"); }
+  catch { return ""; }
 }
 
 export async function getNotificationConnections(db: Db) {
@@ -148,13 +159,46 @@ export async function saveNotificationConnection(db: Db, input: z.infer<typeof n
   const current = await collection.findOne({ _id: input.provider });
   const resolved = resolveSaved(current, input);
   await deliverNotification(resolved, "Kōn-Kōn Ledger connection verified. Security and operations notices can now be delivered here.");
+  let webhookSecret = "";
+  if (input.provider === "TELEGRAM") {
+    webhookSecret = current?.encryptedWebhookSecret
+      ? decryptOptional(current.encryptedWebhookSecret, "TELEGRAM", "webhook-secret")
+      : randomBytes(32).toString("base64url");
+    const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+    let webhookUrl = "";
+    try {
+      const origin = configured ? new URL(configured).origin : "";
+      if (origin.startsWith("https://")) webhookUrl = `${origin}/api/webhooks/telegram`;
+    } catch {
+      // The validation below produces the same safe configuration error.
+    }
+    if (!webhookUrl && process.env.NODE_ENV === "production") {
+      throw new Error("Telegram inbound chat needs a valid HTTPS NEXT_PUBLIC_APP_URL before this connection can be saved.");
+    }
+    if (webhookUrl) {
+      const response = await connectorRequest(`https://api.telegram.org/bot${resolved.endpoint}/setWebhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: webhookUrl,
+          secret_token: webhookSecret,
+          allowed_updates: ["message"],
+          drop_pending_updates: false,
+        }),
+      }, "TELEGRAM", fetch);
+      const result = await response.json().catch(() => null) as { ok?: unknown } | null;
+      if (result?.ok !== true) throw new Error("Telegram did not accept the secure inbound webhook.");
+    }
+  }
   const now = new Date();
   const saved: NotificationConnectionRecord = {
     _id: input.provider,
     encryptedEndpoint: encryptMemberToken(resolved.endpoint, context(input.provider, "endpoint")),
     ...(resolved.destination ? { encryptedDestination: encryptMemberToken(resolved.destination, context(input.provider, "destination")) } : {}),
     ...(resolved.signingSecret ? { encryptedSigningSecret: encryptMemberToken(resolved.signingSecret, context(input.provider, "signing-secret")) } : {}),
+    ...(webhookSecret ? { encryptedWebhookSecret: encryptMemberToken(webhookSecret, context(input.provider, "webhook-secret")) } : {}),
     endpointLast4: resolved.endpoint.slice(-4), destinationLast4: resolved.destination.slice(-4), signingSecretLast4: resolved.signingSecret.slice(-4),
+    ...(webhookSecret ? { webhookSecretLast4: webhookSecret.slice(-4) } : {}),
     validatedAt: now, createdAt: current?.createdAt || now, updatedAt: now,
   };
   await collection.replaceOne({ _id: input.provider }, saved, { upsert: true });
@@ -162,7 +206,21 @@ export async function saveNotificationConnection(db: Db, input: z.infer<typeof n
 }
 
 export async function deleteNotificationConnection(db: Db, provider: NotificationProvider) {
-  return (await db.collection<NotificationConnectionRecord>("notificationConnections").deleteOne({ _id: provider })).deletedCount > 0;
+  const collection = db.collection<NotificationConnectionRecord>("notificationConnections");
+  const record = await collection.findOne({ _id: provider });
+  if (provider === "TELEGRAM" && record?.encryptedEndpoint) {
+    try {
+      const token = decryptMemberToken(record.encryptedEndpoint, context("TELEGRAM", "endpoint"));
+      await connectorRequest(`https://api.telegram.org/bot${token}/deleteWebhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ drop_pending_updates: false }),
+      }, "TELEGRAM", fetch);
+    } catch {
+      // Removing the local credential still immediately rejects every old webhook request.
+    }
+  }
+  return (await collection.deleteOne({ _id: provider })).deletedCount > 0;
 }
 
 export async function broadcastNotification(db: Db, message: string) {
@@ -179,4 +237,93 @@ export async function broadcastNotification(db: Db, message: string) {
     } catch { return { provider: record._id, delivered: false }; }
   }));
   return results;
+}
+
+const telegramUpdateSchema = z.object({
+  update_id: z.number().int().nonnegative(),
+  message: z.object({
+    message_id: z.number().int(),
+    text: z.string().max(4_096),
+    chat: z.object({ id: z.union([z.number().int(), z.string()]) }).passthrough(),
+    from: z.object({ first_name: z.string().max(100).optional(), username: z.string().max(100).optional() }).passthrough().optional(),
+  }).passthrough().optional(),
+}).passthrough();
+
+export function telegramReplyCommand(value: string) {
+  const match = value.trim().match(/^\/reply(?:@[A-Za-z0-9_]+)?\s+(WEB-\d{8}-[A-Z0-9]{6})\s+([\s\S]{1,2000})$/i);
+  if (!match) return null;
+  return { orderNo: match[1].toUpperCase(), text: safeMessage(match[2]) };
+}
+
+function secureEqual(left: string, right: string) {
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export class TelegramWebhookError extends Error {
+  constructor(message: string, readonly status = 400) { super(message); }
+}
+
+export async function processTelegramWebhook(db: Db, input: unknown, suppliedSecret: string) {
+  const record = await db.collection<NotificationConnectionRecord>("notificationConnections").findOne({ _id: "TELEGRAM" });
+  if (!record?.encryptedWebhookSecret) throw new TelegramWebhookError("Telegram inbound chat is not configured.", 404);
+  const webhookSecret = decryptOptional(record.encryptedWebhookSecret, "TELEGRAM", "webhook-secret");
+  if (!suppliedSecret || !secureEqual(suppliedSecret, webhookSecret)) throw new TelegramWebhookError("Telegram webhook authentication failed.", 401);
+  const parsed = telegramUpdateSchema.safeParse(input);
+  if (!parsed.success) throw new TelegramWebhookError("Unsupported Telegram update.", 422);
+  const message = parsed.data.message;
+  if (!message) return { ignored: true };
+  const destination = decryptOptional(record.encryptedDestination, "TELEGRAM", "destination");
+  if (!/^-?\d+$/.test(destination) || String(message.chat.id) !== destination) {
+    throw new TelegramWebhookError("This Telegram chat is not authorized.", 403);
+  }
+  try {
+    await db.collection("notificationWebhookEvents").insertOne({
+      _id: `TELEGRAM:${parsed.data.update_id}` as never,
+      provider: "TELEGRAM",
+      receivedAt: new Date(),
+      expiresAt: new Date(Date.now() + 30 * 86_400_000),
+    });
+  } catch (error) {
+    if ((error as { code?: unknown })?.code === 11000) return { duplicate: true };
+    throw error;
+  }
+  const resolved: ResolvedConnection = {
+    provider: "TELEGRAM",
+    endpoint: decryptMemberToken(record.encryptedEndpoint, context("TELEGRAM", "endpoint")),
+    destination,
+    signingSecret: "",
+  };
+  const command = telegramReplyCommand(message.text);
+  if (!command) {
+    await deliverNotification(resolved, "Reply from Telegram with: /reply WEB-YYYYMMDD-XXXXXX your message");
+    return { ignored: true, guidanceSent: true };
+  }
+  const sender = safeMessage(message.from?.username ? `@${message.from.username}` : message.from?.first_name || "Telegram operator").slice(0, 100);
+  const now = new Date();
+  const updated = await db.collection("onlineOrders").findOneAndUpdate(
+    {
+      orderNo: command.orderNo,
+      status: { $nin: ["REJECTED", "CANCELLED"] },
+      messageCount: { $lt: 200 },
+    },
+    {
+      $push: { messages: orderMessage("STAFF", command.text, { staffName: `Telegram · ${sender}` }) as never },
+      $inc: { messageCount: 1 },
+      $set: { updatedAt: now },
+    },
+    { returnDocument: "after" },
+  );
+  if (!updated) {
+    await deliverNotification(resolved, `Could not reply to ${command.orderNo}. The order is missing, closed or its conversation is full.`);
+    return { delivered: false };
+  }
+  await writeAudit(db, { id: "telegram-bot", username: "telegram-bot", fullName: sender, role: "INTEGRATION" }, "commerce.message_send", "onlineOrder", String(updated._id), {
+    orderNo: command.orderNo,
+    channel: "TELEGRAM",
+    telegramMessageId: message.message_id,
+  });
+  await deliverNotification(resolved, `Reply delivered to ${command.orderNo}.`);
+  return { delivered: true, orderNo: command.orderNo };
 }

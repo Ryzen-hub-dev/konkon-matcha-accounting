@@ -4,6 +4,7 @@ import { fail, created, ok, publicError, sameOrigin } from "@/lib/api";
 import { normaliseBusinessSettings } from "@/lib/business-settings";
 import { getDb } from "@/lib/db";
 import { makeDocumentNo } from "@/lib/format";
+import { broadcastNotification } from "@/lib/notification-connectors";
 import {
   normaliseCommerceSettings,
   onlineOrderRequestSchema,
@@ -12,6 +13,13 @@ import {
 import { roundCurrency } from "@/lib/international";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
+
+function commerceWorkspaceUrl(request: Request) {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  try { return `${new URL(configured || request.url).origin}/commerce`; }
+  catch { return `${new URL(request.url).origin}/commerce`; }
+}
 
 function throttleKey(request: Request, email: string, now: Date) {
   const ip = (request.headers.get("x-forwarded-for") || "unknown")
@@ -40,6 +48,7 @@ export async function GET() {
           price: 1,
           stock: 1,
           onlineDescription: 1,
+          onlineImage: 1,
           sensitiveGood: 1,
         })
         .sort({ category: 1, name: 1 })
@@ -66,6 +75,7 @@ export async function GET() {
         price: Number(product.price || 0),
         available: Math.max(0, Number(product.stock || 0)),
         onlineDescription: String(product.onlineDescription || ""),
+        onlineImage: String(product.onlineImage || ""),
         sensitiveGood: product.sensitiveGood === true,
       })),
     });
@@ -197,6 +207,10 @@ export async function POST(request: Request) {
       createdAt: now,
       updatedAt: now,
     });
+    await broadcastNotification(
+      db,
+      `New online order ${orderNo} from ${parsed.data.customerName}. ${items.length} product line(s), ${business.currency} ${subtotal.toFixed(2)}. Open ${commerceWorkspaceUrl(request)}. Telegram operators can reply with /reply ${orderNo} your message`,
+    );
     return created({
       orderNo,
       status: "REQUESTED",

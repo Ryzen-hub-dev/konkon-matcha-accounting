@@ -3,18 +3,11 @@ import Link from "next/link";
 import {
   ArrowRight,
   BarChart3,
-  Boxes,
-  Check,
-  FileCheck2,
-  Globe2,
   MessageCircle,
   PackageSearch,
-  ReceiptText,
-  ShieldCheck,
-  Sparkles,
-  Workflow,
 } from "lucide-react";
 import styles from "./index.module.css";
+import { CinematicIndexHero } from "@/components/cinematic-index-hero";
 
 const author = process.env.NEXT_PUBLIC_PRODUCT_AUTHOR?.trim() || "Ryzen Hub Dev";
 const client = process.env.NEXT_PUBLIC_PRODUCT_CLIENT?.trim() || "Kōn-Kōn Matchā";
@@ -73,46 +66,7 @@ export default function IndexPage() {
         </div>
       </header>
 
-      <section className={styles.hero} id="content">
-        <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}><Sparkles size={14} /> CONNECTED BUSINESS OPERATIONS</p>
-          <h1>Run the order.<br /><span>Know the numbers.</span></h1>
-          <p className={styles.intro}>A multi-country workspace that connects online enquiries, private customer service, POS, stock, fulfilment and accounting without losing the evidence between them.</p>
-          <div className={styles.heroActions}>
-            <Link href="/login">Enter the workspace <ArrowRight size={17} /></Link>
-            <Link href="/shop">View online catalogue</Link>
-          </div>
-          <div className={styles.trustRow}>
-            <span><ShieldCheck />Server-enforced roles</span>
-            <span><Globe2 />Country-configurable</span>
-            <span><Workflow />Auditable workflows</span>
-          </div>
-        </div>
-
-        <div className={styles.productStage} aria-label="Connected order overview">
-          <div className={styles.stageGlow} />
-          <section className={styles.dashboardCard}>
-            <header>
-              <span className={styles.miniBrand}>KK</span>
-              <div><b>Operations overview</b><small>Live workspace</small></div>
-              <span className={styles.live}><i /> Connected</span>
-            </header>
-            <div className={styles.metrics}>
-              <article><small>ORDER PIPELINE</small><strong>24</strong><span>+8 this week</span></article>
-              <article><small>READY TO SHIP</small><strong>09</strong><span>3 carriers</span></article>
-              <article><small>BOOKS STATUS</small><strong>Clear</strong><span>Period open</span></article>
-            </div>
-            <div className={styles.orderPanel}>
-              <header><b>Recent activity</b><small>One route, end to end</small></header>
-              <div><span className={styles.iconBlue}><MessageCircle /></span><p><b>Order request accepted</b><small>Private customer chat opened</small></p><time>Now</time></div>
-              <div><span className={styles.iconViolet}><ReceiptText /></span><p><b>Receipt verified</b><small>Payment evidence linked</small></p><time>4m</time></div>
-              <div><span className={styles.iconCyan}><Boxes /></span><p><b>Shipment updated</b><small>Tracking shared with customer</small></p><time>12m</time></div>
-            </div>
-            <footer><ShieldCheck /><span>Sensitive settings and credentials stay server-side.</span></footer>
-          </section>
-          <div className={styles.floatingCard}><FileCheck2 /><span><b>Verified evidence</b><small>Invoice · receipt · audit</small></span><Check /></div>
-        </div>
-      </section>
+      <CinematicIndexHero />
 
       <section className={styles.logoStrip} aria-label="Platform areas">
         <span>ONLINE ORDERS</span><i /><span>POINT OF SALE</span><i /><span>INVENTORY</span><i /><span>ACCOUNTING</span><i /><span>FULFILMENT</span>

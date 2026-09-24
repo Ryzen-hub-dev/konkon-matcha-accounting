@@ -38,6 +38,7 @@ export type ProductRecord = {
   reorderLevel: number;
   onlineEnabled?: boolean;
   onlineDescription?: string;
+  onlineImage?: string;
   sensitiveGood?: boolean;
   dimensionDefaults?: {
     costCentre?: { id: string; code: string; name: string };

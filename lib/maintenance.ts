@@ -11,6 +11,7 @@ const expiringCollections = {
   authThrottle: "expiresAt", sensitiveLookupEvents: "expiresAt", localPaymentEvents: "expireAt",
   paymentWebhookEvents: "createdAt", auditLogs: "expiresAt", memberCards: "deletedAt",
   onlineOrderThrottle: "expiresAt",
+  notificationWebhookEvents: "expiresAt",
 } as const;
 
 export async function maintainData(db: Db, dryRun = true, now = new Date()) {

@@ -124,11 +124,20 @@ async function deliverOrderEmail(
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const auth = await authorize("commerce.read");
   if (auth.error) return auth.error;
   try {
     const db = await getDb();
+    const liveId = new URL(request.url).searchParams.get("id") || "";
+    if (liveId) {
+      if (!ObjectId.isValid(liveId)) return fail("Choose a valid online order.", 422);
+      const order = await db.collection("onlineOrders").findOne({ _id: new ObjectId(liveId) });
+      if (!order) return fail("This order request no longer exists.", 404);
+      const response = ok(serialise({ order: safeOrder(order) }));
+      response.headers.set("Cache-Control", "private, no-store, max-age=0");
+      return response;
+    }
     const [
       orders,
       settings,
@@ -161,6 +170,7 @@ export async function GET() {
             stock: 1,
             onlineEnabled: 1,
             onlineDescription: 1,
+            onlineImage: 1,
             sensitiveGood: 1,
           })
           .sort({ category: 1, name: 1 })

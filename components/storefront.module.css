@@ -245,3 +245,70 @@
 }
 
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* Matcha storefront: product-led, tactile and intentionally separate from the workspace UI. */
+.storePage {
+  --navy: #071c13;
+  --navy-2: #123526;
+  --blue: #668a3c;
+  --sky: #e4edd6;
+  --mist: #f4f2e9;
+  --text: #172018;
+  --muted: #667067;
+  --line: #d9ded2;
+  background: #f4f2e9;
+}
+.storePage .wordmark span { border-radius: 50%; color: #d8f29b; background: #0a281a; }
+.storePage .storeHeader { position: relative; z-index: 3; border-color: #d9ded2; background: rgba(250,249,243,.9); }
+.storePage .storeHero { min-height: 620px; position: relative; isolation: isolate; background: #071c13 url("/media/konkon-ledger-hero-1920.webp") center/cover no-repeat; }
+.storePage .storeHero::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, rgba(4,20,12,.94), rgba(4,20,12,.7) 48%, rgba(4,20,12,.14)), linear-gradient(180deg, transparent 55%, rgba(4,20,12,.58)); }
+.storePage .storeHero h1 { max-width: 720px; font-family: "Bodoni 72", Didot, "Times New Roman", serif; font-weight: 400; letter-spacing: -.045em; }
+.storePage .storeHero p { color: #cfdbce; }
+.storePage .signal { color: #c8e287; }
+.storePage .routeCard { border-color: rgba(219,239,171,.24); background: rgba(7,28,19,.48); backdrop-filter: blur(18px); }
+.storePage .routeCard span { border-color: #a8c96a; color: #d9efa6; }
+.storePage .routeCard i { background: rgba(185,213,119,.45); }
+.storePage .catalogue { position: relative; }
+.storePage .catalogue::before { content: "茶"; position: absolute; top: 30px; right: 5vw; color: rgba(59,88,42,.055); font: 400 clamp(120px,18vw,290px)/1 "Yu Mincho", serif; pointer-events: none; }
+.storePage .catalogueHeader, .storePage .categoryRail, .storePage .productGrid { position: relative; }
+.storePage .catalogueHeader h2 { font-family: "Bodoni 72", Didot, "Times New Roman", serif; font-weight: 400; }
+.storePage .categoryRail .activeCategory { border-color: #58783a; color: #365522; }
+.storePage .productGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+.storePage .productCard { grid-template-rows: 230px 1fr auto; border-radius: 6px 28px 6px 6px; border-color: #d8ddd0; box-shadow: 0 18px 50px rgba(25,42,28,.07); transition: transform .3s cubic-bezier(.22,1,.36,1), box-shadow .3s ease; }
+.storePage .productCard:hover { transform: translateY(-7px); box-shadow: 0 28px 60px rgba(25,42,28,.13); }
+.storePage .productVisual { width: 100%; border: 0; padding: 0; cursor: default; color: #6d8554; background: linear-gradient(145deg,#e7edda,#d3dfbe); }
+.storePage .productVisual:disabled { opacity: 1; }
+.storePage .productVisual::after { border-color: rgba(255,255,255,.34); }
+.storePage .productVisual > span { z-index: 3; color: rgba(255,255,255,.92); text-shadow: 0 1px 8px rgba(0,0,0,.25); }
+.storePage .productVisual > img { width: 100%; height: 100%; object-fit: cover; transition: transform .65s cubic-bezier(.22,1,.36,1); }
+.storePage .productVisual.productHasImage { cursor: zoom-in; }
+.storePage .productVisual.productHasImage::after { display: none; }
+.storePage .productVisual.productHasImage:hover > img { transform: scale(1.045); }
+.storePage .productVisual > i { position: absolute; right: 13px; top: 13px; z-index: 3; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #fff; background: rgba(5,25,15,.58); backdrop-filter: blur(10px); }
+.storePage .productVisual > i svg { width: 15px; height: 15px; }
+.storePage .productCopy { padding: 24px 24px 9px; }
+.storePage .productCopy h3 { font-family: "Bodoni 72", Didot, "Times New Roman", serif; font-size: 27px; font-weight: 400; }
+.storePage .productCard > footer { padding-inline: 24px; }
+.storePage .addButton, .storePage .floatingCart, .storePage .submitOrder, .storePage .successCard > i { background: #41652a; }
+.storePage .floatingCart { box-shadow: 0 16px 42px rgba(44,78,30,.32); }
+.previewBackdrop { position: fixed; inset: 0; z-index: 120; padding: 24px; display: grid; place-items: center; background: rgba(2,14,8,.82); backdrop-filter: blur(16px); }
+.imagePreview { position: relative; width: min(980px, 100%); max-height: calc(100svh - 48px); border-radius: 8px 36px 8px 8px; overflow: hidden; display: grid; grid-template-columns: minmax(0,1fr) 280px; color: #fff; background: #071c13; box-shadow: 0 40px 110px rgba(0,0,0,.48); }
+.imagePreview > button { position: absolute; z-index: 2; top: 16px; right: 16px; width: 42px; height: 42px; border: 1px solid rgba(255,255,255,.35); border-radius: 50%; display: grid; place-items: center; color: #fff; background: rgba(4,20,12,.65); cursor: pointer; }
+.imagePreview > img { width: 100%; height: min(72svh,720px); object-fit: cover; }
+.imagePreview > footer { padding: 74px 28px 28px; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; }
+.imagePreview > footer span { color: #bbd27f; font-size: 9px; font-weight: 900; letter-spacing: .13em; }
+.imagePreview > footer strong { font: 400 34px/1.05 "Bodoni 72", Didot, serif; }
+.imagePreview > footer small { color: #b6c2b7; }
+@media (max-width: 980px) {
+  .storePage .productGrid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .storePage .storeHero { min-height: 560px; }
+}
+@media (max-width: 650px) {
+  .storePage .storeHero { min-height: 580px; padding-top: 210px; background-image: url("/media/konkon-ledger-hero-mobile.webp"); background-position: 64% center; }
+  .storePage .storeHero::before { background: linear-gradient(180deg, rgba(4,20,12,.08), rgba(4,20,12,.9) 48%, #071c13); }
+  .storePage .productGrid { grid-template-columns: 1fr; }
+  .storePage .productCard { grid-template-rows: 210px 1fr auto; }
+  .imagePreview { grid-template-columns: 1fr; }
+  .imagePreview > img { height: 58svh; }
+  .imagePreview > footer { padding: 22px; }
+}

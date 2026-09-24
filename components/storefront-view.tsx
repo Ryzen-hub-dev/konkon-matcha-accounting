@@ -12,6 +12,7 @@ import {
   Search,
   ShieldCheck,
   ShoppingBag,
+  ZoomIn,
   X,
 } from "lucide-react";
 import styles from "./storefront.module.css";
@@ -25,6 +26,7 @@ type Product = {
   price: number;
   available: number;
   onlineDescription: string;
+  onlineImage: string;
   sensitiveGood: boolean;
 };
 
@@ -69,6 +71,7 @@ export function StorefrontView() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<{ orderNo: string; message: string } | null>(null);
+  const [preview, setPreview] = useState<Product | null>(null);
 
   useEffect(() => {
     void api<StoreData>("/api/storefront")
@@ -226,11 +229,12 @@ export function StorefrontView() {
               const count = cart[product._id] || 0;
               return (
                 <article className={styles.productCard} key={product._id}>
-                  <div className={styles.productVisual}>
+                  <button type="button" className={`${styles.productVisual} ${product.onlineImage ? styles.productHasImage : ""}`} onClick={() => product.onlineImage && setPreview(product)} disabled={!product.onlineImage} aria-label={product.onlineImage ? `Preview ${product.name}` : `${product.name} has no image`}>
+                    {product.onlineImage ? <img src={product.onlineImage} alt={product.name} loading="lazy" decoding="async" referrerPolicy="no-referrer" /> : null}
                     <span>{String(index + 1).padStart(2, "0")}</span>
-                    <PackageSearch />
+                    {product.onlineImage ? <i><ZoomIn /></i> : <PackageSearch />}
                     {product.sensitiveGood ? <b>CONTROLLED</b> : null}
-                  </div>
+                  </button>
                   <div className={styles.productCopy}>
                     <small>{product.category} · {product.sku}</small>
                     <h3>{product.name}</h3>
@@ -324,6 +328,8 @@ export function StorefrontView() {
           </section>
         </div>
       ) : null}
+
+      {preview ? <div className={styles.previewBackdrop} role="presentation" onClick={() => setPreview(null)}><section className={styles.imagePreview} role="dialog" aria-modal="true" aria-label={`${preview.name} image preview`} onClick={(event) => event.stopPropagation()}><button onClick={() => setPreview(null)} aria-label="Close image preview"><X /></button><img src={preview.onlineImage} alt={preview.name} referrerPolicy="no-referrer" /><footer><span>{preview.category} · {preview.sku}</span><strong>{preview.name}</strong><small>{money.format(preview.price)} / {preview.unit}</small></footer></section></div> : null}
     </main>
   );
 }

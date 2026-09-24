@@ -79,6 +79,7 @@ type Product = {
   stock: number;
   onlineEnabled?: boolean;
   onlineDescription?: string;
+  onlineImage?: string;
   sensitiveGood?: boolean;
 };
 type StoreSettings = {
@@ -136,9 +137,26 @@ export function OnlineOrdersView() {
   }, [show]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    const timer = window.setInterval(() => void load(), 15_000);
+    const timer = window.setInterval(() => { if (!document.hidden) void load(); }, 10_000);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (!selectedId || tab !== "ORDERS") return;
+    let stopped = false;
+    const refresh = async () => {
+      if (document.hidden || stopped) return;
+      try {
+        const live = await apiRequest<{ order: Order }>(`/api/online-orders?id=${encodeURIComponent(selectedId)}`);
+        if (!stopped) setData(current => current ? { ...current, orders: current.orders.map(item => item._id === live.order._id ? live.order : item) } : current);
+      } catch { /* The full refresh keeps the existing visible error path. */ }
+    };
+    const timer = window.setInterval(() => void refresh(), 2_500);
+    const visible = () => { if (!document.hidden) void refresh(); };
+    document.addEventListener("visibilitychange", visible);
+    void refresh();
+    return () => { stopped = true; window.clearInterval(timer); document.removeEventListener("visibilitychange", visible); };
+  }, [selectedId, tab]);
 
   const order = data?.orders.find((item) => item._id === selectedId) || null;
   const money = useMemo(
@@ -182,6 +200,54 @@ export function OnlineOrdersView() {
       show(reason instanceof Error ? reason.message : "Could not upload the file.", "error");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function compressedStoreImage(file: File) {
+    if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(file.type) || file.size > 8_000_000)
+      throw new Error("Choose a JPEG, PNG or WebP image below 8 MB.");
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    try {
+      for (const [edge, quality] of [[1400, .82], [1100, .7], [850, .58]] as const) {
+        const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("This browser cannot prepare the product image.");
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/webp", quality));
+        if (blob && blob.size <= 240_000) return await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error("The product image could not be read."));
+          reader.readAsDataURL(blob);
+        });
+      }
+    } finally { bitmap.close(); }
+    throw new Error("This image is too detailed to fit the protected storefront limit. Use an HTTPS image link instead.");
+  }
+
+  async function saveCatalogue(event: FormEvent<HTMLFormElement>, product: Product) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    let onlineImage = product.onlineImage || "";
+    try {
+      const file = form.get("onlineImageFile");
+      const link = String(form.get("onlineImageUrl") || "").trim();
+      if (form.get("removeOnlineImage") === "on") onlineImage = "";
+      else if (file instanceof File && file.size) onlineImage = await compressedStoreImage(file);
+      else if (link) onlineImage = link;
+      await action({
+        action: "UPDATE_CATALOGUE",
+        id: product._id,
+        onlineEnabled: form.get("onlineEnabled") === "on",
+        sensitiveGood: form.get("sensitiveGood") === "on",
+        onlineDescription: form.get("onlineDescription"),
+        onlineImage,
+      }, `${product.name} online settings saved.`);
+    } catch (reason) {
+      show(reason instanceof Error ? reason.message : "Could not prepare the product image.", "error");
     }
   }
 
@@ -276,7 +342,7 @@ export function OnlineOrdersView() {
         </div>
       ) : null}
 
-      {tab === "CATALOGUE" ? <section className="panel commerce-catalogue"><header><div><span className="eyebrow">PUBLIC PRODUCTS</span><h2>Online catalogue</h2><p>Choose which active inventory products customers can request. Live stock and server prices remain authoritative.</p></div><Link className="button button-secondary" href="/inventory">Open inventory</Link></header><div>{data.products.map((product) => <form key={product._id} onSubmit={(event) => void submitAction(event, (form) => ({ action: "UPDATE_CATALOGUE", id: product._id, onlineEnabled: form.get("onlineEnabled") === "on", sensitiveGood: form.get("sensitiveGood") === "on", onlineDescription: form.get("onlineDescription") }), `${product.name} online settings saved.`)}><span><strong>{product.name}</strong><small>{product.sku} · {product.stock} in stock · {money.format(product.price)}</small></span><label><input name="onlineEnabled" type="checkbox" defaultChecked={product.onlineEnabled} />Online</label><label><input name="sensitiveGood" type="checkbox" defaultChecked={product.sensitiveGood} />Controlled</label><input name="onlineDescription" defaultValue={product.onlineDescription || ""} maxLength={500} placeholder="Customer-facing description" /><button disabled={busy}><Save size={14} />Save</button></form>)}</div></section> : null}
+      {tab === "CATALOGUE" ? <section className="panel commerce-catalogue"><header><div><span className="eyebrow">PUBLIC PRODUCTS</span><h2>Online catalogue</h2><p>Choose public products, add a compressed upload or HTTPS image, and preview exactly what customers will see.</p></div><Link className="button button-secondary" href="/inventory">Open inventory</Link></header><div>{data.products.map((product) => <form key={`${product._id}/${product.onlineImage?.slice(-18) || "none"}`} onSubmit={(event) => void saveCatalogue(event, product)}><span className="commerce-product-identity">{product.onlineImage ? <img src={product.onlineImage} alt="" referrerPolicy="no-referrer" /> : <i><ImagePlus /></i>}<span><strong>{product.name}</strong><small>{product.sku} · {product.stock} in stock · {money.format(product.price)}</small></span></span><label><input name="onlineEnabled" type="checkbox" defaultChecked={product.onlineEnabled} />Online</label><label><input name="sensitiveGood" type="checkbox" defaultChecked={product.sensitiveGood} />Controlled</label><input name="onlineDescription" defaultValue={product.onlineDescription || ""} maxLength={500} placeholder="Customer-facing description" /><input name="onlineImageUrl" type="url" defaultValue={product.onlineImage?.startsWith("https://") ? product.onlineImage : ""} placeholder="HTTPS product image link" /><label className="commerce-image-upload"><ImagePlus size={14} /><span>Upload image</span><input name="onlineImageFile" type="file" accept="image/jpeg,image/png,image/webp" /></label>{product.onlineImage ? <label><input name="removeOnlineImage" type="checkbox" />Remove image</label> : null}<button disabled={busy}><Save size={14} />Save</button></form>)}</div></section> : null}
 
       {tab === "SETTINGS" && data.permissions.owner ? <div className="commerce-settings-grid">
         <form className="panel commerce-config" onSubmit={async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const fields = String(form.get("sensitiveFields") || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line, index) => { const [label, required = "yes"] = line.split("|").map((value) => value.trim()); return { key: `field-${index + 1}`, label, required: required.toLowerCase() !== "no" }; }); setBusy(true); try { await apiRequest("/api/commerce-settings", { method: "PATCH", body: JSON.stringify({ action: "SAVE_STORE", enabled: form.get("enabled") === "on", storeTitle: form.get("storeTitle"), storeSubtitle: form.get("storeSubtitle"), termsNotice: form.get("termsNotice"), abandonedRetentionDays: form.get("abandonedRetentionDays"), sensitiveFields: fields }) }); show("Online store settings saved."); await load(); } catch (reason) { show(reason instanceof Error ? reason.message : "Could not save store settings.", "error"); } finally { setBusy(false); } }}>

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
+import { productImageSchema } from "@/lib/product-images";
 import { roundCurrency } from "@/lib/international";
 import {
   SHIPPING_PROVIDER_IDS,
@@ -252,6 +253,7 @@ export const catalogueProductSchema = z
     id: objectId,
     onlineEnabled: z.boolean(),
     onlineDescription: z.string().trim().max(500).default(""),
+    onlineImage: productImageSchema,
     sensitiveGood: z.boolean().default(false),
   })
   .strict();

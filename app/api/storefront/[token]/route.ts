@@ -2,6 +2,7 @@ import { ObjectId } from "mongodb";
 import { fail, ok, publicError, sameOrigin } from "@/lib/api";
 import { getDb } from "@/lib/db";
 import { serialise } from "@/lib/format";
+import { broadcastNotification } from "@/lib/notification-connectors";
 import {
   orderMessage,
   parseOrderAccessToken,
@@ -10,6 +11,13 @@ import {
 } from "@/lib/online-orders";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
+
+function commerceWorkspaceUrl(request: Request) {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  try { return `${new URL(configured || request.url).origin}/commerce`; }
+  catch { return `${new URL(request.url).origin}/commerce`; }
+}
 
 async function findOrder(tokenValue: string) {
   const parsed = parseOrderAccessToken(tokenValue);
@@ -119,6 +127,10 @@ export async function POST(
         "Wait a moment before sending again, or the conversation is full.",
         429,
       );
+    await broadcastNotification(
+      found.db,
+      `Customer message on ${String(updated.orderNo)}: ${parsed.data.text.slice(0, 500)}\nOpen ${commerceWorkspaceUrl(request)}. Telegram operators can reply with /reply ${String(updated.orderNo)} your message`,
+    );
     return ok(serialise(publicOrder(updated)));
   } catch (error) {
     if (error instanceof SyntaxError)

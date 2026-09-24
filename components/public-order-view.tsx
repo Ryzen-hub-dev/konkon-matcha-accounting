@@ -116,8 +116,10 @@ export function PublicOrderView({ token }: { token: string }) {
 
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load(), 8_000);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(() => { if (!document.hidden) void load(); }, 3_000);
+    const visible = () => { if (!document.hidden) void load(); };
+    document.addEventListener("visibilitychange", visible);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", visible); };
   }, [load]);
 
   useEffect(() => {

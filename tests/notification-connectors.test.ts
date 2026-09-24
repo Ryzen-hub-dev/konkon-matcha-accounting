@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import test from "node:test";
 import {
   deliverNotification, feishuSignature, officialNotificationEndpoint, telegramCredentials,
+  telegramReplyCommand,
 } from "../lib/notification-connectors";
 
 test("notification endpoints accept only exact official webhook hosts and paths", () => {
@@ -16,6 +17,19 @@ test("notification endpoints accept only exact official webhook hosts and paths"
     "https://open.feishu.cn@127.0.0.1/open-apis/bot/v2/hook/12345678-1234-1234-1234-123456789012",
     "https://open.feishu.cn/open-apis/bot/v2/hook/12345678-1234-1234-1234-123456789012?next=http://127.0.0.1",
   ]) assert.throws(() => unsafe.includes("discord") ? officialNotificationEndpoint("DISCORD", unsafe) : officialNotificationEndpoint("FEISHU", unsafe));
+});
+
+test("Telegram order replies require an explicit order number and bounded message", () => {
+  assert.deepEqual(telegramReplyCommand("/reply WEB-20260924-A1B2C3 Your order is ready."), {
+    orderNo: "WEB-20260924-A1B2C3",
+    text: "Your order is ready.",
+  });
+  assert.deepEqual(telegramReplyCommand("/reply@konkon_bot web-20260924-a1b2c3 Hello"), {
+    orderNo: "WEB-20260924-A1B2C3",
+    text: "Hello",
+  });
+  assert.equal(telegramReplyCommand("WEB-20260924-A1B2C3 Hello"), null);
+  assert.equal(telegramReplyCommand("/reply WEB-20260924-A1B2C3"), null);
 });
 
 test("Telegram delivery uses the documented JSON request without parse mode", async () => {
