@@ -11,6 +11,8 @@ import {
 const objectId = z.string().regex(/^[a-f0-9]{24}$/i);
 const version = z.coerce.number().int().min(1);
 
+export const storefrontProductIdSchema = objectId;
+
 export const DEFAULT_COMMERCE_SETTINGS = {
   enabled: true,
   storeTitle: "Online order desk",

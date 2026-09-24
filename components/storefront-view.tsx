@@ -3,15 +3,16 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeft,
   ArrowRight,
   Check,
-  ChevronDown,
   Minus,
   PackageSearch,
   Plus,
   Search,
   ShieldCheck,
   ShoppingBag,
+  Sparkles,
   ZoomIn,
   X,
 } from "lucide-react";
@@ -53,16 +54,17 @@ async function api<T>(url: string, init?: RequestInit) {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
-  const body = (await response.json()) as {
+  const body = (await response.json().catch(() => null)) as {
     ok: boolean;
     data?: T;
     error?: string;
-  };
-  if (!response.ok || !body.ok) throw new Error(body.error || "Request failed.");
+  } | null;
+  if (!response.ok || !body?.ok)
+    throw new Error(body?.error || "The store could not complete this request.");
   return body.data as T;
 }
 
-export function StorefrontView() {
+export function StorefrontView({ productId = "" }: { productId?: string }) {
   const [data, setData] = useState<StoreData | null>(null);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
@@ -74,10 +76,35 @@ export function StorefrontView() {
   const [preview, setPreview] = useState<Product | null>(null);
 
   useEffect(() => {
-    void api<StoreData>("/api/storefront")
+    const endpoint = productId
+      ? `/api/storefront?product=${encodeURIComponent(productId)}`
+      : "/api/storefront";
+    void api<StoreData>(endpoint)
       .then(setData)
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Store unavailable."));
-  }, []);
+  }, [productId]);
+
+  useEffect(() => {
+    const product = productId ? data?.products[0] : null;
+    if (product) document.title = `${product.name} · ${data?.business.name || "Online shop"}`;
+  }, [data, productId]);
+
+  useEffect(() => {
+    if (!checkout && !preview && !success) return;
+    const previous = document.body.style.overflow;
+    const close = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setCheckout(false);
+      setPreview(null);
+      setSuccess(null);
+    };
+    document.body.style.overflow = "hidden";
+    addEventListener("keydown", close);
+    return () => {
+      document.body.style.overflow = previous;
+      removeEventListener("keydown", close);
+    };
+  }, [checkout, preview, success]);
 
   const products = data?.products || [];
   const categories = ["ALL", ...new Set(products.map((product) => product.category))];
@@ -105,8 +132,11 @@ export function StorefrontView() {
     0,
   );
   const hasSensitive = selected.some((item) => item.sensitiveGood);
+  const featuredProduct = productId ? products[0] : null;
+  const paused = data?.store.enabled === false;
 
   function change(product: Product, amount: number) {
+    if (!data?.store.enabled) return;
     setCart((current) => {
       const next = Math.max(
         0,
@@ -118,9 +148,22 @@ export function StorefrontView() {
     });
   }
 
+  function openCheckout() {
+    if (!quantity || paused) return;
+    setError("");
+    setCheckout(true);
+  }
+
+  function requestProduct(product: Product) {
+    if (!product.available || paused) return;
+    if (!cart[product._id]) change(product, 1);
+    setError("");
+    setCheckout(true);
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!data || !selected.length) return;
+    if (!data?.store.enabled || !selected.length) return;
     setBusy(true);
     setError("");
     const form = new FormData(event.currentTarget);
@@ -167,19 +210,91 @@ export function StorefrontView() {
           <strong>{data?.business.name || "Order desk"}</strong>
         </Link>
         <nav>
-          <a href="#catalogue">Catalogue</a>
+          <Link href="/shop#catalogue">Catalogue</Link>
           <span>Stock shown live</span>
         </nav>
-        <button className={styles.cartButton} onClick={() => setCheckout(true)}>
+        <button
+          className={styles.cartButton}
+          onClick={openCheckout}
+          disabled={!quantity || paused}
+          aria-label={paused ? "Online orders are paused" : `Open cart with ${quantity} items`}
+        >
           <ShoppingBag size={18} />
-          <span>{quantity || "Cart"}</span>
+          <span>{quantity || (paused ? "Paused" : "Cart")}</span>
         </button>
       </header>
 
+      {paused ? <div className={styles.storePaused}>Online requests are paused. You can still browse the catalogue.</div> : null}
+
+      {productId ? (
+        !data && !error ? (
+          <div className={styles.productPageState}>Preparing this product…</div>
+        ) : error && !data ? (
+          <div className={styles.productPageState}>
+            <PackageSearch />
+            <h1>Product unavailable</h1>
+            <p>{error}</p>
+            <Link href="/shop"><ArrowLeft />Back to the catalogue</Link>
+          </div>
+        ) : featuredProduct ? (
+          <section className={styles.productDetail}>
+            <i className={styles.detailOrbOne} aria-hidden="true" />
+            <i className={styles.detailOrbTwo} aria-hidden="true" />
+            <Link className={styles.backToShop} href="/shop#catalogue"><ArrowLeft />All products</Link>
+            <div className={styles.detailGrid}>
+              <button
+                type="button"
+                className={`${styles.detailVisual} ${featuredProduct.onlineImage ? styles.detailHasImage : ""}`}
+                onClick={() => featuredProduct.onlineImage && setPreview(featuredProduct)}
+                disabled={!featuredProduct.onlineImage}
+                aria-label={featuredProduct.onlineImage ? `Preview ${featuredProduct.name}` : `${featuredProduct.name} has no image`}
+              >
+                {featuredProduct.onlineImage ? (
+                  <img src={featuredProduct.onlineImage} alt={featuredProduct.name} decoding="async" referrerPolicy="no-referrer" />
+                ) : <PackageSearch />}
+                <span>{featuredProduct.onlineImage ? <><ZoomIn />View full image</> : "Image coming soon"}</span>
+              </button>
+              <div className={styles.detailCopy}>
+                <div className={styles.detailStatus}>
+                  <span>{featuredProduct.available ? "Available now" : "Restocking"}</span>
+                  {featuredProduct.sensitiveGood ? <b>Controlled item</b> : null}
+                </div>
+                <small>{featuredProduct.category} · {featuredProduct.sku}</small>
+                <h1>{featuredProduct.name}</h1>
+                <p>{featuredProduct.onlineDescription || `Sold per ${featuredProduct.unit}. Availability is confirmed before payment.`}</p>
+                <div className={styles.detailPrice}>
+                  <strong>{money.format(featuredProduct.price)}</strong>
+                  <span>per {featuredProduct.unit}</span>
+                  <small>{featuredProduct.available} currently available</small>
+                </div>
+                <div className={styles.detailPromise}>
+                  <Sparkles />
+                  <p><strong>Request first. Pay after confirmation.</strong> Staff verify stock, final pricing and delivery in your private order chat.</p>
+                </div>
+                <div className={styles.detailActions}>
+                  {cart[featuredProduct._id] ? (
+                    <div className={styles.quantityControl}>
+                      <button aria-label={`Remove one ${featuredProduct.name}`} onClick={() => change(featuredProduct, -1)}><Minus size={16} /></button>
+                      <b>{cart[featuredProduct._id]}</b>
+                      <button aria-label={`Add one ${featuredProduct.name}`} onClick={() => change(featuredProduct, 1)} disabled={cart[featuredProduct._id] >= featuredProduct.available}><Plus size={16} /></button>
+                    </div>
+                  ) : null}
+                  <button className={styles.detailRequest} onClick={() => requestProduct(featuredProduct)} disabled={!featuredProduct.available || paused}>
+                    {paused ? "Orders paused" : featuredProduct.available ? "Request this item" : "Currently unavailable"}<ArrowRight />
+                  </button>
+                </div>
+                <div className={styles.detailFacts}>
+                  <span><ShieldCheck />No payment is taken now</span>
+                  <span><ShoppingBag />Live stock is rechecked by staff</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null
+      ) : <>
       <section className={styles.storeHero}>
-        <video className={styles.storeHeroVideo} autoPlay muted loop playsInline preload="metadata" disablePictureInPicture aria-hidden="true">
-          <source media="(max-width: 700px)" src="/media/konkon-ledger-motion-mobile.mp4" type="video/mp4" />
-          <source src="/media/konkon-ledger-motion-1920.mp4" type="video/mp4" />
+        <video className={styles.storeHeroVideo} autoPlay muted loop playsInline preload="metadata" poster="/media/mascot/kona-base-v1.png" disablePictureInPicture aria-hidden="true">
+          <source src="/media/mascot/kona-hero-source.mp4" type="video/mp4" />
         </video>
         <div>
           <span className={styles.signal}>ONLINE ORDER REQUEST</span>
@@ -232,16 +347,19 @@ export function StorefrontView() {
             {visible.map((product, index) => {
               const count = cart[product._id] || 0;
               return (
-                <article className={styles.productCard} key={product._id}>
-                  <button type="button" className={`${styles.productVisual} ${product.onlineImage ? styles.productHasImage : ""}`} onClick={() => product.onlineImage && setPreview(product)} disabled={!product.onlineImage} aria-label={product.onlineImage ? `Preview ${product.name}` : `${product.name} has no image`}>
-                    {product.onlineImage ? <img src={product.onlineImage} alt={product.name} loading="lazy" decoding="async" referrerPolicy="no-referrer" /> : null}
-                    <span>{String(index + 1).padStart(2, "0")}</span>
-                    {product.onlineImage ? <i><ZoomIn /></i> : <PackageSearch />}
+                <article className={styles.productCard} key={product._id} style={{ animationDelay: `${Math.min(index, 8) * 70}ms` }}>
+                  <div className={`${styles.productVisual} ${product.onlineImage ? styles.productHasImage : ""}`}>
+                    <Link href={`/shop/${product._id}`} aria-label={`View ${product.name}`}>
+                      {product.onlineImage ? <img src={product.onlineImage} alt={product.name} loading="lazy" decoding="async" referrerPolicy="no-referrer" /> : <PackageSearch />}
+                    </Link>
+                    <span className={styles.cardNumber}>{String(index + 1).padStart(2, "0")}</span>
+                    <span className={`${styles.cardStatus} ${product.available ? "" : styles.cardRestock}`}>{product.available ? "READY" : "RESTOCK"}</span>
+                    {product.onlineImage ? <button type="button" className={styles.previewButton} onClick={() => setPreview(product)} aria-label={`Preview ${product.name}`}><ZoomIn /></button> : null}
                     {product.sensitiveGood ? <b>CONTROLLED</b> : null}
-                  </button>
+                  </div>
                   <div className={styles.productCopy}>
                     <small>{product.category} · {product.sku}</small>
-                    <h3>{product.name}</h3>
+                    <h3><Link href={`/shop/${product._id}`}>{product.name}</Link></h3>
                     <p>{product.onlineDescription || `Sold per ${product.unit}. Availability is confirmed before payment.`}</p>
                   </div>
                   <footer>
@@ -256,8 +374,8 @@ export function StorefrontView() {
                         <button aria-label={`Add one ${product.name}`} onClick={() => change(product, 1)} disabled={count >= product.available}><Plus size={15} /></button>
                       </div>
                     ) : (
-                      <button className={styles.addButton} onClick={() => change(product, 1)} disabled={!product.available}>
-                        {product.available ? "Add" : "Unavailable"}<Plus size={15} />
+                      <button className={styles.addButton} onClick={() => change(product, 1)} disabled={!product.available || paused}>
+                        {paused ? "Paused" : product.available ? "Add" : "Unavailable"}<Plus size={15} />
                       </button>
                     )}
                   </footer>
@@ -269,9 +387,10 @@ export function StorefrontView() {
           <div className={styles.emptyProducts}>No products match this search.</div>
         )}
       </section>
+      </>}
 
       {quantity ? (
-        <button className={styles.floatingCart} onClick={() => setCheckout(true)}>
+        <button className={styles.floatingCart} onClick={openCheckout}>
           <span>{quantity} item{quantity === 1 ? "" : "s"}</span>
           <strong>{money.format(total)}</strong>
           <ArrowRight size={18} />

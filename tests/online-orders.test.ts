@@ -8,9 +8,16 @@ import {
   onlineOrderRequestSchema,
   normaliseCommerceSettings,
   parseOrderAccessToken,
+  storefrontProductIdSchema,
   validOrderAccess,
   orderAccessHash,
 } from "../lib/online-orders";
+
+test("storefront product pages accept only canonical product identifiers", () => {
+  assert.equal(storefrontProductIdSchema.safeParse(new ObjectId().toHexString()).success, true);
+  assert.equal(storefrontProductIdSchema.safeParse("../hidden-product").success, false);
+  assert.equal(storefrontProductIdSchema.safeParse("").success, false);
+});
 
 test("online-order access tokens are purpose hashed and reject tampering", () => {
   const id = new ObjectId();

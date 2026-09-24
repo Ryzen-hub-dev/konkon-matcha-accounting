@@ -9,6 +9,7 @@ import {
   normaliseCommerceSettings,
   onlineOrderRequestSchema,
   orderMessage,
+  storefrontProductIdSchema,
 } from "@/lib/online-orders";
 import { roundCurrency } from "@/lib/international";
 
@@ -31,15 +32,25 @@ function throttleKey(request: Request, email: string, now: Date) {
     .digest("hex");
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const requestedProduct = new URL(request.url).searchParams.get("product");
+    const productId = requestedProduct
+      ? storefrontProductIdSchema.safeParse(requestedProduct)
+      : null;
+    if (productId && !productId.success)
+      return fail("This product is unavailable.", 404);
     const db = await getDb();
     const [businessRecord, commerceRecord, products] = await Promise.all([
       db.collection("settings").findOne({ key: "business" }),
       db.collection("settings").findOne({ key: "commerce" }),
       db
         .collection("products")
-        .find({ active: { $ne: false }, onlineEnabled: true })
+        .find({
+          active: { $ne: false },
+          onlineEnabled: true,
+          ...(productId?.success ? { _id: new ObjectId(productId.data) } : {}),
+        })
         .project({
           sku: 1,
           name: 1,
@@ -52,9 +63,11 @@ export async function GET() {
           sensitiveGood: 1,
         })
         .sort({ category: 1, name: 1 })
-        .limit(300)
+        .limit(productId?.success ? 1 : 300)
         .toArray(),
     ]);
+    if (productId?.success && !products.length)
+      return fail("This product is unavailable.", 404);
     const business = normaliseBusinessSettings(businessRecord);
     const store = normaliseCommerceSettings(commerceRecord);
     const response = ok({
