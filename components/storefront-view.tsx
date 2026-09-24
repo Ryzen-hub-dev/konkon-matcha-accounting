@@ -177,6 +177,10 @@ export function StorefrontView() {
       </header>
 
       <section className={styles.storeHero}>
+        <video className={styles.storeHeroVideo} autoPlay muted loop playsInline preload="metadata" disablePictureInPicture aria-hidden="true">
+          <source media="(max-width: 700px)" src="/media/konkon-ledger-motion-mobile.mp4" type="video/mp4" />
+          <source src="/media/konkon-ledger-motion-1920.mp4" type="video/mp4" />
+        </video>
         <div>
           <span className={styles.signal}>ONLINE ORDER REQUEST</span>
           <h1>{data?.store.storeTitle || "Choose. Request. Confirm."}</h1>

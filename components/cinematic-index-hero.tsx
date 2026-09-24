@@ -7,12 +7,16 @@ import styles from "@/app/index.module.css";
 
 export function CinematicIndexHero() {
   const section = useRef<HTMLElement>(null);
-  const visual = useRef<HTMLImageElement>(null);
+  const visual = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     const root = section.current;
-    const image = visual.current;
-    if (!root || !image || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const video = visual.current;
+    if (!root || !video) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      video.pause();
+      return;
+    }
     let frame = 0;
     const update = () => {
       frame = 0;
@@ -21,7 +25,7 @@ export function CinematicIndexHero() {
       const progress = Math.min(1, Math.max(0, -rect.top / distance));
       root.dataset.stage = progress < 0.3 ? "0" : progress < 0.67 ? "1" : "2";
       root.style.setProperty("--cinema-progress", String(progress));
-      image.style.transform = `scale(${1.02 + progress * 0.17}) translate3d(${-progress * 5.5}%, ${progress * 2.5}%, 0)`;
+      video.style.transform = `scale(${1.02 + progress * 0.17}) translate3d(${-progress * 5.5}%, ${progress * 2.5}%, 0)`;
     };
     const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
     update();
@@ -36,18 +40,20 @@ export function CinematicIndexHero() {
 
   return <section ref={section} className={styles.cinema} id="content" data-stage="0">
     <div className={styles.cinemaSticky}>
-      <picture className={styles.cinemaVisual}>
-        <source media="(max-width: 700px)" srcSet="/media/konkon-ledger-hero-mobile.webp" />
-        <source media="(min-width: 2000px)" srcSet="/media/konkon-ledger-hero-4k.webp" />
-        <img ref={visual} src="/media/konkon-ledger-hero-1920.webp" alt="A ceramic matcha bowl with tea, receipts, inventory and point-of-sale tools moving through one connected operation" fetchPriority="high" decoding="async" />
-      </picture>
+      <div className={styles.cinemaVisual}>
+        <video ref={visual} autoPlay muted loop playsInline preload="auto" disablePictureInPicture aria-hidden="true">
+          <source media="(max-width: 700px)" src="/media/konkon-ledger-motion-mobile.mp4" type="video/mp4" />
+          <source media="(min-width: 2000px)" src="/media/konkon-ledger-motion-4k.mp4" type="video/mp4" />
+          <source src="/media/konkon-ledger-motion-1920.mp4" type="video/mp4" />
+        </video>
+      </div>
       <div className={styles.cinemaShade} />
       <div className={styles.cinemaCopy}>
         <p className={styles.eyebrow}>KŌN-KŌN MATCHĀ · CONNECTED LEDGER</p>
-        <h1>Every movement.<br /><em>One clear story.</em></h1>
-        <p className={`${styles.cinemaLine} ${styles.storyZero}`}>Matcha craft, customer orders and accounting move as one continuous operation.</p>
-        <p className={`${styles.cinemaLine} ${styles.storyOne}`}>From shelf and counter to invoice, stock movement and journal—without rebuilding the evidence.</p>
-        <p className={`${styles.cinemaLine} ${styles.storyTwo}`}>Built for teams that want calm operations, exact books and room to grow across borders.</p>
+        <h1>From counter.<br /><em>To closing.</em></h1>
+        <p className={`${styles.cinemaLine} ${styles.storyZero}`}>Orders, stock, receipts and accounts stay connected from the first scan.</p>
+        <p className={`${styles.cinemaLine} ${styles.storyOne}`}>One transaction carries its evidence into inventory, invoices and the journal.</p>
+        <p className={`${styles.cinemaLine} ${styles.storyTwo}`}>Country settings change the workflow—not the integrity of your history.</p>
         <div className={styles.heroActions}>
           <Link href="/shop">Explore the store <ArrowRight /></Link>
           <Link href="/login">Open workspace</Link>
