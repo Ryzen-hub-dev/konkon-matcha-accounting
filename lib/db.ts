@@ -9,6 +9,11 @@ type MongoCache = {
 type ExistingIndex = {
   name?: string;
   sparse?: boolean;
+  key?: Record<string, number>;
+  expireAfterSeconds?: number;
+  partialFilterExpression?: {
+    action?: { $in?: unknown[] };
+  };
 };
 
 type IndexMigrationRecord = {
@@ -18,7 +23,7 @@ type IndexMigrationRecord = {
 
 // Bump this value whenever the index definitions below change. The durable marker
 // prevents every new Vercel function instance from re-checking the full index set.
-export const INDEX_SCHEMA_VERSION = "indexes-2026-09-23-v12";
+export const INDEX_SCHEMA_VERSION = "indexes-2026-09-24-v13";
 
 const mongoCache = globalThis as typeof globalThis & {
   __konkonMongo?: MongoCache;
@@ -145,6 +150,45 @@ async function ensureStableOptionalStringUniqueIndex(
     await collection.dropIndex(legacySparseIndex.name);
   } catch (error) {
     if ((error as { code?: number }).code !== 27) throw error;
+  }
+}
+
+export function auditExpiryIndexMatches(index: ExistingIndex) {
+  const actions = index.partialFilterExpression?.action?.$in;
+  if (
+    Number(index.key?.expiresAt) !== 1 ||
+    Number(index.expireAfterSeconds) !== 0 ||
+    !Array.isArray(actions)
+  ) return false;
+  const expected = [...EXPIRING_AUDIT_ACTIONS].sort();
+  const actual = actions.filter((value): value is string => typeof value === "string").sort();
+  return actual.length === expected.length && actual.every((value, position) => value === expected[position]);
+}
+
+async function ensureAuditExpiryIndex(db: Db) {
+  const collection = db.collection("auditLogs");
+  let indexes: ExistingIndex[] = [];
+  try {
+    indexes = await collection.listIndexes().toArray() as ExistingIndex[];
+  } catch (error) {
+    if ((error as { code?: number }).code !== 26) throw error;
+  }
+  if (indexes.some(auditExpiryIndexMatches)) return;
+
+  const replacementName = "audit_expiry_v13";
+  await collection.createIndex(
+    { expiresAt: 1 },
+    {
+      name: replacementName,
+      expireAfterSeconds: 0,
+      partialFilterExpression: { action: { $in: EXPIRING_AUDIT_ACTIONS } },
+    },
+  );
+  for (const index of indexes) {
+    if (index.name && Number(index.key?.expiresAt) === 1) {
+      try { await collection.dropIndex(index.name); }
+      catch (error) { if ((error as { code?: number }).code !== 27) throw error; }
+    }
   }
 }
 
@@ -564,13 +608,7 @@ async function initializeIndexes(db: Db) {
       .createIndex({ isDefault: -1, updatedAt: -1 }),
     db.collection("auditLogs").createIndex({ createdAt: -1 }),
     db.collection("auditLogs").createIndex({ actorId: 1, createdAt: -1 }),
-    db.collection("auditLogs").createIndex(
-      { expiresAt: 1 },
-      {
-        expireAfterSeconds: 0,
-        partialFilterExpression: { action: { $in: EXPIRING_AUDIT_ACTIONS } },
-      },
-    ),
+    ensureAuditExpiryIndex(db),
     db
       .collection("operationalReviews")
       .createIndex({ reviewNo: 1 }, { unique: true }),

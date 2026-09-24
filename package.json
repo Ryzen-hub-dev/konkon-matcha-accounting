@@ -16,7 +16,7 @@
     "smoke:bridge": "node --import tsx scripts/local-payment-bridge-smoke.ts"
   },
   "engines": {
-    "node": ">=20.9.0"
+    "node": "24.x"
   },
   "dependencies": {
     "@zxing/browser": "^0.2.1",

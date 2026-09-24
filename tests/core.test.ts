@@ -7,6 +7,7 @@ import { POST as setup } from "../app/api/setup/route";
 import { publicError } from "../lib/api";
 import {
   INDEX_SCHEMA_VERSION,
+  auditExpiryIndexMatches,
   indexMigrationIsComplete,
   scopedCollectionName,
   stableDistinctPipeline,
@@ -685,6 +686,32 @@ test("completed index migrations can be skipped across serverless cold starts", 
   assert.equal(indexMigrationIsComplete({}), false);
   assert.equal(indexMigrationIsComplete({ completedAt: new Date("invalid") }), false);
   assert.equal(indexMigrationIsComplete({ completedAt: new Date("2026-09-18T00:00:00.000Z") }), true);
+});
+
+test("audit expiry index migration recognises only the current protected allow-list", () => {
+  const current = {
+    key: { expiresAt: 1 },
+    expireAfterSeconds: 0,
+    partialFilterExpression: {
+      action: {
+        $in: [
+          "payment-display.revoke", "expense_attachment.download", "auth.login",
+          "member.identity_lookup", "member_card.reveal", "einvoice.download",
+          "expense_attachment.view", "scanner.issue", "scanner.route",
+          "scanner.revoke", "scanner.binding_start", "scanner.binding_finish",
+          "payment-display.issue",
+        ],
+      },
+    },
+  };
+  assert.equal(auditExpiryIndexMatches(current), true);
+  assert.equal(
+    auditExpiryIndexMatches({
+      ...current,
+      partialFilterExpression: { action: { $in: ["auth.login"] } },
+    }),
+    false,
+  );
 });
 
 test("default template seeding never writes the same MongoDB path twice", async () => {
