@@ -21,6 +21,7 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Invoice register search/status filters, copy-as-new-draft, idempotent draft creation, unpaid-draft editing with optimistic version checks, explicit payment/void confirmation and immutable issued/paid documents
 - Controlled recurring invoices with active-customer linkage, weekly/monthly/quarterly/yearly cadence, month-end-safe dates, optional end dates, templates and dimensions, idempotent occurrence generation, visible failure state, pause/resume/end controls and daily Vercel-compatible draft runs
 - Manual journals, chart of accounts and core management reports
+- Thirteen-week scheduled cash forecast from current posted cash-equivalent balances and open customer/supplier due dates, with overdue exposure, weekly liquidity warnings and CSV/print output; it deliberately excludes speculative sales, purchases, payroll, financing and settlement claims
 - Local CSV bank-statement import, confirmed matching to posted ledger lines, zero-difference completion and immutable prior/current uncleared-item working papers
 - Month-end integrity/bank checklist, immutable close evidence, direct-ledger drift warning and transactional back-date locks across every journal-posting workflow
 - Fixed-asset register, cash/bank acquisition posting, register-only migration evidence, exact straight-line monthly depreciation, disposal gain/loss journals and month-close depreciation blockers
@@ -94,7 +95,7 @@ This count is a delivery benchmark, not a claim of AutoCount parity. Accounting,
 
 ## Next accounting modules
 
-- Named-bank/aggregator onboarding, reusable bank matching rules, controlled voucher creation and cash-flow forecast
+- Named-bank/aggregator onboarding, reusable bank matching rules and controlled voucher creation
 - Batched expense payment runs, mileage/per-diem policies and corporate-card feeds
 - Serial-number tracking
 - Automated intercompany matching, minority interests, goodwill and purchase-price allocation

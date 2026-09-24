@@ -5,6 +5,7 @@ import { getDb } from "@/lib/db";
 import {
   assembleFinancialStatements,
   buildAgingReport,
+  buildCashForecast,
   type AccountMovement,
   type CashSourceMovement,
   type FinancialAccount,
@@ -35,6 +36,7 @@ export async function GET(request: Request) {
     if (periodDays > 3_653) return fail("Choose a reporting period of 10 years or less.", 422);
 
     const journalUpper = utcBoundary(to, 2);
+    const currentJournalUpper = utcBoundary(today, 2);
     const activityLower = utcBoundary(from, -2);
     const activityUpper = utcBoundary(to, 2);
     const reportDateExpression = (field: string) => ({ $dateToString: { format: "%Y-%m-%d", date: field, timezone: settings.timeZone } });
@@ -46,6 +48,7 @@ export async function GET(request: Request) {
     const [
       movementDocuments,
       cashDocuments,
+      currentCashBalance,
       journalQuality,
       salesSummary,
       trend,
@@ -79,6 +82,17 @@ export async function GET(request: Request) {
           periodAmount: { $sum: { $cond: [{ $and: [{ $gte: ["$_reportDate", from] }, { $lte: ["$_reportDate", to] }] }, { $subtract: [{ $ifNull: ["$lines.debit", 0] }, { $ifNull: ["$lines.credit", 0] }] }, 0] } },
         } },
       ]).toArray() : Promise.resolve([]),
+      cashAccountCodes.length ? db.collection("journalEntries").aggregate([
+        { $match: { status: "POSTED", date: { $lt: currentJournalUpper } } },
+        { $addFields: { _reportDate: journalReportDateExpression(settings.timeZone) } },
+        { $match: { _reportDate: { $lte: today } } },
+        { $unwind: "$lines" },
+        { $match: { "lines.accountCode": { $in: cashAccountCodes } } },
+        { $group: {
+          _id: null,
+          balance: { $sum: { $subtract: [{ $ifNull: ["$lines.debit", 0] }, { $ifNull: ["$lines.credit", 0] }] } },
+        } },
+      ]).next() : Promise.resolve(null),
       db.collection("journalEntries").aggregate([
         { $match: { status: "POSTED", date: { $gte: activityLower, $lt: activityUpper } } },
         { $addFields: { _reportDate: journalReportDateExpression(settings.timeZone) } },
@@ -148,14 +162,23 @@ export async function GET(request: Request) {
       periodAmount: Number(movement.periodAmount || 0),
     }));
     const statements = assembleFinancialStatements({ accounts: financialAccounts, movements, cashMovements, currency: settings.currency });
-    const agedReceivables = buildAgingReport(receivableDocuments.map((invoice) => ({
+    const receivables = receivableDocuments.map((invoice) => ({
       id: String(invoice._id), documentNo: String(invoice.invoiceNo), party: String(invoice.customerName), dueDate: invoice.dueDate as Date,
       balance: Number(invoice.total || 0) - Number(invoice.paidAmount || 0), status: String(invoice.status),
-    })), to, settings.currency);
-    const agedPayables = buildAgingReport(payableDocuments.map((bill) => ({
+    }));
+    const payables = payableDocuments.map((bill) => ({
       id: String(bill._id), documentNo: String(bill.billNo), party: String(bill.supplierName), dueDate: bill.dueDate as Date,
       balance: Number(bill.baseBalance || 0), status: String(bill.status),
-    })), to, settings.currency);
+    }));
+    const agedReceivables = buildAgingReport(receivables, to, settings.currency);
+    const agedPayables = buildAgingReport(payables, to, settings.currency);
+    const cashForecast = buildCashForecast({
+      asOf: today,
+      openingCash: Number(currentCashBalance?.balance || 0),
+      receivables,
+      payables,
+      currency: settings.currency,
+    });
     const unbalancedEntries = Number(journalQuality?.unbalancedEntries || 0);
     const integrity = {
       ...statements.integrity,
@@ -178,6 +201,7 @@ export async function GET(request: Request) {
         draftInvoiceCount,
       },
       aging: { receivables: agedReceivables, payables: agedPayables },
+      cashForecast,
     }));
   } catch (error) {
     return publicError(error);

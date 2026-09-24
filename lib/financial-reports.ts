@@ -50,6 +50,20 @@ export type AgingDocument = {
   status?: string;
 };
 
+export type CashForecastDocument = AgingDocument;
+
+export type CashForecastWeek = {
+  week: number;
+  from: string;
+  to: string;
+  receipts: number;
+  payments: number;
+  netMovement: number;
+  closingCash: number;
+  receivableCount: number;
+  payableCount: number;
+};
+
 export type AgingBucketKey = "CURRENT" | "1_30" | "31_60" | "61_90" | "OVER_90";
 
 const BUCKETS: Array<{ key: AgingBucketKey; label: string }> = [
@@ -259,6 +273,95 @@ export function assembleFinancialStatements({
 function utcDay(value: string | Date) {
   const date = value instanceof Date ? value : new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+function shiftedDateKey(value: string, days: number) {
+  return new Date(utcDay(value) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+export function buildCashForecast({
+  asOf,
+  openingCash,
+  receivables,
+  payables,
+  currency,
+  weeks = 13,
+}: {
+  asOf: string;
+  openingCash: number;
+  receivables: CashForecastDocument[];
+  payables: CashForecastDocument[];
+  currency: string;
+  weeks?: number;
+}) {
+  const horizonWeeks = Math.max(1, Math.min(52, Math.trunc(weeks)));
+  const asOfDay = utcDay(asOf);
+  const rows: CashForecastWeek[] = Array.from({ length: horizonWeeks }, (_, index) => ({
+    week: index + 1,
+    from: shiftedDateKey(asOf, index * 7 + 1),
+    to: shiftedDateKey(asOf, (index + 1) * 7),
+    receipts: 0,
+    payments: 0,
+    netMovement: 0,
+    closingCash: 0,
+    receivableCount: 0,
+    payableCount: 0,
+  }));
+  let overdueReceipts = 0;
+  let overduePayments = 0;
+  let laterReceipts = 0;
+  let laterPayments = 0;
+
+  const allocate = (documents: CashForecastDocument[], kind: "receipts" | "payments") => {
+    for (const document of documents) {
+      const balance = amount(document.balance, currency);
+      const dueDay = utcDay(document.dueDate);
+      if (balance <= 0 || !Number.isFinite(dueDay)) continue;
+      const daysUntilDue = Math.floor((dueDay - asOfDay) / 86_400_000);
+      if (daysUntilDue <= 0) {
+        if (kind === "receipts") overdueReceipts = amount(overdueReceipts + balance, currency);
+        else overduePayments = amount(overduePayments + balance, currency);
+      }
+      if (daysUntilDue > horizonWeeks * 7) {
+        if (kind === "receipts") laterReceipts = amount(laterReceipts + balance, currency);
+        else laterPayments = amount(laterPayments + balance, currency);
+        continue;
+      }
+      const index = Math.max(0, Math.ceil(daysUntilDue / 7) - 1);
+      rows[index][kind] = amount(rows[index][kind] + balance, currency);
+      const countKey = kind === "receipts" ? "receivableCount" : "payableCount";
+      rows[index][countKey] += 1;
+    }
+  };
+
+  allocate(receivables, "receipts");
+  allocate(payables, "payments");
+  let runningCash = amount(openingCash, currency);
+  for (const row of rows) {
+    row.netMovement = amount(row.receipts - row.payments, currency);
+    runningCash = amount(runningCash + row.netMovement, currency);
+    row.closingCash = runningCash;
+  }
+  const totalReceipts = amount(rows.reduce((sum, row) => sum + row.receipts, 0), currency);
+  const totalPayments = amount(rows.reduce((sum, row) => sum + row.payments, 0), currency);
+  const lowestCash = Math.min(amount(openingCash, currency), ...rows.map((row) => row.closingCash));
+  const firstNegative = rows.find((row) => row.closingCash < 0);
+
+  return {
+    asOf,
+    weeks: horizonWeeks,
+    openingCash: amount(openingCash, currency),
+    totalReceipts,
+    totalPayments,
+    closingCash: runningCash,
+    lowestCash,
+    firstNegativeWeek: firstNegative?.week || null,
+    overdueReceipts,
+    overduePayments,
+    laterReceipts,
+    laterPayments,
+    rows,
+  };
 }
 
 export function buildAgingReport(documents: AgingDocument[], asOf: string, currency: string) {

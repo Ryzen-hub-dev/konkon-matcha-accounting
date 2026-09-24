@@ -51,7 +51,7 @@ import {
   supplierPulse, weightedAverageInventoryCost,
 } from "../lib/procurement";
 import { dateKeyInTimeZone } from "../lib/dates";
-import { assembleFinancialStatements, buildAgingReport } from "../lib/financial-reports";
+import { assembleFinancialStatements, buildAgingReport, buildCashForecast } from "../lib/financial-reports";
 import {
   localPaymentEventSchema, normaliseLocalBridgePath, parseLocalPaymentNotification,
   signSmsForwarderWebhook, verifySmsForwarderWebhook,
@@ -180,6 +180,35 @@ test("AR and AP aging place balances in mutually exclusive due-date buckets", ()
   assert.equal(aging.buckets.find((bucket) => bucket.key === "31_60")?.amount, 30);
   assert.equal(aging.buckets.find((bucket) => bucket.key === "OVER_90")?.amount, 40);
   assert.equal(aging.rows.length, 4);
+});
+
+test("13-week cash forecast buckets overdue and future working-capital documents exactly once", () => {
+  const forecast = buildCashForecast({
+    asOf: "2026-09-25",
+    openingCash: 100,
+    currency: "SGD",
+    receivables: [
+      { id: "1", documentNo: "INV-1", party: "Past due", dueDate: "2026-09-20", balance: 50 },
+      { id: "2", documentNo: "INV-2", party: "Week two", dueDate: "2026-10-03", balance: 25 },
+      { id: "3", documentNo: "INV-3", party: "Later", dueDate: "2027-01-15", balance: 40 },
+    ],
+    payables: [
+      { id: "4", documentNo: "BILL-1", party: "Week one", dueDate: "2026-09-30", balance: 80 },
+      { id: "5", documentNo: "BILL-2", party: "Week three", dueDate: "2026-10-10", balance: 60 },
+    ],
+  });
+  assert.equal(forecast.rows.length, 13);
+  assert.deepEqual(forecast.rows.slice(0, 3).map((row) => ({ receipts: row.receipts, payments: row.payments, closing: row.closingCash })), [
+    { receipts: 50, payments: 80, closing: 70 },
+    { receipts: 25, payments: 0, closing: 95 },
+    { receipts: 0, payments: 60, closing: 35 },
+  ]);
+  assert.equal(forecast.totalReceipts, 75);
+  assert.equal(forecast.totalPayments, 140);
+  assert.equal(forecast.overdueReceipts, 50);
+  assert.equal(forecast.laterReceipts, 40);
+  assert.equal(forecast.lowestCash, 35);
+  assert.equal(forecast.firstNegativeWeek, null);
 });
 
 test("country profiles use valid ISO currencies and IANA time zones", () => {

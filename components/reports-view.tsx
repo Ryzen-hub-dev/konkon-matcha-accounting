@@ -157,6 +157,31 @@ type ReportData = {
     draftInvoiceCount: number;
   };
   aging: { receivables: AgingReport; payables: AgingReport };
+  cashForecast: {
+    asOf: string;
+    weeks: number;
+    openingCash: number;
+    totalReceipts: number;
+    totalPayments: number;
+    closingCash: number;
+    lowestCash: number;
+    firstNegativeWeek: number | null;
+    overdueReceipts: number;
+    overduePayments: number;
+    laterReceipts: number;
+    laterPayments: number;
+    rows: Array<{
+      week: number;
+      from: string;
+      to: string;
+      receipts: number;
+      payments: number;
+      netMovement: number;
+      closingCash: number;
+      receivableCount: number;
+      payableCount: number;
+    }>;
+  };
 };
 
 type ReportTab =
@@ -164,6 +189,7 @@ type ReportTab =
   | "PROFIT_LOSS"
   | "BALANCE_SHEET"
   | "CASH_FLOW"
+  | "CASH_FORECAST"
   | "TRIAL_BALANCE"
   | "AGING"
   | "COUNTRY";
@@ -185,6 +211,7 @@ const REPORT_TABS: Array<{ key: ReportTab; label: string }> = [
   { key: "PROFIT_LOSS", label: "Profit & loss" },
   { key: "BALANCE_SHEET", label: "Balance sheet" },
   { key: "CASH_FLOW", label: "Cash flow" },
+  { key: "CASH_FORECAST", label: "13-week forecast" },
   { key: "TRIAL_BALANCE", label: "Trial balance" },
   { key: "AGING", label: "AR / AP aging" },
   { key: "COUNTRY", label: "Country report desk" },
@@ -577,6 +604,20 @@ export function ReportsView() {
           row.amount,
         ]),
         ["Closing cash", "", "", data.cashFlow.closingCash],
+      );
+    } else if (tab === "CASH_FORECAST") {
+      rows.push(
+        ["Week", "From", "To", "Scheduled receipts", "Supplier payments", "Net movement", "Closing cash"],
+        ...data.cashForecast.rows.map((row) => [
+          row.week,
+          row.from,
+          row.to,
+          row.receipts,
+          row.payments,
+          row.netMovement,
+          row.closingCash,
+        ]),
+        ["Projected closing cash", "", "", "", "", "", data.cashForecast.closingCash],
       );
     } else if (tab === "TRIAL_BALANCE") {
       rows.push(
@@ -1193,6 +1234,89 @@ export function ReportsView() {
                   />
                 </>
               ) : null}
+            </section>
+          ) : null}
+
+          {tab === "CASH_FORECAST" ? (
+            <section className={statementClass}>
+              <header>
+                <span>WORKING CAPITAL OUTLOOK</span>
+                <h2>13-week scheduled cash forecast</h2>
+                <small>
+                  As at {data.cashForecast.asOf} · {data.period.currency}
+                </small>
+              </header>
+              <div className="cash-forecast-summary">
+                <article>
+                  <span>Cash now</span>
+                  <strong>{money.format(data.cashForecast.openingCash)}</strong>
+                </article>
+                <article>
+                  <span>Scheduled receipts</span>
+                  <strong>{money.format(data.cashForecast.totalReceipts)}</strong>
+                </article>
+                <article>
+                  <span>Supplier payments</span>
+                  <strong>{money.format(data.cashForecast.totalPayments)}</strong>
+                </article>
+                <article>
+                  <span>Projected cash</span>
+                  <strong className={data.cashForecast.closingCash < 0 ? "negative" : ""}>
+                    {money.format(data.cashForecast.closingCash)}
+                  </strong>
+                </article>
+              </div>
+              <div className={`cash-forecast-risk ${data.cashForecast.firstNegativeWeek ? "attention" : "stable"}`}>
+                {data.cashForecast.firstNegativeWeek ? <AlertTriangle /> : <CheckCircle2 />}
+                <p>
+                  <strong>
+                    {data.cashForecast.firstNegativeWeek
+                      ? `Scheduled cash turns negative in week ${data.cashForecast.firstNegativeWeek}.`
+                      : `Scheduled cash remains non-negative; lowest point ${money.format(data.cashForecast.lowestCash)}.`}
+                  </strong>
+                  <span>
+                    Past-due receipts {money.format(data.cashForecast.overdueReceipts)} · past-due supplier bills {money.format(data.cashForecast.overduePayments)}
+                  </span>
+                </p>
+              </div>
+              <div className="report-table-wrap">
+                <table className="report-table cash-forecast-table">
+                  <thead>
+                    <tr>
+                      <th>Week</th>
+                      <th>Period</th>
+                      <th className="number">Receipts</th>
+                      <th className="number">Payments</th>
+                      <th className="number">Net movement</th>
+                      <th className="number">Closing cash</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.cashForecast.rows.map((row) => (
+                      <tr key={row.week}>
+                        <td><b>{String(row.week).padStart(2, "0")}</b></td>
+                        <td>
+                          {row.from} – {row.to}
+                          <small>{row.receivableCount} AR · {row.payableCount} AP</small>
+                        </td>
+                        <td className="number">{money.format(row.receipts)}</td>
+                        <td className="number">{money.format(row.payments)}</td>
+                        <td className={`number ${row.netMovement < 0 ? "negative" : ""}`}>{money.format(row.netMovement)}</td>
+                        <td className={`number ${row.closingCash < 0 ? "negative" : ""}`}><strong>{money.format(row.closingCash)}</strong></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="aging-note cash-forecast-note">
+                <TrendingUp />
+                <p>
+                  <strong>This is a scheduled-document management forecast.</strong>
+                  <span>
+                    It starts from posted cash and bank balances, then applies current unpaid customer invoices and supplier bills by due date. It does not predict new sales, purchases, payroll, financing or actual bank settlement. Beyond 13 weeks: {money.format(data.cashForecast.laterReceipts)} receivable and {money.format(data.cashForecast.laterPayments)} payable.
+                  </span>
+                </p>
+              </div>
             </section>
           ) : null}
 
