@@ -27,13 +27,22 @@
 .headerActions { justify-self: end; display: flex; align-items: center; gap: 18px; }
 .headerActions .primaryLink { min-height: 42px; padding: 0 17px; border: 1px solid rgba(255,255,255,.35); border-radius: 999px; display: inline-flex; align-items: center; gap: 8px; color: var(--forest); background: var(--rice); }
 .header a:focus-visible, .heroActions a:focus-visible, .workflow a:focus-visible, .author > a:focus-visible { outline: 3px solid var(--matcha-bright); outline-offset: 4px; }
-.cinema { --cinema-progress: 0; --cinema-x: 0deg; --cinema-y: 0deg; position: relative; height: 280svh; color: #fff; background: var(--forest); }
+.cinema { --cinema-progress: 0; --cinema-x: 0deg; --cinema-y: 0deg; --kona-gaze-x: 0px; --kona-gaze-y: 0px; position: relative; height: 280svh; color: #fff; background: var(--forest); }
 .cinemaSticky { position: sticky; top: 0; height: 100svh; min-height: 640px; overflow: hidden; isolation: isolate; }
 .cinemaVisual { position: absolute; inset: 0; z-index: -3; overflow: hidden; background: #06150e; perspective: 1200px; }
 .cinemaVisual::before { content: ""; position: absolute; inset: -7%; z-index: 0; opacity: .32; background: url("/media/mascot/kona-base-v1.png") 72% 42% / cover no-repeat; filter: blur(34px) saturate(.85); transform: scale(1.08); }
 .cinemaVisual::after { content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none; opacity: .3; background-image: linear-gradient(rgba(204,241,139,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(204,241,139,.07) 1px, transparent 1px); background-size: 64px 64px; mask-image: linear-gradient(90deg, transparent 38%, #000 72%, transparent); }
 .cinemaStage { position: absolute; inset: 82px 2vw 28px 37vw; z-index: 2; display: grid; place-items: center; transform: perspective(1200px) rotateX(var(--cinema-y)) rotateY(var(--cinema-x)); transform-style: preserve-3d; will-change: transform; }
-.cinemaStage video { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: contain; object-position: center 28%; pointer-events: none; filter: saturate(.96) contrast(1.025); transform: translateZ(22px); -webkit-mask-image: radial-gradient(ellipse 56% 64% at 57% 47%, #000 0 48%, rgba(0,0,0,.92) 58%, transparent 78%); mask-image: radial-gradient(ellipse 56% 64% at 57% 47%, #000 0 48%, rgba(0,0,0,.92) 58%, transparent 78%); }
+.cinemaStage video { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; object-position: right center; pointer-events: none; filter: saturate(.96) contrast(1.025); transform: translateZ(22px); -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.72) 12%, #000 31% 100%); mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.72) 12%, #000 31% 100%); }
+.konaGaze { position: absolute; z-index: 5; left: 69.1%; top: 14.4%; width: clamp(20px,1.85vw,34px); height: clamp(7px,.72vw,13px); display: flex; justify-content: space-between; pointer-events: none; transform: translate(-50%,-50%) translateZ(48px); }
+.konaGaze i { width: clamp(3px,.29vw,5px); aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 66% 33%, #fff 0 18%, #d6a742 22% 48%, #36230e 54% 100%); box-shadow: 0 0 5px rgba(225,186,88,.5); transform: translate3d(var(--kona-gaze-x),var(--kona-gaze-y),0); will-change: transform; }
+.konaHotspot { position: absolute; z-index: 4; top: 2%; right: 0; width: 48%; height: 96%; padding: 0; border: 0; border-radius: 44% 42% 30% 34%; color: inherit; background: transparent; cursor: pointer; }
+.konaHotspot::after { content: ""; position: absolute; inset: 5% 11% 4% 7%; border: 1px solid rgba(210,241,142,0); border-radius: inherit; opacity: 0; transform: scale(.97); transition: opacity .35s ease, border-color .35s ease, transform .5s cubic-bezier(.16,1,.3,1), box-shadow .35s ease; }
+.cinema[data-kona-hover="true"] .konaHotspot::after, .cinema[data-kona-engaged="true"] .konaHotspot::after, .konaHotspot:focus-visible::after { border-color: rgba(210,241,142,.42); opacity: 1; transform: scale(1); box-shadow: inset 0 0 60px rgba(210,241,142,.04), 0 0 50px rgba(174,225,98,.08); }
+.konaHotspot:focus-visible { outline: 0; }
+.konaResponse { position: absolute; z-index: 6; right: 14%; bottom: 14%; max-width: 260px; padding: 13px 16px; border: 1px solid rgba(218,244,166,.32); color: rgba(255,255,255,.86); background: rgba(4,22,13,.84); backdrop-filter: blur(16px); font-size: 10px; line-height: 1.45; opacity: 0; pointer-events: none; transform: translate3d(0,10px,50px); transition: opacity .28s ease, transform .42s cubic-bezier(.16,1,.3,1); }
+.konaResponse[data-visible="true"] { opacity: 1; transform: translate3d(0,0,50px); }
+.konaResponse span { display: block; margin-bottom: 5px; color: var(--matcha-bright); font-size: 7px; font-weight: 900; letter-spacing: .16em; }
 .cinemaDepth { position: absolute; z-index: 1; top: 7%; right: -4%; width: min(64vw, 930px); aspect-ratio: 1; pointer-events: none; transform: perspective(1100px) rotateX(calc(66deg + var(--cinema-y))) rotateZ(calc(-12deg + var(--cinema-x))); transform-style: preserve-3d; opacity: .72; }
 .cinemaDepth i { position: absolute; border: 1px solid rgba(202,239,132,.27); border-radius: 50%; box-shadow: inset 0 0 80px rgba(175,224,94,.035), 0 0 40px rgba(175,224,94,.04); animation: konaOrbit 13s linear infinite; }
 .cinemaDepth i:nth-child(1) { inset: 8%; }
@@ -163,7 +172,11 @@
   .cinemaVisual::before { inset: -4%; background-position: center top; filter: blur(26px) saturate(.8); }
   .cinemaVisual::after { background-size: 38px 38px; mask-image: linear-gradient(180deg,#000,transparent 52%); }
   .cinemaStage { top: 68px; right: 0; bottom: auto; left: 0; height: clamp(220px,38svh,330px); transform: none; }
-  .cinemaStage video { object-position: center top; transform: none; -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%); }
+  .cinemaStage video { object-fit: contain; object-position: center top; transform: none; -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%); }
+  .konaGaze { left: 76.6%; top: 11.1%; width: 15px; height: 6px; }
+  .konaGaze i { width: 2.5px; }
+  .konaHotspot { top: 0; right: 4%; width: 40%; height: 100%; }
+  .konaResponse { right: 14px; bottom: 14px; max-width: min(230px,62vw); padding: 10px 12px; font-size: 9px; }
   .cinemaDepth { top: 4%; right: -20%; width: 135vw; opacity: .46; }
   .konaSticker { right: 16px; bottom: 4px; width: 86px; }
   .konaSticker strong { font-size: 19px; }
@@ -206,6 +219,8 @@
 @media (prefers-reduced-motion: reduce) {
   .cinema { height: 100svh; }
   .cinemaStage, .cinemaStage video { transform: none !important; }
+  .konaGaze i { transform: none !important; }
+  .konaHotspot::after, .konaResponse { transition: none; }
   .cinemaDepth i, .cinemaDepth span, .scrollCue svg,
   .capabilityGrid article, .routeList article, .author { animation: none !important; }
   .cinemaLine { display: none; }
