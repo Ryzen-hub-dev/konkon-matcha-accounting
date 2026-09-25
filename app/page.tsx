@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import styles from "./index.module.css";
 import { CinematicIndexHero } from "@/components/cinematic-index-hero";
+import { KonaRadio } from "@/components/kona-radio";
 
 const author = process.env.NEXT_PUBLIC_PRODUCT_AUTHOR?.trim() || "Ryzen Hub Dev";
 const client = process.env.NEXT_PUBLIC_PRODUCT_CLIENT?.trim() || "Kōn-Kōn Matchā";
@@ -70,6 +71,25 @@ export default function IndexPage() {
 
       <section className={styles.logoStrip} aria-label="Platform areas">
         <span>ONLINE ORDERS</span><i /><span>POINT OF SALE</span><i /><span>INVENTORY</span><i /><span>ACCOUNTING</span><i /><span>FULFILMENT</span>
+      </section>
+
+      <section className={styles.konaProfile} aria-labelledby="kona-profile-title">
+        <div className={styles.konaPortrait} aria-hidden="true">
+          <div className={styles.konaSeal}><span>K</span><small>HOUSE<br />GUIDE</small></div>
+          <img src="/media/mascot/kona-base-v1.png" alt="" />
+          <span className={styles.konaPortraitLabel}>KONA / 01</span>
+        </div>
+        <div className={styles.konaProfileCopy}>
+          <p className={styles.eyebrow}>MEET THE HOUSE GUIDE</p>
+          <h2 id="kona-profile-title">One calm guide across every handoff.</h2>
+          <p>KONA is the face of Kōn-Kōn Matchā’s daily flow. She connects the counter, stock room and ledger while the team keeps every approval and financial decision in control.</p>
+          <div className={styles.konaRoles}>
+            <span><b>01</b> Welcome at the counter</span>
+            <span><b>02</b> Keep stock moving</span>
+            <span><b>03</b> Close with evidence</span>
+          </div>
+          <KonaRadio />
+        </div>
       </section>
 
       <section className={styles.platform} id="platform">

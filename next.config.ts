@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const scriptSources = `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`;
-const contentSecurityPolicy = `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; ${scriptSources}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' http://127.0.0.1:* http://localhost:*; worker-src 'self' blob:`;
+const contentSecurityPolicy = `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; ${scriptSources}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https://streaming.exclusive.radio; connect-src 'self' http://127.0.0.1:* http://localhost:*; worker-src 'self' blob:`;
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,

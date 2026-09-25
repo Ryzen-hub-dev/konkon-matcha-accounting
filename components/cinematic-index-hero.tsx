@@ -107,7 +107,9 @@ export function CinematicIndexHero() {
             <source src="/media/mascot/kona-hero-source.mp4" type="video/mp4" />
             Your browser does not support background video.
           </video>
-          <div className={styles.motionBadge} aria-hidden="true"><i />KONA · NATIVE MOTION</div>
+          <div className={styles.konaSticker} aria-hidden="true">
+            <strong>KONA</strong><span>MATCHĀ<br />HOUSE GUIDE</span>
+          </div>
         </div>
       </div>
       <div className={styles.cinemaShade} />
