@@ -15,19 +15,21 @@ export function CinematicIndexHero() {
     const video = visual.current;
     if (!root || !video) return;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    video.pause();
     if (reducedMotion) {
       video.pause();
+      const resetFrame = () => { video.currentTime = 0; };
+      if (video.readyState >= HTMLMediaElement.HAVE_METADATA) resetFrame();
+      else video.addEventListener("loadedmetadata", resetFrame, { once: true });
       return;
     }
 
     let frame = 0;
     let targetProgress = 0;
-    let displayedTime = 0;
     let targetX = 0;
     let targetY = 0;
     let currentX = 0;
     let currentY = 0;
+    let visible = true;
     const requestFrame = typeof window.requestAnimationFrame === "function"
       ? window.requestAnimationFrame.bind(window)
       : (callback: FrameRequestCallback) => window.setTimeout(() => callback(window.performance.now()), 16);
@@ -37,23 +39,16 @@ export function CinematicIndexHero() {
 
     const render = () => {
       frame = 0;
-      const state = cinematicScrollState(targetProgress, video.duration);
-      displayedTime += (state.time - displayedTime) * 0.16;
+      const state = cinematicScrollState(targetProgress, 1);
       currentX += (targetX - currentX) * 0.12;
       currentY += (targetY - currentY) * 0.12;
 
       root.dataset.stage = state.stage;
       root.style.setProperty("--cinema-progress", String(state.progress));
-      root.style.setProperty("--cinema-scale", String(1.018 + state.progress * 0.035));
-      root.style.setProperty("--cinema-x", `${currentX.toFixed(3)}%`);
-      root.style.setProperty("--cinema-y", `${currentY.toFixed(3)}%`);
-
-      if (video.readyState >= HTMLMediaElement.HAVE_METADATA && Math.abs(video.currentTime - displayedTime) > 0.012) {
-        video.currentTime = displayedTime;
-      }
+      root.style.setProperty("--cinema-x", `${currentX.toFixed(3)}deg`);
+      root.style.setProperty("--cinema-y", `${currentY.toFixed(3)}deg`);
 
       if (
-        Math.abs(state.time - displayedTime) > 0.008 ||
         Math.abs(targetX - currentX) > 0.008 ||
         Math.abs(targetY - currentY) > 0.008
       ) frame = requestFrame(render);
@@ -67,20 +62,34 @@ export function CinematicIndexHero() {
     };
     const point = (event: PointerEvent) => {
       if (event.pointerType === "touch") return;
-      targetX = (event.clientX / window.innerWidth - 0.5) * -0.8;
-      targetY = (event.clientY / window.innerHeight - 0.5) * -0.55;
+      targetX = (event.clientX / window.innerWidth - 0.5) * 3.2;
+      targetY = (event.clientY / window.innerHeight - 0.5) * -2.4;
       schedule();
     };
     const resetPoint = () => { targetX = 0; targetY = 0; schedule(); };
+    const syncPlayback = () => {
+      if (!visible || document.hidden) video.pause();
+      else void video.play().catch(() => undefined);
+    };
+    const observer = typeof window.IntersectionObserver === "function"
+      ? new IntersectionObserver(([entry]) => {
+          visible = Boolean(entry?.isIntersecting);
+          syncPlayback();
+        }, { threshold: 0.05 })
+      : null;
 
     measure();
-    video.addEventListener("loadedmetadata", measure);
+    video.playbackRate = 1;
+    observer?.observe(root);
+    syncPlayback();
+    document.addEventListener("visibilitychange", syncPlayback);
     addEventListener("scroll", measure, { passive: true });
     addEventListener("resize", measure, { passive: true });
     root.addEventListener("pointermove", point, { passive: true });
     root.addEventListener("pointerleave", resetPoint);
     return () => {
-      video.removeEventListener("loadedmetadata", measure);
+      observer?.disconnect();
+      document.removeEventListener("visibilitychange", syncPlayback);
       removeEventListener("scroll", measure);
       removeEventListener("resize", measure);
       root.removeEventListener("pointermove", point);
@@ -92,10 +101,14 @@ export function CinematicIndexHero() {
   return <section ref={section} className={styles.cinema} id="content" data-stage="0">
     <div className={styles.cinemaSticky}>
       <div className={styles.cinemaVisual}>
-        <video ref={visual} muted playsInline preload="auto" disablePictureInPicture tabIndex={-1} aria-hidden="true">
-          <source src="/media/mascot/kona-hero-source.mp4" type="video/mp4" />
-          Your browser does not support background video.
-        </video>
+        <div className={styles.cinemaDepth} aria-hidden="true"><i /><i /><i /><span /><span /></div>
+        <div className={styles.cinemaStage}>
+          <video ref={visual} autoPlay muted loop playsInline preload="auto" poster="/media/mascot/kona-base-v1.png" disablePictureInPicture tabIndex={-1} aria-hidden="true">
+            <source src="/media/mascot/kona-hero-source.mp4" type="video/mp4" />
+            Your browser does not support background video.
+          </video>
+          <div className={styles.motionBadge} aria-hidden="true"><i />KONA · NATIVE MOTION</div>
+        </div>
       </div>
       <div className={styles.cinemaShade} />
       <div className={styles.cinemaCopy}>

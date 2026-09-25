@@ -350,18 +350,33 @@
 .storePage .cartButton { border: 1px solid rgba(204, 242, 134, .55); color: #102111; background: #c8f379; box-shadow: 0 9px 30px rgba(178, 226, 91, .18); }
 .storePage .cartButton:disabled { border-color: rgba(255,255,255,.12); color: #718078; background: rgba(255,255,255,.05); box-shadow: none; cursor: not-allowed; }
 .storePaused { padding: 10px 18px; color: #241b08; background: #ffd86e; font-size: 11px; font-weight: 850; letter-spacing: .035em; text-align: center; }
-.storePage .storeHero { min-height: 690px; border-bottom: 1px solid rgba(212, 242, 153, .13); background: #06120c; }
-.storePage .storeHeroVideo { transform: scale(1.02); animation: heroBreathe 8s ease-in-out infinite alternate; }
+.storePage .storeHero { min-height: 690px; border-bottom: 1px solid rgba(212, 242, 153, .13); background: radial-gradient(circle at 78% 45%, rgba(182,231,96,.12), transparent 31%), #06120c; }
+.storePage .storeMascotStage { position: absolute; z-index: -2; top: 34px; right: 1vw; bottom: 24px; left: 43vw; display: grid; place-items: center; perspective: 1100px; pointer-events: none; }
+.storePage .storeMascotStage .storeHeroVideo { position: relative; inset: auto; z-index: 2; width: 100%; height: 100%; object-fit: contain; object-position: center; filter: none; transform: translateZ(18px); animation: none; }
+.storeMascotOrbit { position: absolute; z-index: 1; width: min(50vw,670px); aspect-ratio: 1; transform: rotateX(68deg) rotateZ(-12deg); transform-style: preserve-3d; opacity: .64; }
+.storeMascotOrbit i { position: absolute; border: 1px solid rgba(207,242,143,.28); border-radius: 50%; animation: storeOrbit 14s linear infinite; }
+.storeMascotOrbit i:first-child { inset: 7%; }
+.storeMascotOrbit i:nth-child(2) { inset: 24%; border-style: dashed; animation-duration: 10s; animation-direction: reverse; }
+.storeMascotOrbit span { position: absolute; top: 18%; left: 21%; width: 8px; aspect-ratio: 1; border-radius: 50%; background: #d7ff8d; box-shadow: 0 0 26px #bceb68; animation: storeSatellite 6s ease-in-out infinite alternate; }
+.storeMotionBadge { position: absolute; z-index: 3; right: 4%; bottom: 3%; min-height: 32px; padding: 0 12px; border: 1px solid rgba(219,250,158,.25); border-radius: 999px; display: inline-flex; align-items: center; gap: 8px; color: rgba(241,249,235,.74); background: rgba(4,20,12,.52); backdrop-filter: blur(14px); font-size: 8px; font-weight: 900; letter-spacing: .13em; }
+.storeMotionBadge i { width: 6px; height: 6px; border-radius: 50%; background: #d3f78a; box-shadow: 0 0 16px #bde56d; }
 .storePage .storeHero::before {
   background:
     linear-gradient(90deg, rgba(3, 15, 9, .97) 0%, rgba(3, 15, 9, .79) 40%, rgba(3, 15, 9, .04) 72%),
     linear-gradient(180deg, rgba(0,0,0,.04), transparent 55%, rgba(2, 12, 7, .74));
 }
-.storePage .storeHero > div:first-of-type { animation: heroCopyIn .85s cubic-bezier(.16,1,.3,1) both; }
+.storePage .storeHeroCopy { animation: heroCopyIn .85s cubic-bezier(.16,1,.3,1) both; }
 .storePage .storeHero h1 { color: #fffdf6; font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif; font-weight: 760; text-shadow: 0 10px 60px rgba(0,0,0,.38); }
 .storePage .storeHero p { color: #cbd7cc; }
 .storePage .signal { color: #c9f47a; }
-.storePage .routeCard { border-color: rgba(216, 248, 156, .22); background: rgba(4, 20, 12, .58); box-shadow: 0 34px 90px rgba(0,0,0,.34); animation: routeIn .9s .15s cubic-bezier(.16,1,.3,1) both; }
+.storePage .routeCard { position: absolute; left: clamp(20px,8vw,125px); bottom: 38px; width: min(620px,50vw); padding: 18px 22px; border-color: rgba(216, 248, 156, .22); grid-template-columns: repeat(4,1fr); justify-items: center; gap: 9px 4px; background: rgba(4, 20, 12, .58); box-shadow: 0 34px 90px rgba(0,0,0,.34); animation: routeIn .9s .15s cubic-bezier(.16,1,.3,1) both; }
+.storePage .routeCard > span { grid-row: 1; }
+.storePage .routeCard > strong { grid-row: 2; font-size: 10px; text-align: center; }
+.storePage .routeCard > i { display: none; }
+.storePage .routeCard > :is(span,strong):nth-of-type(1) { grid-column: 1; }
+.storePage .routeCard > :is(span,strong):nth-of-type(2) { grid-column: 2; }
+.storePage .routeCard > :is(span,strong):nth-of-type(3) { grid-column: 3; }
+.storePage .routeCard > :is(span,strong):nth-of-type(4) { grid-column: 4; }
 .storePage .routeCard span { border-color: #c4ed78; color: #ddff9c; box-shadow: 0 0 22px rgba(193, 235, 113, .14); }
 .storePage .routeCard i { background: linear-gradient(#c4ed78, rgba(196,237,120,.08)); }
 .storePage .catalogue { overflow: hidden; }
@@ -469,6 +484,8 @@
 .paymentCard { border-color: #bad48b !important; background: #f3f8e9; }
 
 @keyframes heroBreathe { to { transform: scale(1.055) translate3d(-.7%,.35%,0); } }
+@keyframes storeOrbit { to { transform: rotate(360deg); } }
+@keyframes storeSatellite { to { transform: translate3d(17px,-14px,32px) scale(1.35); opacity: .52; } }
 @keyframes heroCopyIn { from { opacity: 0; transform: translateY(34px); } }
 @keyframes routeIn { from { opacity: 0; transform: translateX(42px); } }
 @keyframes cardArrival { from { opacity: 0; transform: translateY(34px) scale(.985); } }
@@ -482,10 +499,13 @@
   .detailVisual { max-height: 680px; }
 }
 @media (max-width: 650px) {
-  .storePage .storeHero { min-height: 650px; padding-top: 220px; }
-  .storePage .storeHeroVideo { height: auto; aspect-ratio: 16 / 9; object-fit: contain; object-position: center top; transform: none; }
-  .storePage .storeHero::before { background: linear-gradient(180deg, rgba(3,15,9,.06), rgba(3,15,9,.88) 42%, #06120c 72%); }
-  .storePage .routeCard { padding: 20px 14px; grid-template-columns: repeat(4,1fr); justify-items: center; gap: 10px 4px; }
+  .storePage .storeHero { min-height: 740px; padding-top: clamp(350px,48svh,410px); }
+  .storePage .storeMascotStage { top: 10px; right: 0; bottom: auto; left: 0; height: clamp(320px,44svh,390px); }
+  .storePage .storeMascotStage .storeHeroVideo { width: 100%; height: 100%; aspect-ratio: auto; object-fit: contain; object-position: center top; transform: none; }
+  .storeMascotOrbit { width: 125vw; opacity: .42; }
+  .storeMotionBadge { right: 14px; bottom: 6px; }
+  .storePage .storeHero::before { background: linear-gradient(180deg, rgba(3,15,9,.02), rgba(3,15,9,.16) 39%, rgba(3,15,9,.93) 53%, #06120c 76%); }
+  .storePage .routeCard { right: 15px; bottom: 18px; left: 15px; width: auto; padding: 20px 14px; grid-template-columns: repeat(4,1fr); justify-items: center; gap: 10px 4px; }
   .storePage .routeCard > span { grid-row: 1; }
   .storePage .routeCard > strong { grid-row: 2; font-size: 10px; text-align: center; }
   .storePage .routeCard > i { display: none; }
@@ -502,7 +522,9 @@
   .detailFacts { align-items: flex-start; flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .storePage .storeHeroVideo, .storePage .storeHero > div:first-of-type, .storePage .routeCard,
+  .storePage .storeHeroVideo, .storePage .storeHeroCopy, .storePage .routeCard,
   .storePage .productCard, .storePage .floatingCart, .detailOrbOne, .detailOrbTwo,
   .detailVisual, .detailCopy { animation: none; transform: none; }
+  .storePage .storeHeroVideo { display: block; }
+  .storeMascotOrbit i, .storeMascotOrbit span { animation: none; }
 }

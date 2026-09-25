@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -65,6 +65,7 @@ async function api<T>(url: string, init?: RequestInit) {
 }
 
 export function StorefrontView({ productId = "" }: { productId?: string }) {
+  const heroVideo = useRef<HTMLVideoElement>(null);
   const [data, setData] = useState<StoreData | null>(null);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
@@ -88,6 +89,35 @@ export function StorefrontView({ productId = "" }: { productId?: string }) {
     const product = productId ? data?.products[0] : null;
     if (product) document.title = `${product.name} · ${data?.business.name || "Online shop"}`;
   }, [data, productId]);
+
+  useEffect(() => {
+    const video = heroVideo.current;
+    if (!video) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reducedMotion) {
+      video.pause();
+      return;
+    }
+    let visible = true;
+    const syncPlayback = () => {
+      if (!visible || document.hidden) video.pause();
+      else void video.play().catch(() => undefined);
+    };
+    const observer = typeof window.IntersectionObserver === "function"
+      ? new IntersectionObserver(([entry]) => {
+          visible = Boolean(entry?.isIntersecting);
+          syncPlayback();
+        }, { threshold: 0.05 })
+      : null;
+    video.playbackRate = 1;
+    observer?.observe(video);
+    syncPlayback();
+    document.addEventListener("visibilitychange", syncPlayback);
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener("visibilitychange", syncPlayback);
+    };
+  }, [productId]);
 
   useEffect(() => {
     if (!checkout && !preview && !success) return;
@@ -293,10 +323,14 @@ export function StorefrontView({ productId = "" }: { productId?: string }) {
         ) : null
       ) : <>
       <section className={styles.storeHero}>
-        <video className={styles.storeHeroVideo} autoPlay muted loop playsInline preload="metadata" poster="/media/mascot/kona-base-v1.png" disablePictureInPicture aria-hidden="true">
-          <source src="/media/mascot/kona-hero-source.mp4" type="video/mp4" />
-        </video>
-        <div>
+        <div className={styles.storeMascotStage} aria-hidden="true">
+          <div className={styles.storeMascotOrbit}><i /><i /><span /></div>
+          <video ref={heroVideo} className={styles.storeHeroVideo} autoPlay muted loop playsInline preload="auto" poster="/media/mascot/kona-base-v1.png" disablePictureInPicture>
+            <source src="/media/mascot/kona-hero-source.mp4" type="video/mp4" />
+          </video>
+          <span className={styles.storeMotionBadge}><i />KONA LIVE</span>
+        </div>
+        <div className={styles.storeHeroCopy}>
           <span className={styles.signal}>ONLINE ORDER REQUEST</span>
           <h1>{data?.store.storeTitle || "Choose. Request. Confirm."}</h1>
           <p>
