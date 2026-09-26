@@ -16,14 +16,23 @@ import styles from "@/app/index.module.css";
 import { KonaRadio } from "@/components/kona-radio";
 import {
   calculateMediaCalibration,
+  correctedPoseFrame,
+  coverDrawRect,
   frameDamping,
-  incrementalScrubTarget,
+  nativeCanvasPixelRatio,
   normalizePointer,
 } from "@/lib/interactive-video";
 
 const PRELOADER_VIDEO = "/media/intro/optical-preloader-h264.mp4";
-const KONA_VIDEO = "/media/mascot/kona-mainframe-master-v6.mp4";
+const KONA_VIDEO = "/media/mascot/kona-mainframe-fallback-v7.mp4";
 const KONA_POSTER = "/media/mascot/kona-mainframe-poster-v6.jpg";
+const KONA_FRAME_ROOT = "/media/mascot/kona-frames-v7";
+const KONA_FRAME_COUNT = 240;
+const KONA_FRAME_RATE = 24;
+const KONA_SOURCE_WIDTH = 1280;
+const KONA_SOURCE_HEIGHT = 720;
+const KONA_NEUTRAL_FRAME = (KONA_FRAME_COUNT - 1) / 2;
+const MAX_DECODED_FRAMES = 12;
 const INTRO_COPY =
   "KONA keeps every hand-off connected — from the first order and stock movement to the final receipt and close.";
 
@@ -54,13 +63,12 @@ function isInteractiveTarget(target: EventTarget | null) {
 export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: CinematicIndexHeroProps) {
   const rootRef = useRef<HTMLElement>(null);
   const preloaderRef = useRef<HTMLVideoElement>(null);
-  const poseRef = useRef<HTMLVideoElement>(null);
+  const poseCanvasRef = useRef<HTMLCanvasElement>(null);
+  const poseFallbackRef = useRef<HTMLVideoElement>(null);
   const pointerRef = useRef({ x: 0.5, y: 0.5, clientX: 0, clientY: 0 });
   const previewingRef = useRef(false);
-  const lastPointerXRef = useRef<number | null>(null);
-  const targetTimeRef = useRef(0);
-  const smoothTimeRef = useRef(0);
-  const durationRef = useRef(0);
+  const targetFrameRef = useRef(KONA_NEUTRAL_FRAME);
+  const smoothFrameRef = useRef(KONA_NEUTRAL_FRAME);
   const [stage, setStage] = useState<IntroStage>("loading");
   const [progress, setProgress] = useState(0);
   const [typedCopy, setTypedCopy] = useState("");
@@ -150,64 +158,187 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
 
   useEffect(() => {
     const root = rootRef.current;
-    const video = poseRef.current;
-    if (!root || !video) return;
+    const canvas = poseCanvasRef.current;
+    const fallbackVideo = poseFallbackRef.current;
+    const context = canvas?.getContext("2d", { alpha: false });
+    if (!root || !canvas || !fallbackVideo || !context) return;
 
     const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const cachedFrames = new Map<number, HTMLImageElement>();
+    const pendingFrames = new Set<number>();
+    const queuedFrames = new Set<number>();
+    let frameQueue: number[] = [];
     let animationFrame = 0;
     let lastFrameAt = performance.now();
-    let lastSeekAt = 0;
-    let seekStartedAt = 0;
-    let seekIntervalMs = 1000 / 30;
-    let seekBusy = false;
-    let pendingSeek: number | null = null;
+    let renderedFrame = -1;
+    let desiredFrame = Math.round(KONA_NEUTRAL_FRAME);
+    let renderDpr = 1;
+    let focusX = 50;
+    let focusY = 50;
+    let activeLoads = 0;
+    let frameFailures = 0;
+    let fallbackMode = false;
+    let fallbackDuration = 10;
+    let lastFallbackSeekAt = 0;
+    let previewFrame = KONA_NEUTRAL_FRAME;
+    let wasPreviewing = false;
+    let disposed = false;
     let activeTouchPointer: number | null = null;
     let cursorX = innerWidth * 0.5;
     let cursorY = innerHeight * 0.5;
     let parallaxX = 0;
     let parallaxY = 0;
 
+    const frameSource = (index: number) =>
+      `${KONA_FRAME_ROOT}/frame-${index.toString().padStart(4, "0")}.webp`;
+    const clampFrame = (index: number) =>
+      Math.min(KONA_FRAME_COUNT - 1, Math.max(0, Math.round(index)));
+
+    const drawFrame = (image: HTMLImageElement, index: number) => {
+      const width = Math.max(1, canvas.clientWidth || window.innerWidth);
+      const height = Math.max(1, canvas.clientHeight || window.innerHeight);
+      const rect = coverDrawRect(image.naturalWidth, image.naturalHeight, width, height, focusX, focusY);
+      context.setTransform(renderDpr, 0, 0, renderDpr, 0, 0);
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.fillStyle = "#edf1ef";
+      context.fillRect(0, 0, width, height);
+      context.drawImage(image, rect.x, rect.y, rect.width, rect.height);
+      renderedFrame = index;
+      root.dataset.renderMode = "frames";
+      root.dataset.poseFrame = String(index);
+      fallbackVideo.pause();
+    };
+
+    const trimDecodedFrames = () => {
+      if (cachedFrames.size <= MAX_DECODED_FRAMES) return;
+      const protectedFrames = new Set([
+        desiredFrame,
+        renderedFrame,
+        Math.round(KONA_NEUTRAL_FRAME),
+      ]);
+      const removable = [...cachedFrames.keys()]
+        .filter((index) => !protectedFrames.has(index))
+        .sort((a, b) => Math.abs(b - desiredFrame) - Math.abs(a - desiredFrame));
+      while (cachedFrames.size > MAX_DECODED_FRAMES && removable.length) {
+        cachedFrames.delete(removable.shift()!);
+      }
+    };
+
+    const activateFallback = () => {
+      if (fallbackMode) return;
+      fallbackMode = true;
+      root.dataset.renderMode = "video";
+      try {
+        fallbackVideo.currentTime = (smoothFrameRef.current / (KONA_FRAME_COUNT - 1)) * fallbackDuration;
+      } catch {
+        // Metadata may still be loading; initializeFallback will align the pose.
+      }
+      if (previewingRef.current) void fallbackVideo.play().catch(() => undefined);
+    };
+
+    const pumpFrameQueue = () => {
+      if (disposed) return;
+      while (activeLoads < 4 && frameQueue.length) {
+        const index = frameQueue.shift()!;
+        queuedFrames.delete(index);
+        if (cachedFrames.has(index) || pendingFrames.has(index)) continue;
+        const image = new Image();
+        image.decoding = "async";
+        activeLoads += 1;
+        pendingFrames.add(index);
+        image.onload = () => {
+          activeLoads -= 1;
+          pendingFrames.delete(index);
+          if (disposed) return;
+          cachedFrames.set(index, image);
+          frameFailures = 0;
+          trimDecodedFrames();
+          if (renderedFrame < 0 || index === desiredFrame) drawFrame(image, index);
+          pumpFrameQueue();
+        };
+        image.onerror = () => {
+          activeLoads -= 1;
+          pendingFrames.delete(index);
+          frameFailures += 1;
+          if (frameFailures >= 3 && cachedFrames.size === 0) activateFallback();
+          pumpFrameQueue();
+        };
+        image.src = frameSource(index);
+      }
+    };
+
+    const enqueueFrame = (frame: number, priority = false) => {
+      const index = clampFrame(frame);
+      if (cachedFrames.has(index) || pendingFrames.has(index) || queuedFrames.has(index)) return;
+      if (queuedFrames.size >= 24) {
+        const retained = frameQueue.filter((queued) => Math.abs(queued - desiredFrame) <= 6);
+        frameQueue = retained;
+        queuedFrames.clear();
+        retained.forEach((queued) => queuedFrames.add(queued));
+      }
+      if (!priority && queuedFrames.size >= 18) return;
+      queuedFrames.add(index);
+      if (priority) frameQueue.unshift(index);
+      else frameQueue.push(index);
+      pumpFrameQueue();
+    };
+
+    const closestCachedFrame = (target: number) => {
+      let closest: { index: number; image: HTMLImageElement } | null = null;
+      for (const [index, image] of cachedFrames) {
+        if (!closest || Math.abs(index - target) < Math.abs(closest.index - target)) {
+          closest = { index, image };
+        }
+      }
+      return closest;
+    };
+
     const calibrateMedia = () => {
       const calibration = calculateMediaCalibration(
-        video.videoWidth || 1920,
-        video.videoHeight || 1080,
+        KONA_SOURCE_WIDTH,
+        KONA_SOURCE_HEIGHT,
         window.innerWidth,
         window.innerHeight,
         window.devicePixelRatio || 1,
       );
-      seekIntervalMs = calibration.seekIntervalMs;
+      focusX = calibration.focusX;
+      focusY = calibration.focusY;
       root.style.setProperty("--media-scale", String(calibration.scale));
       root.style.setProperty("--media-focus-x", `${calibration.focusX}%`);
       root.style.setProperty("--media-focus-y", `${calibration.focusY}%`);
+      const width = Math.max(1, canvas.clientWidth || window.innerWidth);
+      const height = Math.max(1, canvas.clientHeight || window.innerHeight);
+      renderDpr = nativeCanvasPixelRatio(
+        KONA_SOURCE_WIDTH,
+        KONA_SOURCE_HEIGHT,
+        width,
+        height,
+        window.devicePixelRatio || 1,
+      );
+      const pixelWidth = Math.round(width * renderDpr);
+      const pixelHeight = Math.round(height * renderDpr);
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+      }
+      const current = cachedFrames.get(renderedFrame);
+      if (current) drawFrame(current, renderedFrame);
     };
 
-    const flushSeek = () => {
-      if (seekBusy || pendingSeek === null || previewingRef.current) return;
-      const next = pendingSeek;
-      pendingSeek = null;
-      if (Math.abs(video.currentTime - next) < 1 / 48) return;
-      seekBusy = true;
-      seekStartedAt = performance.now();
+    const initializeFallback = () => {
+      fallbackDuration = Number.isFinite(fallbackVideo.duration) && fallbackVideo.duration > 0
+        ? fallbackVideo.duration
+        : 10;
       try {
-        video.currentTime = next;
+        fallbackVideo.currentTime = (KONA_NEUTRAL_FRAME / (KONA_FRAME_COUNT - 1)) * fallbackDuration;
       } catch {
-        seekBusy = false;
+        // Some mobile decoders only allow seeking after their first loaded frame.
       }
+      fallbackVideo.pause();
     };
-    const handleSeeked = () => {
-      seekBusy = false;
-      if (pendingSeek !== null) requestAnimationFrame(flushSeek);
-    };
-    const initializeVideo = () => {
-      durationRef.current = Number.isFinite(video.duration) ? video.duration : 0;
-      const middle = durationRef.current * 0.5;
-      targetTimeRef.current = middle;
-      smoothTimeRef.current = middle;
-      video.currentTime = middle;
-      video.pause();
-      calibrateMedia();
-    };
+
     const move = (event: PointerEvent) => {
       const isTouchScrub = activeTouchPointer === event.pointerId;
       if (!finePointer.matches && !isTouchScrub) return;
@@ -218,34 +349,23 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
         root.dataset.cursor = "visible";
         root.dataset.cursorMode = isInteractiveTarget(event.target) ? "action" : "idle";
       }
-
-      const previousX = lastPointerXRef.current;
-      lastPointerXRef.current = event.clientX;
-      if (previousX !== null && !previewingRef.current && durationRef.current > 0) {
-        targetTimeRef.current = incrementalScrubTarget(
-          targetTimeRef.current,
-          event.clientX - previousX,
-          innerWidth,
-          durationRef.current,
-          finePointer.matches ? 0.82 : 1.05,
-        );
-      }
+      if (!previewingRef.current) targetFrameRef.current = correctedPoseFrame(normalized.x, KONA_FRAME_COUNT);
     };
     const startTouchScrub = (event: PointerEvent) => {
       if (finePointer.matches || isInteractiveTarget(event.target)) return;
       activeTouchPointer = event.pointerId;
-      lastPointerXRef.current = event.clientX;
       root.setPointerCapture?.(event.pointerId);
+      move(event);
     };
     const endTouchScrub = (event: PointerEvent) => {
       if (activeTouchPointer !== event.pointerId) return;
       activeTouchPointer = null;
-      lastPointerXRef.current = null;
       if (root.hasPointerCapture?.(event.pointerId)) root.releasePointerCapture(event.pointerId);
     };
     const resetMouse = () => {
       if (!finePointer.matches) return;
-      lastPointerXRef.current = null;
+      pointerRef.current = { x: 0.5, y: 0.5, clientX: 0, clientY: 0 };
+      targetFrameRef.current = KONA_NEUTRAL_FRAME;
       root.dataset.cursor = "hidden";
       root.dataset.cursorMode = "idle";
     };
@@ -259,23 +379,42 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
       root.style.setProperty("--cursor-x", `${cursorX.toFixed(2)}px`);
       root.style.setProperty("--cursor-y", `${cursorY.toFixed(2)}px`);
 
-      if (seekBusy && now - seekStartedAt > 220) {
-        seekBusy = false;
-        pendingSeek = smoothTimeRef.current;
-      }
-
-      if (!previewingRef.current && durationRef.current > 0) {
-        smoothTimeRef.current = frameDamping(
-          smoothTimeRef.current,
-          targetTimeRef.current,
+      if (previewingRef.current) {
+        if (!wasPreviewing) previewFrame = smoothFrameRef.current;
+        previewFrame = (previewFrame + (deltaMs / 1000) * KONA_FRAME_RATE * 0.7) % KONA_FRAME_COUNT;
+        smoothFrameRef.current = previewFrame;
+      } else {
+        smoothFrameRef.current = frameDamping(
+          smoothFrameRef.current,
+          targetFrameRef.current,
           deltaMs,
-          reducedMotion ? 24 : 15,
+          reducedMotion ? 24 : 13,
         );
-        pendingSeek = smoothTimeRef.current;
-        if (!seekBusy && now - lastSeekAt >= seekIntervalMs) {
-          lastSeekAt = now;
-          flushSeek();
+      }
+      wasPreviewing = previewingRef.current;
+      desiredFrame = clampFrame(smoothFrameRef.current);
+
+      if (fallbackMode) {
+        if (!previewingRef.current && now - lastFallbackSeekAt >= 1000 / 24) {
+          lastFallbackSeekAt = now;
+          const targetTime = (smoothFrameRef.current / (KONA_FRAME_COUNT - 1)) * fallbackDuration;
+          if (Math.abs(fallbackVideo.currentTime - targetTime) > 1 / 48) {
+            try {
+              fallbackVideo.currentTime = targetTime;
+            } catch {
+              // Ignore transient decoder seek failures and retry on the next frame.
+            }
+          }
         }
+      } else {
+        enqueueFrame(desiredFrame, true);
+        const direction = desiredFrame >= renderedFrame ? 1 : -1;
+        enqueueFrame(desiredFrame + direction);
+        enqueueFrame(desiredFrame + direction * 2);
+        const closest = cachedFrames.get(desiredFrame)
+          ? { index: desiredFrame, image: cachedFrames.get(desiredFrame)! }
+          : closestCachedFrame(desiredFrame);
+        if (closest && closest.index !== renderedFrame) drawFrame(closest.image, closest.index);
       }
 
       const targetParallaxX = reducedMotion ? 0 : (pointer.x - 0.5) * -9;
@@ -288,9 +427,12 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
       animationFrame = requestAnimationFrame(render);
     };
 
-    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) initializeVideo();
-    else video.addEventListener("loadedmetadata", initializeVideo, { once: true });
-    video.addEventListener("seeked", handleSeeked);
+    root.dataset.renderMode = "loading";
+    calibrateMedia();
+    enqueueFrame(KONA_NEUTRAL_FRAME, true);
+    [0, 40, 80, 160, 200, KONA_FRAME_COUNT - 1].forEach((index) => enqueueFrame(index));
+    if (fallbackVideo.readyState >= HTMLMediaElement.HAVE_METADATA) initializeFallback();
+    else fallbackVideo.addEventListener("loadedmetadata", initializeFallback, { once: true });
     window.addEventListener("pointermove", move, { passive: true });
     root.addEventListener("pointerdown", startTouchScrub);
     root.addEventListener("pointerup", endTouchScrub);
@@ -301,9 +443,10 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
     animationFrame = requestAnimationFrame(render);
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(animationFrame);
-      video.removeEventListener("loadedmetadata", initializeVideo);
-      video.removeEventListener("seeked", handleSeeked);
+      fallbackVideo.pause();
+      fallbackVideo.removeEventListener("loadedmetadata", initializeFallback);
       window.removeEventListener("pointermove", move);
       root.removeEventListener("pointerdown", startTouchScrub);
       root.removeEventListener("pointerup", endTouchScrub);
@@ -311,6 +454,10 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
       window.removeEventListener("resize", calibrateMedia);
       window.removeEventListener("blur", resetMouse);
       document.documentElement.removeEventListener("mouseleave", resetMouse);
+      cachedFrames.clear();
+      pendingFrames.clear();
+      queuedFrames.clear();
+      frameQueue = [];
     };
   }, []);
 
@@ -335,10 +482,11 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
   }, []);
 
   const updatePreview = (value: boolean) => {
-    const video = poseRef.current;
+    const video = poseFallbackRef.current;
+    const root = rootRef.current;
     previewingRef.current = value;
     setPreviewing(value);
-    if (!video) return;
+    if (!video || root?.dataset.renderMode !== "video") return;
     if (value) {
       video.loop = true;
       video.playbackRate = 0.7;
@@ -348,9 +496,9 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
       });
     } else {
       video.pause();
-      targetTimeRef.current = video.currentTime;
-      smoothTimeRef.current = video.currentTime;
-      lastPointerXRef.current = null;
+      const frame = (video.currentTime / Math.max(video.duration || 10, 0.01)) * (KONA_FRAME_COUNT - 1);
+      targetFrameRef.current = frame;
+      smoothFrameRef.current = frame;
     }
   };
 
@@ -414,11 +562,13 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
       </nav>
 
       <div className={styles.heroMedia} aria-label="Interactive KONA motion portrait">
+        <canvas ref={poseCanvasRef} className={styles.poseCanvas} aria-hidden="true" />
         <video
-          ref={poseRef}
+          ref={poseFallbackRef}
+          className={styles.poseFallback}
           muted
           playsInline
-          preload="auto"
+          preload="metadata"
           poster={KONA_POSTER}
           disablePictureInPicture
           tabIndex={-1}
