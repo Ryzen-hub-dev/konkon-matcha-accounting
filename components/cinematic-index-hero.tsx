@@ -2,232 +2,316 @@
 
 import Link from "next/link";
 import {
-  CalendarDays,
+  ArrowRight,
   Check,
-  ChevronLeft,
-  ChevronRight,
-  Clock3,
+  Headphones,
   Menu,
+  Pause,
   Play,
-  Search,
-  Star,
-  UserRound,
+  Sparkles,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "@/app/index.module.css";
-import { dampedPlayhead, normalizePointer, videoPoseTarget } from "@/lib/interactive-video";
+import { KonaRadio } from "@/components/kona-radio";
+import {
+  frameDamping,
+  incrementalScrubTarget,
+  normalizePointer,
+} from "@/lib/interactive-video";
 
-const PRELOADER_SOURCE = "https://d2ol7oe51mr4n9.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/5fc5651c-3b5d-4171-b507-87f7e635d1b4.mp4";
-const PRELOADER_VIDEO = "/media/intro/optical-preloader-h264.mp4";
-const BACKGROUND_VIDEO = "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260406_094145_4a271a6c-3869-4f1c-8aa7-aeb0cb227994.mp4";
-const POSE_VIDEO = "/media/mascot/kona-parallax-v3.mp4";
-
-const NAV_ITEMS = ["Eyewear", "Optics", "Sound System", "Edition", "Studio"] as const;
-
-const SPECS = [
-  { id: "frame", label: "Titanium Frame", detail: "Featherweight structure · precision-cut profile · satin monochrome finish" },
-  { id: "lens", label: "Polarized AR Lens", detail: "Low-reflection optics · adaptive highlight control · edge-to-edge clarity" },
-  { id: "audio", label: "Integrated Spatial Audio", detail: "Open-ear directionality · low-leakage chambers · tuned near-field sound" },
-] as const;
+const KONA_VIDEO = "/media/mascot/kona-mainframe-scrub-v5.mp4";
+const KONA_POSTER = "/media/mascot/kona-mainframe-poster.jpg";
+const INTRO_COPY =
+  "KONA keeps every hand-off connected — from the first order and stock movement to the final receipt and close.";
 
 type IntroStage = "loading" | "docking" | "ready";
-type SpecId = (typeof SPECS)[number]["id"];
 
 function BrandMark() {
   return (
-    <svg viewBox="0 0 48 48" role="img" aria-label="Kōn-Kōn">
-      <rect x="1" y="1" width="46" height="46" rx="14" fill="none" stroke="currentColor" strokeWidth="1" />
-      <path d="M15 12v24M15 25l16-13M15 25l17 11" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="35" cy="13" r="2.2" fill="currentColor" />
+    <svg viewBox="0 0 56 56" role="img" aria-label="Kōn-Kōn">
+      <path d="M28 2 50 15v26L28 54 6 41V15Z" fill="currentColor" />
+      <path d="M18 16v24m0-11 19-13M18 29l19 11" fill="none" stroke="#f8f3e8" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="39" cy="16" r="2.7" fill="#ef6b3f" />
     </svg>
   );
 }
 
+function isInteractiveTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest("a, button, input, label"));
+}
+
 export function CinematicIndexHero() {
   const rootRef = useRef<HTMLElement>(null);
-  const preloaderRef = useRef<HTMLVideoElement>(null);
   const poseRef = useRef<HTMLVideoElement>(null);
-  const pointerRef = useRef({ x: 0.5, y: 0.5 });
-  const hoveredRef = useRef(false);
-  const pinnedRef = useRef(false);
+  const pointerRef = useRef({ x: 0.5, y: 0.5, clientX: 0, clientY: 0 });
   const previewingRef = useRef(false);
+  const lastPointerXRef = useRef<number | null>(null);
+  const targetTimeRef = useRef(0);
+  const smoothTimeRef = useRef(0);
+  const durationRef = useRef(0);
   const [stage, setStage] = useState<IntroStage>("loading");
   const [progress, setProgress] = useState(0);
-  const [hovered, setHovered] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  const [activeSpec, setActiveSpec] = useState<SpecId>("lens");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [typedCopy, setTypedCopy] = useState("");
   const [previewing, setPreviewing] = useState(false);
-  const inspectionOpen = hovered || pinned;
-  const selectedSpec = SPECS.find((spec) => spec.id === activeSpec) ?? SPECS[1];
-
-  const updatePinned = (value: boolean) => {
-    pinnedRef.current = value;
-    setPinned(value);
-  };
-
-  const updatePreview = (value: boolean) => {
-    previewingRef.current = value;
-    setPreviewing(value);
-    const pose = poseRef.current;
-    if (!pose) return;
-    if (value) {
-      pose.loop = true;
-      pose.playbackRate = 0.72;
-      void pose.play().catch(() => {
-        previewingRef.current = false;
-        setPreviewing(false);
-      });
-    } else {
-      pose.pause();
-    }
-  };
+  const [storyOpen, setStoryOpen] = useState(false);
+  const [radioExpanded, setRadioExpanded] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    const video = preloaderRef.current;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reducedMotion) {
+    if (reducedMotion || document.visibilityState !== "visible") {
       setProgress(100);
       setStage("ready");
       return;
     }
 
     let frame = 0;
-    let finishTimer = 0;
+    let dockingTimer = 0;
     let fallbackTimer = 0;
-    let settled = false;
+    let finished = false;
     const startedAt = performance.now();
     const finish = () => {
-      if (settled) return;
-      settled = true;
+      if (finished) return;
+      finished = true;
       cancelAnimationFrame(frame);
       setProgress(100);
       setStage("docking");
-      finishTimer = window.setTimeout(() => setStage("ready"), 2000);
+      dockingTimer = window.setTimeout(() => setStage("ready"), 1100);
     };
     const tick = (now: number) => {
-      const elapsed = Math.min(1, (now - startedAt) / 3000);
-      const media = video && Number.isFinite(video.duration) && video.duration > 0
-        ? video.currentTime / video.duration
-        : 0;
-      const next = Math.min(1, Math.max(elapsed, media));
-      setProgress(Math.round(next * 100));
-      if (next >= 1) finish();
-      else frame = requestAnimationFrame(tick);
+      const ratio = Math.min(1, (now - startedAt) / 2600);
+      setProgress(Math.round(ratio * 100));
+      if (ratio < 1) frame = requestAnimationFrame(tick);
+      else finish();
     };
-    const play = () => {
-      if (!video || !Number.isFinite(video.duration)) return;
-      video.playbackRate = Math.max(0.25, video.duration / 3);
-      void video.play().catch(() => undefined);
+    const finishWhenHidden = () => {
+      if (document.visibilityState !== "visible") finish();
     };
-    video?.addEventListener("loadedmetadata", play, { once: true });
-    video?.addEventListener("ended", finish, { once: true });
-    if (video && video.readyState >= HTMLMediaElement.HAVE_METADATA) play();
+    document.addEventListener("visibilitychange", finishWhenHidden);
     frame = requestAnimationFrame(tick);
-    fallbackTimer = window.setTimeout(finish, 3200);
+    fallbackTimer = window.setTimeout(finish, 2850);
     return () => {
-      settled = true;
+      finished = true;
       cancelAnimationFrame(frame);
-      clearTimeout(finishTimer);
+      clearTimeout(dockingTimer);
       clearTimeout(fallbackTimer);
-      video?.removeEventListener("loadedmetadata", play);
-      video?.removeEventListener("ended", finish);
+      document.removeEventListener("visibilitychange", finishWhenHidden);
     };
   }, []);
+
+  useEffect(() => {
+    if (stage === "loading") return;
+    setTypedCopy("");
+    let index = 0;
+    let typeTimer = 0;
+    const startTimer = window.setTimeout(() => {
+      typeTimer = window.setInterval(() => {
+        index += 1;
+        setTypedCopy(INTRO_COPY.slice(0, index));
+        if (index >= INTRO_COPY.length) clearInterval(typeTimer);
+      }, 22);
+    }, 380);
+    return () => {
+      clearTimeout(startTimer);
+      clearInterval(typeTimer);
+    };
+  }, [stage]);
 
   useEffect(() => {
     const root = rootRef.current;
     const video = poseRef.current;
     if (!root || !video) return;
-    const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let frame = 0;
-    let playhead = 0;
-    let lastSeek = 0;
 
-    const initialize = () => {
-      playhead = video.duration * 0.5;
-      video.currentTime = playhead;
+    const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let animationFrame = 0;
+    let lastFrameAt = performance.now();
+    let lastSeekAt = 0;
+    let seekBusy = false;
+    let pendingSeek: number | null = null;
+    let activeTouchPointer: number | null = null;
+    let cursorX = innerWidth * 0.5;
+    let cursorY = innerHeight * 0.5;
+    let parallaxX = 0;
+    let parallaxY = 0;
+
+    const flushSeek = () => {
+      if (seekBusy || pendingSeek === null || previewingRef.current) return;
+      const next = pendingSeek;
+      pendingSeek = null;
+      if (Math.abs(video.currentTime - next) < 1 / 120) return;
+      seekBusy = true;
+      try {
+        video.currentTime = next;
+      } catch {
+        seekBusy = false;
+      }
+    };
+    const handleSeeked = () => {
+      seekBusy = false;
+      if (pendingSeek !== null) requestAnimationFrame(flushSeek);
+    };
+    const initializeVideo = () => {
+      durationRef.current = Number.isFinite(video.duration) ? video.duration : 0;
+      const middle = durationRef.current * 0.5;
+      targetTimeRef.current = middle;
+      smoothTimeRef.current = middle;
+      video.currentTime = middle;
       video.pause();
     };
     const move = (event: PointerEvent) => {
-      pointerRef.current = normalizePointer(event.clientX, event.clientY, innerWidth, innerHeight);
-      root.style.setProperty("--cursor-x", `${event.clientX}px`);
-      root.style.setProperty("--cursor-y", `${event.clientY}px`);
-      root.dataset.cursor = "visible";
+      const isTouchScrub = activeTouchPointer === event.pointerId;
+      if (!finePointer.matches && !isTouchScrub) return;
+
+      const normalized = normalizePointer(event.clientX, event.clientY, innerWidth, innerHeight);
+      pointerRef.current = { ...normalized, clientX: event.clientX, clientY: event.clientY };
+      if (finePointer.matches) root.dataset.cursor = "visible";
+
+      const previousX = lastPointerXRef.current;
+      lastPointerXRef.current = event.clientX;
+      if (previousX !== null && !previewingRef.current && durationRef.current > 0) {
+        targetTimeRef.current = incrementalScrubTarget(
+          targetTimeRef.current,
+          event.clientX - previousX,
+          innerWidth,
+          durationRef.current,
+          finePointer.matches ? 0.82 : 1.05,
+        );
+      }
     };
-    const hideCursor = () => { root.dataset.cursor = "hidden"; };
+    const startTouchScrub = (event: PointerEvent) => {
+      if (finePointer.matches || isInteractiveTarget(event.target)) return;
+      activeTouchPointer = event.pointerId;
+      lastPointerXRef.current = event.clientX;
+      root.setPointerCapture?.(event.pointerId);
+    };
+    const endTouchScrub = (event: PointerEvent) => {
+      if (activeTouchPointer !== event.pointerId) return;
+      activeTouchPointer = null;
+      lastPointerXRef.current = null;
+      if (root.hasPointerCapture?.(event.pointerId)) root.releasePointerCapture(event.pointerId);
+    };
+    const resetMouse = () => {
+      if (!finePointer.matches) return;
+      lastPointerXRef.current = null;
+      root.dataset.cursor = "hidden";
+    };
     const render = (now: number) => {
+      const deltaMs = Math.min(64, now - lastFrameAt);
+      lastFrameAt = now;
       const pointer = pointerRef.current;
-      const locked = hoveredRef.current || pinnedRef.current;
-      const target = locked ? video.duration * 0.52 : videoPoseTarget(pointer, video.duration);
-      if (!previewingRef.current && Number.isFinite(target) && video.duration > 0) {
-        playhead = dampedPlayhead(playhead, target, locked ? 0.14 : 0.08);
-        if (!reducedMotion && now - lastSeek > 32 && !video.seeking && Math.abs(video.currentTime - playhead) > 0.018) {
-          video.currentTime = playhead;
-          lastSeek = now;
+
+      cursorX = frameDamping(cursorX, pointer.clientX || innerWidth * 0.5, deltaMs, 28);
+      cursorY = frameDamping(cursorY, pointer.clientY || innerHeight * 0.5, deltaMs, 28);
+      root.style.setProperty("--cursor-x", `${cursorX.toFixed(2)}px`);
+      root.style.setProperty("--cursor-y", `${cursorY.toFixed(2)}px`);
+
+      if (!previewingRef.current && durationRef.current > 0) {
+        smoothTimeRef.current = frameDamping(
+          smoothTimeRef.current,
+          targetTimeRef.current,
+          deltaMs,
+          reducedMotion ? 24 : 15,
+        );
+        pendingSeek = smoothTimeRef.current;
+        if (!seekBusy && now - lastSeekAt >= 16) {
+          lastSeekAt = now;
+          flushSeek();
         }
       }
-      const yaw = locked ? 0 : (pointer.x - 0.5) * 16;
-      const pitch = locked ? 0 : (0.5 - pointer.y) * 11;
-      root.style.setProperty("--yaw", `${yaw.toFixed(2)}deg`);
-      root.style.setProperty("--pitch", `${pitch.toFixed(2)}deg`);
-      root.style.setProperty("--light-x", `${(pointer.x * 100).toFixed(1)}%`);
-      root.style.setProperty("--light-y", `${(pointer.y * 100).toFixed(1)}%`);
-      frame = requestAnimationFrame(render);
+
+      const targetParallaxX = reducedMotion ? 0 : (pointer.x - 0.5) * -9;
+      const targetParallaxY = reducedMotion ? 0 : (pointer.y - 0.5) * -6;
+      parallaxX = frameDamping(parallaxX, targetParallaxX, deltaMs, 9);
+      parallaxY = frameDamping(parallaxY, targetParallaxY, deltaMs, 9);
+      root.style.setProperty("--parallax-x", `${parallaxX.toFixed(2)}px`);
+      root.style.setProperty("--parallax-y", `${parallaxY.toFixed(2)}px`);
+      root.style.setProperty("--cursor-tilt", `${((pointer.x - 0.5) * 24 - 8).toFixed(2)}deg`);
+      animationFrame = requestAnimationFrame(render);
     };
 
-    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) initialize();
-    else video.addEventListener("loadedmetadata", initialize, { once: true });
-    if (finePointer) {
-      root.addEventListener("pointermove", move, { passive: true });
-      root.addEventListener("pointerleave", hideCursor);
-    }
-    frame = requestAnimationFrame(render);
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) initializeVideo();
+    else video.addEventListener("loadedmetadata", initializeVideo, { once: true });
+    video.addEventListener("seeked", handleSeeked);
+    window.addEventListener("pointermove", move, { passive: true });
+    root.addEventListener("pointerdown", startTouchScrub);
+    root.addEventListener("pointerup", endTouchScrub);
+    root.addEventListener("pointercancel", endTouchScrub);
+    window.addEventListener("blur", resetMouse);
+    document.documentElement.addEventListener("mouseleave", resetMouse);
+    animationFrame = requestAnimationFrame(render);
+
     return () => {
-      cancelAnimationFrame(frame);
-      video.removeEventListener("loadedmetadata", initialize);
-      root.removeEventListener("pointermove", move);
-      root.removeEventListener("pointerleave", hideCursor);
+      cancelAnimationFrame(animationFrame);
+      video.removeEventListener("loadedmetadata", initializeVideo);
+      video.removeEventListener("seeked", handleSeeked);
+      window.removeEventListener("pointermove", move);
+      root.removeEventListener("pointerdown", startTouchScrub);
+      root.removeEventListener("pointerup", endTouchScrub);
+      root.removeEventListener("pointercancel", endTouchScrub);
+      window.removeEventListener("blur", resetMouse);
+      document.documentElement.removeEventListener("mouseleave", resetMouse);
     };
   }, []);
 
-  const enterInspection = () => {
-    hoveredRef.current = true;
-    setHovered(true);
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setStoryOpen(false);
+      setMenuOpen(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, []);
+
+  useEffect(() => {
+    const compact = window.matchMedia("(max-width: 780px)");
+    const collapseForCompactScreen = () => {
+      if (compact.matches) setRadioExpanded(false);
+    };
+    collapseForCompactScreen();
+    compact.addEventListener("change", collapseForCompactScreen);
+    return () => compact.removeEventListener("change", collapseForCompactScreen);
+  }, []);
+
+  const updatePreview = (value: boolean) => {
+    const video = poseRef.current;
+    previewingRef.current = value;
+    setPreviewing(value);
+    if (!video) return;
+    if (value) {
+      video.loop = true;
+      video.playbackRate = 0.7;
+      void video.play().catch(() => {
+        previewingRef.current = false;
+        setPreviewing(false);
+      });
+    } else {
+      video.pause();
+      targetTimeRef.current = video.currentTime;
+      smoothTimeRef.current = video.currentTime;
+      lastPointerXRef.current = null;
+    }
   };
-  const leaveInspection = () => {
-    hoveredRef.current = false;
-    setHovered(false);
-  };
-  const openInspection = (spec: SpecId = "lens") => {
-    setActiveSpec(spec);
-    updatePinned(true);
-    updatePreview(false);
-  };
-  const handleNav = (item: (typeof NAV_ITEMS)[number]) => {
-    if (item === "Sound System") openInspection("audio");
-    else if (item === "Optics") openInspection("lens");
-    else if (item === "Eyewear") openInspection("frame");
-    else if (item === "Edition") updatePreview(true);
+
+  const openStory = () => {
+    setStoryOpen(true);
     setMenuOpen(false);
   };
-  const nudgePose = (direction: -1 | 1) => {
-    const video = poseRef.current;
-    if (!video || !Number.isFinite(video.duration)) return;
-    updatePreview(false);
-    video.currentTime = Math.min(video.duration * 0.92, Math.max(video.duration * 0.08, video.currentTime + direction * video.duration * 0.12));
+  const openRadio = () => {
+    setRadioExpanded(true);
+    setMenuOpen(false);
   };
 
   return (
-    <section ref={rootRef} className={styles.experience} data-stage={stage} data-inspection={inspectionOpen} id="content">
+    <section ref={rootRef} className={styles.experience} data-stage={stage} id="content">
       <div className={styles.preloader} aria-hidden={stage === "ready"}>
-        <video ref={preloaderRef} muted playsInline preload="auto" tabIndex={-1} data-original-source={PRELOADER_SOURCE}>
-          <source src={PRELOADER_VIDEO} type="video/mp4" />
-        </video>
-        <div className={styles.preloaderCounter} aria-live="polite"><span>{progress}</span><small>%</small></div>
+        <div className={styles.preloaderAura} />
+        <p>KONA IS GETTING THE DAY READY</p>
+        <div className={styles.preloaderCounter} aria-live="polite">
+          <span>{progress.toString().padStart(2, "0")}</span><small>%</small>
+        </div>
       </div>
 
       <Link href="/" className={styles.dockingLogo} aria-label="Kōn-Kōn home" tabIndex={stage === "ready" ? 0 : -1}>
@@ -235,84 +319,99 @@ export function CinematicIndexHero() {
       </Link>
 
       <nav className={styles.navbar} aria-label="Main navigation">
-        <div className={styles.brandCopy}><strong>KŌN-KŌN</strong><small>OPTICAL WORKSPACE</small></div>
+        <div className={styles.brandCopy}>
+          <strong>KŌN-KŌN</strong>
+          <small>KONA HOUSE SYSTEM</small>
+        </div>
         <div className={styles.desktopNav}>
-          {NAV_ITEMS.map((item, index) => item === "Studio" ? (
-            <Link key={item} href="/login" style={{ "--delay": `${100 + index * 50}ms` } as CSSProperties}>{item}</Link>
-          ) : (
-            <button key={item} type="button" onClick={() => handleNav(item)} style={{ "--delay": `${100 + index * 50}ms` } as CSSProperties}>{item}</button>
-          ))}
+          <button type="button" onClick={openStory}>Meet KONA</button>
+          <button type="button" onClick={openStory}>How she helps</button>
+          <button type="button" onClick={openRadio}>KONA Radio</button>
+          <Link href="/shop">Shop</Link>
         </div>
         <div className={styles.navActions}>
-          <div className={`${styles.searchControl} ${styles.liquidGlass}`} data-open={searchOpen}>
-            <Search aria-hidden="true" />
-            {searchOpen && <input autoFocus aria-label="Search experience" placeholder="Search optics" onKeyDown={(event) => { if (event.key === "Escape") setSearchOpen(false); }} />}
-            {!searchOpen && <button type="button" onClick={() => setSearchOpen(true)} aria-label="Open search">Search</button>}
-          </div>
-          <Link href="/login" className={`${styles.profileButton} ${styles.liquidGlass}`} aria-label="Open workspace"><UserRound /></Link>
-          <button className={`${styles.menuButton} ${styles.liquidGlass}`} type="button" aria-expanded={menuOpen} aria-label={menuOpen ? "Close menu" : "Open menu"} onClick={() => setMenuOpen((value) => !value)}>
+          <Link className={styles.workspaceLink} href="/login">Open workspace <ArrowRight /></Link>
+          <button
+            className={styles.menuButton}
+            type="button"
+            aria-expanded={menuOpen}
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            onClick={() => setMenuOpen((value) => !value)}
+          >
             {menuOpen ? <X /> : <Menu />}
           </button>
         </div>
-        <div className={`${styles.mobileMenu} ${styles.liquidGlass}`} data-open={menuOpen}>
-          {NAV_ITEMS.map((item) => item === "Studio" ? <Link key={item} href="/login">{item}</Link> : <button key={item} type="button" onClick={() => handleNav(item)}>{item}</button>)}
+        <div className={styles.mobileMenu} data-open={menuOpen}>
+          <button type="button" onClick={openStory}>Meet KONA</button>
+          <button type="button" onClick={openStory}>How she helps</button>
+          <button type="button" onClick={openRadio}>KONA Radio</button>
+          <Link href="/shop">Shop</Link>
+          <Link href="/login">Open workspace</Link>
         </div>
       </nav>
 
-      <div className={styles.heroMedia} aria-hidden="true">
-        <video className={styles.backgroundVideo} autoPlay muted loop playsInline preload="metadata" disablePictureInPicture tabIndex={-1}>
-          <source src={BACKGROUND_VIDEO} type="video/mp4" />
+      <div className={styles.heroMedia} aria-label="Interactive KONA motion portrait">
+        <video
+          ref={poseRef}
+          muted
+          playsInline
+          preload="auto"
+          poster={KONA_POSTER}
+          disablePictureInPicture
+          tabIndex={-1}
+          aria-hidden="true"
+        >
+          <source src={KONA_VIDEO} type="video/mp4" />
         </video>
-        <div className={styles.characterFilm}>
-          <video ref={poseRef} muted playsInline preload="auto" disablePictureInPicture tabIndex={-1}>
-            <source src={POSE_VIDEO} type="video/mp4" />
-          </video>
-        </div>
-      </div>
-
-      <div className={styles.opticalBlur} aria-hidden="true" />
-
-      <div className={styles.characterZone} onPointerEnter={enterInspection} onPointerLeave={leaveInspection} onFocus={enterInspection} onBlur={leaveInspection}>
-        <button type="button" className={styles.inspectionTarget} aria-label="Inspect KONA eyewear" aria-pressed={pinned} onClick={() => updatePinned(!pinned)} />
-        <div className={styles.eyewearRig} aria-hidden="true">
-          <span className={styles.lensLeft} /><span className={styles.bridge} /><span className={styles.lensRight} />
-        </div>
-        <div className={styles.hotspots} aria-label="Eyewear specifications">
-          {SPECS.map((spec) => (
-            <button key={spec.id} type="button" className={styles.hotspot} data-spec={spec.id} data-active={activeSpec === spec.id} onPointerEnter={() => setActiveSpec(spec.id)} onFocus={() => setActiveSpec(spec.id)} onClick={() => openInspection(spec.id)}>
-              <span>+</span><b>{spec.label}</b>
-            </button>
-          ))}
-        </div>
-        <article className={`${styles.specCard} ${styles.liquidGlass}`} aria-live="polite">
-          <div><span>OPTICAL SYSTEM / {SPECS.findIndex((spec) => spec.id === activeSpec) + 1}</span><Check /></div>
-          <h2>{selectedSpec.label}</h2>
-          <p>{selectedSpec.detail}</p>
-          <button type="button" onClick={() => updatePinned(false)}>Close inspection</button>
-        </article>
+        <div className={styles.colorAtmosphere} aria-hidden="true" />
+        <div className={styles.filmGrain} aria-hidden="true" />
       </div>
 
       <div className={styles.heroContent} id="hero-content">
-        <div className={styles.metadata}>
-          <span><Star fill="currentColor" />8.7/10 IMDB</span><i />
-          <span><Clock3 />132 min</span><i />
-          <span><CalendarDays />April, 2026</span>
-        </div>
-        <h1>Step Through.<br />Work Smarter.</h1>
-        <p>A voyage through forgotten realms, where past and future intertwine.</p>
+        <p className={styles.introLabel}>Hey there, meet KONA,<br />Kōn-Kōn’s calm operations guide.</p>
+        <p className={styles.eyebrow}><Sparkles /> MOVE LEFT OR RIGHT — KONA RESPONDS</p>
+        <h1>A calmer way to<br />run the whole day.</h1>
+        <p className={styles.typewriter}>
+          {typedCopy}
+          {typedCopy.length < INTRO_COPY.length ? <span aria-hidden="true" /> : null}
+        </p>
         <div className={styles.actions}>
-          <button type="button" className={styles.primaryAction} onClick={() => updatePreview(!previewing)}><Play fill="currentColor" />{previewing ? "Pause sequence" : "Play sequence"}</button>
-          <button type="button" className={`${styles.secondaryAction} ${styles.liquidGlass}`} onClick={() => updatePinned(!pinned)}>Explore Optics</button>
+          <button type="button" className={styles.primaryAction} onClick={openStory}>Meet KONA <ArrowRight /></button>
+          <button type="button" className={styles.lightAction} onClick={() => updatePreview(!previewing)}>
+            {previewing ? <Pause /> : <Play />}{previewing ? "Pause her motion" : "Watch her move"}
+          </button>
+          <button type="button" className={styles.radioAction} onClick={openRadio}><Headphones /> Open KONA Radio</button>
+          <Link className={styles.shopAction} href="/shop">Explore the shop</Link>
         </div>
       </div>
 
-      <div className={styles.poseControls} aria-label="Pose navigation">
-        <button type="button" className={styles.liquidGlass} aria-label="Previous pose" onClick={() => nudgePose(-1)}><ChevronLeft /></button>
-        <button type="button" className={styles.liquidGlass} aria-label="Next pose" onClick={() => nudgePose(1)}><ChevronRight /></button>
+      {storyOpen ? (
+        <aside className={styles.storyPanel} aria-label="About KONA">
+          <header>
+            <span>KONA / HOUSE GUIDE</span>
+            <button type="button" onClick={() => setStoryOpen(false)} aria-label="Close KONA introduction"><X /></button>
+          </header>
+          <h2>One familiar guide across every hand-off.</h2>
+          <p>KONA gives the team one calm place to move from customer request to stock, payment, receipt and the final accounting trail. She helps people find the next action; your team stays in control of every approval.</p>
+          <div className={styles.storySteps}>
+            <article><small>AT THE COUNTER</small><strong>Welcome, identify and sell</strong><p>Members, coupons, payments and receipts stay connected to the same sale.</p></article>
+            <article><small>BEHIND THE COUNTER</small><strong>Keep stock moving</strong><p>Products, batches, locations and purchasing share one operational record.</p></article>
+            <article><small>AT CLOSE</small><strong>Finish with evidence</strong><p>Posted journals and reports preserve what actually happened.</p></article>
+          </div>
+          <footer><Check /> KONA assists the flow. Server-enforced roles still decide who may act.</footer>
+        </aside>
+      ) : null}
+
+      <div id="kona-radio" className={styles.radioDock} data-expanded={radioExpanded}>
+        <button type="button" className={styles.radioCollapse} onClick={() => setRadioExpanded((value) => !value)} aria-label={radioExpanded ? "Minimize KONA Radio" : "Open KONA Radio"}>
+          <Headphones />
+        </button>
+        <KonaRadio />
       </div>
 
-      <div className={styles.creatorMark}>KONA / 2026 <span>CREATED BY RYZEN HUB DEV</span></div>
-      <div className={styles.inspectCursor} aria-hidden="true"><span>+</span><b>Explore optics</b></div>
+      <div className={styles.motionNote}>MOVE LEFT · MOVE RIGHT <span>DRAG ON TOUCHSCREENS</span></div>
+      <div className={styles.creatorMark}>CREATED BY <strong>RYZEN HUB DEV</strong></div>
+      <div className={styles.doritoCursor} aria-hidden="true"><span /><i /><b /></div>
     </section>
   );
 }

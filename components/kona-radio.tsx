@@ -39,7 +39,7 @@ export function KonaRadio() {
   }
 
   return (
-    <div className={styles.konaRadio}>
+    <div className={styles.konaRadio} data-state={state}>
       <audio
         ref={audio}
         src={KONA_RADIO_STREAM}

@@ -14,12 +14,26 @@ export function normalizePointer(
   };
 }
 
-export function videoPoseTarget(pointer: NormalizedPointer, duration: number) {
+export function incrementalScrubTarget(
+  currentTarget: number,
+  deltaX: number,
+  viewportWidth: number,
+  duration: number,
+  sensitivity = 0.8,
+) {
   if (!Number.isFinite(duration) || duration <= 0) return 0;
-  const pose = 0.08 + (pointer.x * 0.72 + (1 - pointer.y) * 0.28) * 0.84;
-  return clamp01(pose) * duration;
+  const inset = Math.min(duration * 0.06, 0.35);
+  const delta = (deltaX / Math.max(1, viewportWidth)) * sensitivity * duration;
+  return Math.min(duration - inset, Math.max(inset, currentTarget + delta));
 }
 
-export function dampedPlayhead(current: number, target: number, damping = 0.08) {
-  return current + (target - current) * clamp01(damping);
+export function frameDamping(
+  current: number,
+  target: number,
+  deltaMs: number,
+  responsiveness = 12,
+) {
+  const safeDelta = Math.min(64, Math.max(0, deltaMs)) / 1000;
+  const alpha = 1 - Math.exp(-Math.max(0, responsiveness) * safeDelta);
+  return current + (target - current) * alpha;
 }
