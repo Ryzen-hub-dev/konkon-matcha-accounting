@@ -4,7 +4,7 @@ import { Fragment, type CSSProperties, type ReactNode } from "react";
 import { Leaf } from "lucide-react";
 import { DEFAULT_INVOICE_TEMPLATE, type InvoiceTemplateInput } from "@/lib/invoice-templates";
 import { formatCalendarDate } from "@/lib/dates";
-import { customBlockKey, normaliseTemplateBlockOrder } from "@/lib/document-template-blocks";
+import { customBlockKey, normaliseTemplateBlockOrder, normaliseTemplateBlockStyles, templateBlockClassName, type TemplateCustomBlock } from "@/lib/document-template-blocks";
 
 export type InvoicePaperItem = {
   description: string;
@@ -45,6 +45,13 @@ export type InvoicePaperDocument = {
   };
 };
 
+function customBlockContent(block: TemplateCustomBlock) {
+  if (block.kind === "IMAGE") return <img src={block.content} alt={block.label} />;
+  if (block.kind === "DIVIDER") return <hr aria-label={block.label} />;
+  if (block.kind === "SPACER") return <span className="document-spacer" aria-label={block.label} />;
+  return <p>{block.content}</p>;
+}
+
 export function InvoicePaper({ document, template = DEFAULT_INVOICE_TEMPLATE, compact = false }: {
   document: InvoicePaperDocument;
   template?: InvoiceTemplateInput;
@@ -59,6 +66,9 @@ export function InvoicePaper({ document, template = DEFAULT_INVOICE_TEMPLATE, co
   const shortDate = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", timeZone });
   const customBlocks = template.customBlocks || [];
   const blockOrder = normaliseTemplateBlockOrder(template.blockOrder, DEFAULT_INVOICE_TEMPLATE.blockOrder, customBlocks);
+  const hasCanvasLayout = Boolean(template.blockStyles?.length);
+  const blockStyles = normaliseTemplateBlockStyles(template.blockStyles, blockOrder);
+  const styleByKey = new Map(blockStyles.map(style => [style.key, style]));
   const customByKey = new Map(customBlocks.map(block => [customBlockKey(block.id), block]));
   const blocks: Record<string, ReactNode> = {
     HEADER: <header className="invoice-paper-header">
@@ -89,10 +99,14 @@ export function InvoicePaper({ document, template = DEFAULT_INVOICE_TEMPLATE, co
     </footer>,
   };
   return (
-    <article className={`invoice-paper invoice-layout-${template.layout.toLowerCase()} invoice-tone-${template.paperTone.toLowerCase()} ${compact ? "invoice-paper-compact" : ""}`} style={paperStyle}>
+    <article className={`invoice-paper invoice-layout-${template.layout.toLowerCase()} invoice-tone-${template.paperTone.toLowerCase()} ${hasCanvasLayout ? "document-layout-enabled" : ""} ${compact ? "invoice-paper-compact" : ""}`} style={paperStyle}>
       {blockOrder.map(key => {
         const custom = customByKey.get(key);
-        return <Fragment key={key}>{blocks[key] || (custom ? <section className={`document-custom-block align-${custom.alignment.toLowerCase()}`}>{custom.kind === "IMAGE" ? <img src={custom.content} alt={custom.label} /> : <p>{custom.content}</p>}</section> : null)}</Fragment>;
+        const content = blocks[key] || (custom ? <section className={`document-custom-block document-custom-${custom.kind.toLowerCase()} align-${custom.alignment.toLowerCase()}`}>{customBlockContent(custom)}</section> : null);
+        if (!hasCanvasLayout) return <Fragment key={key}>{content}</Fragment>;
+        const baseStyle = styleByKey.get(key)!;
+        const blockStyle = ["ITEMS", "TOTALS"].includes(key) ? { ...baseStyle, width: "FULL" as const } : baseStyle;
+        return <div className={templateBlockClassName(blockStyle)} key={key} data-document-block={key}>{content}</div>;
       })}
     </article>
   );

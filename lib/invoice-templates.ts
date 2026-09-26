@@ -1,6 +1,6 @@
 import type { ClientSession, Db } from "mongodb";
 import { z } from "zod";
-import { templateCustomBlockSchema, validateTemplateBlocks } from "@/lib/document-template-blocks";
+import { templateBlockStyleSchema, templateCustomBlockSchema, validateTemplateBlocks, validateTemplateBlockStyles } from "@/lib/document-template-blocks";
 
 export const INVOICE_LAYOUTS = ["CEREMONIAL", "LEDGER", "MINIMAL"] as const;
 export const INVOICE_PAPER_TONES = ["RICE", "WHITE", "MIST"] as const;
@@ -29,10 +29,13 @@ export const invoiceTemplateInputSchema = z.object({
   showNotes: z.boolean().default(true),
   blockOrder: z.array(z.string().max(80)).max(16).default([...INVOICE_TEMPLATE_BLOCKS]),
   customBlocks: z.array(templateCustomBlockSchema).max(6).default([]),
+  blockStyles: z.array(templateBlockStyleSchema).max(16).default([]),
   isDefault: z.boolean().default(false),
 }).superRefine((value, context) => {
   const issue = validateTemplateBlocks(value.blockOrder, value.customBlocks, INVOICE_TEMPLATE_BLOCKS);
   if (issue) context.addIssue({ code: "custom", path: ["blockOrder"], message: issue });
+  const styleIssue = validateTemplateBlockStyles(value.blockStyles, value.blockOrder);
+  if (styleIssue) context.addIssue({ code: "custom", path: ["blockStyles"], message: styleIssue });
 });
 
 export type InvoiceTemplateInput = z.infer<typeof invoiceTemplateInputSchema>;
@@ -60,6 +63,7 @@ export const DEFAULT_INVOICE_TEMPLATE: InvoiceTemplateInput = {
   showNotes: true,
   blockOrder: [...INVOICE_TEMPLATE_BLOCKS],
   customBlocks: [],
+  blockStyles: [],
   isDefault: true,
 };
 

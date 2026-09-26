@@ -11,7 +11,7 @@ import {
   ensureDefaultReceiptTemplate,
   receiptTemplateInputSchema,
 } from "../lib/receipt-templates";
-import { customBlockKey, normaliseTemplateBlockOrder } from "../lib/document-template-blocks";
+import { customBlockKey, normaliseTemplateBlockOrder, normaliseTemplateBlockStyles } from "../lib/document-template-blocks";
 
 type Document = Record<string, unknown>;
 type Filter = Document & { $or?: Filter[] };
@@ -162,4 +162,26 @@ test("document builders preserve every required financial block while allowing o
     normaliseTemplateBlockOrder(["FOOTER", "HEADER"], DEFAULT_INVOICE_TEMPLATE.blockOrder, []),
     ["FOOTER", "HEADER", "CUSTOMER", "ITEMS", "TOTALS"],
   );
+  const styled = invoiceTemplateInputSchema.safeParse({
+    ...DEFAULT_INVOICE_TEMPLATE,
+    blockStyles: [{ key: "HEADER", width: "HALF", surface: "TINT", spacing: "RELAXED", alignment: "CENTER" }],
+  });
+  assert.equal(styled.success, true);
+  assert.equal(invoiceTemplateInputSchema.safeParse({
+    ...DEFAULT_INVOICE_TEMPLATE,
+    blockStyles: [
+      { key: "HEADER", width: "FULL", surface: "PLAIN", spacing: "STANDARD", alignment: "LEFT" },
+      { key: "HEADER", width: "HALF", surface: "TINT", spacing: "RELAXED", alignment: "CENTER" },
+    ],
+  }).success, false);
+  assert.equal(receiptTemplateInputSchema.safeParse({
+    ...DEFAULT_RECEIPT_TEMPLATE,
+    blockStyles: [{ key: "MISSING", width: "FULL", surface: "PLAIN", spacing: "STANDARD", alignment: "LEFT" }],
+  }).success, false);
+  assert.equal(invoiceTemplateInputSchema.safeParse({
+    ...DEFAULT_INVOICE_TEMPLATE,
+    blockOrder: [...DEFAULT_INVOICE_TEMPLATE.blockOrder, "CUSTOM:section-divider"],
+    customBlocks: [{ id: "section-divider", kind: "DIVIDER", label: "Section divider", content: "", alignment: "CENTER" }],
+  }).success, true);
+  assert.equal(normaliseTemplateBlockStyles([], ["HEADER"])[0]?.width, "FULL");
 });

@@ -1,15 +1,26 @@
 import { z } from "zod";
 
 export const TEMPLATE_BLOCK_ALIGNMENTS = ["LEFT", "CENTER", "RIGHT"] as const;
+export const TEMPLATE_BLOCK_WIDTHS = ["FULL", "TWO_THIRDS", "HALF", "THIRD"] as const;
+export const TEMPLATE_BLOCK_SURFACES = ["PLAIN", "OUTLINE", "TINT", "ACCENT"] as const;
+export const TEMPLATE_BLOCK_SPACING = ["COMPACT", "STANDARD", "RELAXED"] as const;
+
+export const templateBlockStyleSchema = z.object({
+  key: z.string().min(1).max(80),
+  width: z.enum(TEMPLATE_BLOCK_WIDTHS).default("FULL"),
+  surface: z.enum(TEMPLATE_BLOCK_SURFACES).default("PLAIN"),
+  spacing: z.enum(TEMPLATE_BLOCK_SPACING).default("STANDARD"),
+  alignment: z.enum(TEMPLATE_BLOCK_ALIGNMENTS).default("LEFT"),
+});
 
 export const templateCustomBlockSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]{8,64}$/),
-  kind: z.enum(["TEXT", "IMAGE"]),
+  kind: z.enum(["TEXT", "IMAGE", "CALLOUT", "DIVIDER", "SPACER"]),
   label: z.string().trim().min(1).max(60),
   content: z.string().max(280_000),
   alignment: z.enum(TEMPLATE_BLOCK_ALIGNMENTS).default("LEFT"),
 }).superRefine((block, context) => {
-  if (block.kind === "TEXT" && (!block.content.trim() || block.content.length > 1_000)) {
+  if (["TEXT", "CALLOUT"].includes(block.kind) && (!block.content.trim() || block.content.length > 1_000)) {
     context.addIssue({ code: "custom", path: ["content"], message: "Text components require 1–1,000 characters." });
   }
   if (block.kind === "IMAGE" && !/^data:image\/(png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(block.content)) {
@@ -18,6 +29,7 @@ export const templateCustomBlockSchema = z.object({
 });
 
 export type TemplateCustomBlock = z.infer<typeof templateCustomBlockSchema>;
+export type TemplateBlockStyle = z.infer<typeof templateBlockStyleSchema>;
 
 export function customBlockKey(id: string) {
   return `CUSTOM:${id}`;
@@ -40,6 +52,16 @@ export function validateTemplateBlocks(
   return null;
 }
 
+export function validateTemplateBlockStyles(
+  styles: TemplateBlockStyle[],
+  order: string[],
+) {
+  const keys = styles.map(style => style.key);
+  if (new Set(keys).size !== keys.length) return "Each component can have only one layout rule.";
+  if (keys.some(key => !order.includes(key))) return "A layout rule points to a missing component.";
+  return null;
+}
+
 export function normaliseTemplateBlockOrder(
   value: unknown,
   builtIns: readonly string[],
@@ -49,4 +71,30 @@ export function normaliseTemplateBlockOrder(
   const supplied = Array.isArray(value) ? value.map(String) : [];
   const ordered = supplied.filter((key, index) => allowed.includes(key) && supplied.indexOf(key) === index);
   return [...ordered, ...allowed.filter(key => !ordered.includes(key))];
+}
+
+export function normaliseTemplateBlockStyles(
+  value: unknown,
+  order: string[],
+) {
+  const parsed = z.array(templateBlockStyleSchema).max(24).safeParse(value);
+  const supplied = parsed.success ? parsed.data : [];
+  const byKey = new Map(supplied.filter(style => order.includes(style.key)).map(style => [style.key, style]));
+  return order.map(key => byKey.get(key) || {
+    key,
+    width: "FULL" as const,
+    surface: "PLAIN" as const,
+    spacing: "STANDARD" as const,
+    alignment: "LEFT" as const,
+  });
+}
+
+export function templateBlockClassName(style: TemplateBlockStyle) {
+  return [
+    "document-layout-block",
+    `block-width-${style.width.toLowerCase().replace("_", "-")}`,
+    `block-surface-${style.surface.toLowerCase()}`,
+    `block-spacing-${style.spacing.toLowerCase()}`,
+    `align-${style.alignment.toLowerCase()}`,
+  ].join(" ");
 }

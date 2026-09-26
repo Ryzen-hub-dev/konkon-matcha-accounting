@@ -42,6 +42,7 @@ function draftFrom(template?: ReceiptTemplateRecord): TemplateDraft {
     showPoints: template.showPoints,
     blockOrder: template.blockOrder?.length ? template.blockOrder : [...DEFAULT_RECEIPT_TEMPLATE.blockOrder],
     customBlocks: template.customBlocks || [],
+    blockStyles: template.blockStyles || [],
     isDefault: template.isDefault,
   } : { ...DEFAULT_RECEIPT_TEMPLATE, name: "New receipt template", isDefault: false };
 }
@@ -173,7 +174,9 @@ export function ReceiptTemplateStudio({ open, templates, initialTemplateId, onCl
             ]}
             order={draft.blockOrder}
             customBlocks={draft.customBlocks}
-            onChange={(blockOrder, customBlocks) => setDraft(current => ({ ...current, blockOrder, customBlocks }))}
+            blockStyles={draft.blockStyles}
+            compact
+            onChange={(blockOrder, customBlocks, blockStyles) => setDraft(current => ({ ...current, blockOrder, customBlocks, blockStyles }))}
             onError={message => show(message, "error")}
           />
           <section className="template-toggles">{toggles.map((toggle) => <label className="check-row" key={toggle.key}><input type="checkbox" checked={Boolean(draft[toggle.key])} onChange={(event) => update(toggle.key, event.target.checked as never)} /><span><strong>{toggle.label}</strong><small>{toggle.detail}</small></span></label>)}<label className="check-row"><input type="checkbox" checked={draft.isDefault} onChange={(event) => update("isDefault", event.target.checked)} /><span><strong>Default template</strong><small>Preselect this at the register.</small></span></label></section>

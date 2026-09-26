@@ -4,7 +4,7 @@ import { Fragment, type CSSProperties, type ReactNode } from "react";
 import { Leaf } from "lucide-react";
 import { QrImage } from "./qr-image";
 import { DEFAULT_RECEIPT_TEMPLATE, type ReceiptTemplateInput } from "@/lib/receipt-templates";
-import { customBlockKey, normaliseTemplateBlockOrder } from "@/lib/document-template-blocks";
+import { customBlockKey, normaliseTemplateBlockOrder, normaliseTemplateBlockStyles, templateBlockClassName, type TemplateCustomBlock } from "@/lib/document-template-blocks";
 
 export type ReceiptPaperDocument = {
   _id?: string;
@@ -56,6 +56,13 @@ export type ReceiptPaperDocument = {
   };
 };
 
+function customBlockContent(block: TemplateCustomBlock) {
+  if (block.kind === "IMAGE") return <img src={block.content} alt={block.label} />;
+  if (block.kind === "DIVIDER") return <hr aria-label={block.label} />;
+  if (block.kind === "SPACER") return <span className="document-spacer" aria-label={block.label} />;
+  return <p>{block.content}</p>;
+}
+
 export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, compact = false }: {
   document: ReceiptPaperDocument;
   template?: ReceiptTemplateInput;
@@ -73,6 +80,8 @@ export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, co
   const isCash = document.paymentKind ? document.paymentKind === "CASH" : document.paymentMethod === "CASH";
   const customBlocks = template.customBlocks || [];
   const blockOrder = normaliseTemplateBlockOrder(template.blockOrder, DEFAULT_RECEIPT_TEMPLATE.blockOrder, customBlocks);
+  const hasCanvasLayout = Boolean(template.blockStyles?.length);
+  const blockStyles = normaliseTemplateBlockStyles(template.blockStyles, blockOrder);
   const customByKey = new Map(customBlocks.map(block => [customBlockKey(block.id), block]));
   const blocks: Record<string, ReactNode> = {
     HEADER: <header className="receipt-paper-header">
@@ -122,10 +131,13 @@ export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, co
     </footer>,
   };
 
-  return <article className={`thermal-receipt receipt-width-${template.paperWidth.toLowerCase()} receipt-density-${template.density.toLowerCase()} ${compact ? "thermal-receipt-compact" : ""}`} style={style}>
+  return <article className={`thermal-receipt receipt-width-${template.paperWidth.toLowerCase()} receipt-density-${template.density.toLowerCase()} ${hasCanvasLayout ? "document-layout-enabled" : ""} ${compact ? "thermal-receipt-compact" : ""}`} style={style}>
     {blockOrder.map(key => {
       const custom = customByKey.get(key);
-      return <Fragment key={key}>{blocks[key] || (custom ? <section className={`document-custom-block align-${custom.alignment.toLowerCase()}`}>{custom.kind === "IMAGE" ? <img src={custom.content} alt={custom.label} /> : <p>{custom.content}</p>}</section> : null)}</Fragment>;
+      const content = blocks[key] || (custom ? <section className={`document-custom-block document-custom-${custom.kind.toLowerCase()} align-${custom.alignment.toLowerCase()}`}>{customBlockContent(custom)}</section> : null);
+      if (!hasCanvasLayout) return <Fragment key={key}>{content}</Fragment>;
+      const baseStyle = blockStyles.find(blockStyle => blockStyle.key === key)!;
+      return <div className={templateBlockClassName({ ...baseStyle, width: "FULL" })} key={key} data-document-block={key}>{content}</div>;
     })}
   </article>;
 }

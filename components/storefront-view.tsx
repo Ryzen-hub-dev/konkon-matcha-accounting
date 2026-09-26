@@ -6,12 +6,15 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  Clock3,
+  MessageCircle,
   Minus,
   PackageSearch,
   Plus,
   Search,
   ShieldCheck,
   ShoppingBag,
+  SlidersHorizontal,
   Sparkles,
   ZoomIn,
   X,
@@ -70,6 +73,8 @@ export function StorefrontView({ productId = "" }: { productId?: string }) {
   const [cart, setCart] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("ALL");
+  const [sort, setSort] = useState("FEATURED");
+  const [inStockOnly, setInStockOnly] = useState(false);
   const [checkout, setCheckout] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -138,13 +143,22 @@ export function StorefrontView({ productId = "" }: { productId?: string }) {
 
   const products = data?.products || [];
   const categories = ["ALL", ...new Set(products.map((product) => product.category))];
-  const visible = products.filter(
-    (product) =>
-      (category === "ALL" || product.category === category) &&
-      `${product.name} ${product.sku} ${product.category}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
-  );
+  const visible = useMemo(() => {
+    const filtered = products.filter(
+      (product) =>
+        (category === "ALL" || product.category === category) &&
+        (!inStockOnly || product.available > 0) &&
+        `${product.name} ${product.sku} ${product.category}`
+          .toLowerCase()
+          .includes(search.toLowerCase()),
+    );
+    return [...filtered].sort((left, right) => {
+      if (sort === "PRICE_ASC") return left.price - right.price;
+      if (sort === "PRICE_DESC") return right.price - left.price;
+      if (sort === "NAME") return left.name.localeCompare(right.name);
+      return Number(right.available > 0) - Number(left.available > 0);
+    });
+  }, [category, inStockOnly, products, search, sort]);
   const selected = useMemo(
     () =>
       products
@@ -241,7 +255,7 @@ export function StorefrontView({ productId = "" }: { productId?: string }) {
         </Link>
         <nav>
           <Link href="/shop#catalogue">Catalogue</Link>
-          <span>Stock shown live</span>
+          <Link href="/shop#how-it-works">How it works</Link>
         </nav>
         <button
           className={styles.cartButton}
@@ -346,32 +360,37 @@ export function StorefrontView({ productId = "" }: { productId?: string }) {
         </div>
       </section>
 
+      <section className={styles.commercePromise} id="how-it-works" aria-label="Order service promises">
+        <article><ShieldCheck /><span><strong>Verified availability</strong><small>Staff recheck live stock before any payment.</small></span></article>
+        <article><MessageCircle /><span><strong>Private order chat</strong><small>Confirm variations, delivery and documents in one place.</small></span></article>
+        <article><Clock3 /><span><strong>Clear order trail</strong><small>Offers, invoices, receipts and tracking stay connected.</small></span></article>
+      </section>
+
       <section className={styles.catalogue} id="catalogue">
         <header className={styles.catalogueHeader}>
           <div>
             <span className={styles.signal}>LIVE CATALOGUE</span>
             <h2>Available products</h2>
           </div>
-          <label className={styles.searchBox}>
-            <Search size={18} />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search product or SKU"
-            />
-          </label>
+          <div className={styles.catalogueTools}>
+            <label className={styles.searchBox}>
+              <Search size={18} />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search product or SKU" />
+            </label>
+            <label className={styles.sortBox}><SlidersHorizontal size={15} /><select aria-label="Sort products" value={sort} onChange={(event) => setSort(event.target.value)}><option value="FEATURED">Featured</option><option value="PRICE_ASC">Price: low to high</option><option value="PRICE_DESC">Price: high to low</option><option value="NAME">Name</option></select></label>
+          </div>
         </header>
-        <div className={styles.categoryRail}>
-          {categories.map((item) => (
-            <button
-              key={item}
-              className={category === item ? styles.activeCategory : ""}
-              onClick={() => setCategory(item)}
-            >
-              {item === "ALL" ? "All products" : item}
-            </button>
-          ))}
+        <div className={styles.catalogueNavigation}>
+          <div className={styles.categoryRail}>
+            {categories.map((item) => (
+              <button key={item} className={category === item ? styles.activeCategory : ""} onClick={() => setCategory(item)}>
+                {item === "ALL" ? "All products" : item}
+              </button>
+            ))}
+          </div>
+          <label className={styles.stockToggle}><input type="checkbox" checked={inStockOnly} onChange={(event) => setInStockOnly(event.target.checked)} /><span>In stock only</span></label>
         </div>
+        <div className={styles.catalogueSummary}><strong>{visible.length}</strong><span>product{visible.length === 1 ? "" : "s"} ready to browse</span><i /><small>Prices are estimates until staff confirmation</small></div>
         {!data && !error ? (
           <div className={styles.loading}>Loading catalogue…</div>
         ) : error && !data ? (

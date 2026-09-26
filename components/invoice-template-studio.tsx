@@ -38,6 +38,7 @@ function draftFrom(template?: InvoiceTemplateRecord): TemplateDraft {
     showNotes: template.showNotes,
     blockOrder: template.blockOrder?.length ? template.blockOrder : [...DEFAULT_INVOICE_TEMPLATE.blockOrder],
     customBlocks: template.customBlocks || [],
+    blockStyles: template.blockStyles || [],
     isDefault: template.isDefault,
   } : { ...DEFAULT_INVOICE_TEMPLATE, name: "New invoice template", isDefault: false };
 }
@@ -150,13 +151,14 @@ export function InvoiceTemplateStudio({ open, templates, initialTemplateId, onCl
             builtIns={[
               { key: "HEADER", label: "Brand & invoice identity", detail: "Logo, document title and invoice number" },
               { key: "CUSTOMER", label: "Customer & dates", detail: "Billing party, issue date and due date" },
-              { key: "ITEMS", label: "Invoice lines", detail: "Descriptions, quantities, rates and amounts" },
-              { key: "TOTALS", label: "Notes & totals", detail: "Payment wording, tax and grand total" },
+              { key: "ITEMS", label: "Invoice lines", detail: "Descriptions, quantities, rates and amounts", fixedWidth: true },
+              { key: "TOTALS", label: "Notes & totals", detail: "Payment wording, tax and grand total", fixedWidth: true },
               { key: "FOOTER", label: "Business footer", detail: "Contact, registration and closing line" },
             ]}
             order={draft.blockOrder}
             customBlocks={draft.customBlocks}
-            onChange={(blockOrder, customBlocks) => setDraft(current => ({ ...current, blockOrder, customBlocks }))}
+            blockStyles={draft.blockStyles}
+            onChange={(blockOrder, customBlocks, blockStyles) => setDraft(current => ({ ...current, blockOrder, customBlocks, blockStyles }))}
             onError={message => show(message, "error")}
           />
           <section className="template-toggles"><label className="check-row"><input type="checkbox" checked={draft.showTaxBreakdown} onChange={(event) => update("showTaxBreakdown", event.target.checked)} /><span><strong>Show tax breakdown</strong><small>Display tax as a separate total.</small></span></label><label className="check-row"><input type="checkbox" checked={draft.showNotes} onChange={(event) => update("showNotes", event.target.checked)} /><span><strong>Show invoice notes</strong><small>Include customer-facing notes.</small></span></label><label className="check-row"><input type="checkbox" checked={draft.showBusinessAddress} onChange={(event) => update("showBusinessAddress", event.target.checked)} /><span><strong>Show business address</strong><small>Off by default. Enable only when a statutory country pack requires it.</small></span></label><label className="check-row"><input type="checkbox" checked={draft.showCustomerAddress} onChange={(event) => update("showCustomerAddress", event.target.checked)} /><span><strong>Show customer address</strong><small>Off by default to protect customer privacy.</small></span></label><label className="check-row"><input type="checkbox" checked={draft.showRegistrationNo} onChange={(event) => update("showRegistrationNo", event.target.checked)} /><span><strong>Show registration number</strong><small>Use the workspace business profile.</small></span></label><label className="check-row"><input type="checkbox" checked={draft.isDefault} onChange={(event) => update("isDefault", event.target.checked)} /><span><strong>Default template</strong><small>Preselect this for new invoices.</small></span></label></section>
