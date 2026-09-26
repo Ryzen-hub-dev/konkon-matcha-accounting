@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { MobileScanner } from "@/components/mobile-scanner";
+import { readPublicBranding } from "@/lib/public-branding";
 
 export const metadata: Metadata = {
   title: "Mobile scanner pass",
@@ -9,5 +10,6 @@ export const metadata: Metadata = {
 
 export default async function MobileScannerPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  return <MobileScanner token={token} />;
+  const branding = await readPublicBranding();
+  return <MobileScanner token={token} branding={branding} />;
 }

@@ -35,7 +35,7 @@ export function publicReceipt(sale: Document) {
     tenderCurrency: sale.tenderCurrency, tenderTotal: sale.tenderTotal, exchangeRate: sale.exchangeRate,
     tenderedAmount: sale.tenderedAmount, changeDue: sale.changeDue,
     templateSnapshot: normaliseReceiptTemplate(sale.templateSnapshot || {}),
-    businessSnapshot: Object.fromEntries(["businessName", "legalEntityName", "registrationNo", "email", "phone", "address", "countryCode", "timeZone", "locale", "currency", "taxName", "franchiseBrand", "franchiseCode"].map(key => [key, snapshot[key]])),
+    businessSnapshot: Object.fromEntries(["businessName", "legalEntityName", "registrationNo", "email", "phone", "address", "countryCode", "timeZone", "locale", "currency", "taxName", "franchiseBrand", "franchiseCode", "workspaceLogoDataUrl"].map(key => [key, snapshot[key]])),
     eInvoice: { schemaVersion: 1, sourceDocumentType: "POS_RECEIPT", sourceReceiptNo: sale.receiptNo, countryCode: snapshot.countryCode || "", status: "NOT_SUBMITTED" },
   };
 }

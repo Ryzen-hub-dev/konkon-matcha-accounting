@@ -126,6 +126,24 @@ export async function PATCH(request: Request) {
             { code: "2100", name: "GST payable" }, { $set: { name: "Tax payable" } }, { session: mongoSession },
           );
         }
+        // Migrate only untouched starter copy. Running this on every real settings save also repairs
+        // workspaces that changed their name before workspace-wide branding was introduced.
+        await db.collection("invoiceTemplates").updateOne(
+          { systemKey: "starter-invoice-template", headerText: { $in: ["KŌN-KŌN MATCHĀ", "KŌN-KŌN MATCHĀ · SINGAPORE"] } },
+          { $set: { headerText: "ACCOUNTING & OPERATIONS", updatedAt: now } }, { session: mongoSession },
+        );
+        await db.collection("invoiceTemplates").updateOne(
+          { systemKey: "starter-invoice-template", footerText: "Prepared with care by Kōn-Kōn Matchā." },
+          { $set: { footerText: "Prepared with care for your records.", updatedAt: now } }, { session: mongoSession },
+        );
+        await db.collection("receiptTemplates").updateOne(
+          { systemKey: "starter-receipt-template", headerText: { $in: ["KŌN-KŌN MATCHĀ", "KŌN-KŌN MATCHĀ · SINGAPORE"] } },
+          { $set: { headerText: "SALES COUNTER", updatedAt: now } }, { session: mongoSession },
+        );
+        await db.collection("receiptTemplates").updateOne(
+          { systemKey: "starter-receipt-template", footerText: "Prepared fresh at the Kōn-Kōn counter." },
+          { $set: { footerText: "Prepared at the counter.", updatedAt: now } }, { session: mongoSession },
+        );
         if (changedFields.length) {
           await db.collection("settingsHistory").insertOne({
             key: "business",

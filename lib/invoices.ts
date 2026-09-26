@@ -94,6 +94,7 @@ export function invoiceBusinessSnapshot(business: BusinessSettings) {
     organizationType: business.organizationType,
     franchiseBrand: business.franchiseBrand,
     franchiseCode: business.franchiseCode,
+    workspaceLogoDataUrl: business.workspaceLogoDataUrl,
   };
 }
 

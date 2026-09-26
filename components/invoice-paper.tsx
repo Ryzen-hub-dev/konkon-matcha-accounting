@@ -42,6 +42,7 @@ export type InvoicePaperDocument = {
     timeZone?: string;
     franchiseBrand?: string;
     franchiseCode?: string;
+    workspaceLogoDataUrl?: string;
   };
 };
 
@@ -65,6 +66,7 @@ export function InvoicePaper({ document, template = DEFAULT_INVOICE_TEMPLATE, co
   const money = new Intl.NumberFormat(locale, { style: "currency", currency });
   const shortDate = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", timeZone });
   const customBlocks = template.customBlocks || [];
+  const logoSrc = template.logoDataUrl || business.workspaceLogoDataUrl || "";
   const blockOrder = normaliseTemplateBlockOrder(template.blockOrder, DEFAULT_INVOICE_TEMPLATE.blockOrder, customBlocks);
   const hasCanvasLayout = Boolean(template.blockStyles?.length);
   const blockStyles = normaliseTemplateBlockStyles(template.blockStyles, blockOrder);
@@ -73,7 +75,7 @@ export function InvoicePaper({ document, template = DEFAULT_INVOICE_TEMPLATE, co
   const blocks: Record<string, ReactNode> = {
     HEADER: <header className="invoice-paper-header">
       <div className="invoice-paper-brand">
-        {template.logoDataUrl ? <img src={template.logoDataUrl} alt={`${business.businessName || "Business"} logo`} /> : <span className="invoice-paper-mark"><Leaf size={18} /></span>}
+        {logoSrc ? <img src={logoSrc} alt={`${business.businessName || "Business"} logo`} /> : <span className="invoice-paper-mark"><Leaf size={18} /></span>}
         <div><small>{template.headerText}</small><strong>{business.businessName || "Kōn-Kōn Matchā"}</strong>{business.franchiseCode ? <span>{business.franchiseBrand || "Franchise"} · {business.franchiseCode}</span> : null}</div>
       </div>
       <div className="invoice-paper-title"><small>{document.status || "DRAFT"}</small><h2>{template.documentTitle}</h2><span>{document.invoiceNo}</span></div>

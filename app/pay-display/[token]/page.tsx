@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { PaymentDisplay } from "@/components/payment-display";
+import { readPublicBranding } from "@/lib/public-branding";
 
 export const metadata: Metadata = {
   title: "Customer payment display",
@@ -9,5 +10,6 @@ export const metadata: Metadata = {
 
 export default async function CustomerPaymentDisplayPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  return <PaymentDisplay token={token} />;
+  const branding = await readPublicBranding();
+  return <PaymentDisplay token={token} branding={branding} />;
 }

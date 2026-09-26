@@ -80,7 +80,7 @@ export async function POST(request: Request) {
             address: business.address, countryCode: business.countryCode, timeZone: business.timeZone,
             locale: business.locale, currency: business.currency, taxName: business.taxName,
             organizationType: business.organizationType, franchiseBrand: business.franchiseBrand,
-            franchiseCode: business.franchiseCode,
+            franchiseCode: business.franchiseCode, workspaceLogoDataUrl: business.workspaceLogoDataUrl,
           },
           status: "DRAFT", createdBy: new ObjectId(auth.session.id), createdAt: now, updatedAt: now,
         };

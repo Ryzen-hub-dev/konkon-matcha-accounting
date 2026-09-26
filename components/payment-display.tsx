@@ -4,6 +4,7 @@ import QRCode from "qrcode";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Expand, LoaderCircle, LockKeyhole, Radio, ShieldCheck, Sprout, WifiOff } from "lucide-react";
 import { apiRequest } from "@/components/ui";
+import type { PublicBranding } from "@/lib/business-settings";
 
 type DisplayState = {
   phase: "WELCOME" | "PAYMENT" | "THANK_YOU";
@@ -21,7 +22,7 @@ const WELCOME_STATE: DisplayState = {
   phase: "WELCOME", stateVersion: 0, paymentName: "", provider: "", amount: 0, currency: "", qrPayload: "", amountLocked: false, expiresAt: "",
 };
 
-export function PaymentDisplay({ token }: { token: string }) {
+export function PaymentDisplay({ token, branding }: { token: string; branding: PublicBranding }) {
   const [display, setDisplay] = useState<DisplayState>(WELCOME_STATE);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [connection, setConnection] = useState<"CONNECTING" | "LIVE" | "ERROR">("CONNECTING");
@@ -81,7 +82,7 @@ export function PaymentDisplay({ token }: { token: string }) {
 
   return <main className={`payment-display-page phase-${display.phase.toLowerCase()}`}>
     <header className="payment-display-header">
-      <div><Sprout /><span><strong>KŌN-KŌN</strong><small>CUSTOMER PAYMENT DISPLAY</small></span></div>
+      <div>{branding.workspaceLogoDataUrl ? <img src={branding.workspaceLogoDataUrl} alt={`${branding.businessName} logo`} /> : <Sprout />}<span><strong>{branding.businessName}</strong><small>CUSTOMER PAYMENT DISPLAY</small></span></div>
       <p className={`payment-display-signal ${connection.toLowerCase()}`}><Radio />{connection === "LIVE" ? "REGISTER LIVE" : connection === "CONNECTING" ? "CONNECTING" : "RECONNECTING"}</p>
     </header>
 

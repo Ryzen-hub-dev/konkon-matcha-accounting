@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     const raw = typeof body?.code === "string" && body.code.length <= 512 ? body.code : "";
     const token = memberScanToken(raw);
     const binding = memberBindingScanToken(raw);
-    if (!token && !binding) return fail("Scan a Kōn-Kōn or bound NFC member card.", 422);
+    if (!token && !binding) return fail("Scan an issued or bound NFC member card.", 422);
     const db = await getDb();
     const allowOrphanLookup = Boolean(body.includeOrphan) && Boolean(binding) && hasPermission(auth.session.role, "members.write");
     const card = await db.collection("memberCards").findOne({ ...(token ? { tokenHash: memberTokenHash(token) } : { bindingHash: memberBindingHash(binding!.source, binding!.fingerprint) }), status: allowOrphanLookup ? { $in: ["ACTIVE", "SUSPENDED", "VOID"] } : "ACTIVE" });

@@ -53,6 +53,7 @@ export type ReceiptPaperDocument = {
     countryCode?: string;
     franchiseBrand?: string;
     franchiseCode?: string;
+    workspaceLogoDataUrl?: string;
   };
 };
 
@@ -79,13 +80,14 @@ export function ReceiptPaper({ document, template = DEFAULT_RECEIPT_TEMPLATE, co
   const style = { "--receipt-accent": template.accentColor } as CSSProperties;
   const isCash = document.paymentKind ? document.paymentKind === "CASH" : document.paymentMethod === "CASH";
   const customBlocks = template.customBlocks || [];
+  const logoSrc = template.logoDataUrl || business.workspaceLogoDataUrl || "";
   const blockOrder = normaliseTemplateBlockOrder(template.blockOrder, DEFAULT_RECEIPT_TEMPLATE.blockOrder, customBlocks);
   const hasCanvasLayout = Boolean(template.blockStyles?.length);
   const blockStyles = normaliseTemplateBlockStyles(template.blockStyles, blockOrder);
   const customByKey = new Map(customBlocks.map(block => [customBlockKey(block.id), block]));
   const blocks: Record<string, ReactNode> = {
     HEADER: <header className="receipt-paper-header">
-      {template.logoDataUrl ? <img src={template.logoDataUrl} alt={`${business.businessName || "Business"} logo`} /> : <span className="receipt-leaf-mark"><Leaf size={18} /></span>}
+      {logoSrc ? <img src={logoSrc} alt={`${business.businessName || "Business"} logo`} /> : <span className="receipt-leaf-mark"><Leaf size={18} /></span>}
       <strong>{business.businessName || "Kōn-Kōn Matchā"}</strong>
       {business.franchiseCode ? <span>{business.franchiseBrand || "Franchise"} · {business.franchiseCode}</span> : null}
       {template.headerText ? <small>{template.headerText}</small> : null}

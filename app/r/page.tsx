@@ -1,3 +1,8 @@
 import { PublicReceiptView } from "@/components/public-receipt-view";
+import { readPublicBranding } from "@/lib/public-branding";
 export const metadata = { title: "Your receipt", robots: { index: false, follow: false }, referrer: "no-referrer" as const };
-export default function ReceiptPage() { return <PublicReceiptView />; }
+export const dynamic = "force-dynamic";
+export default async function ReceiptPage() {
+  const branding = await readPublicBranding();
+  return <PublicReceiptView branding={branding} />;
+}

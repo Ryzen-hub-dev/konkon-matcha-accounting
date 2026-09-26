@@ -19,10 +19,12 @@ test("receipt QR authorization resists tampering, cross-sale reuse and revocatio
   assert.equal(validReceiptAccess(sale, token.slice(0, -1)), false);
   assert.equal(receiptScanToken(`https://shop.example/r#receipt=${token}`), token.toLowerCase());
 });
-test("public receipts exclude internal finances and personal identifiers, including nested lines", () => {
-  const sale = { _id: new ObjectId(), receiptNo: "TEST", total: 12, totalCost: 3, memberName: "PRIVATE", memberId: new ObjectId(), cashierName: "PRIVATE", paymentReference: "SECRET", saleNote: "PRIVATE", passwordHash: "SECRET", businessSnapshot: { businessName: "Store", currency: "MYR", privateKey: "SECRET" }, items: [{ name: "Tea", price: 12, cost: 3, quantity: 1, lineTotal: 12, lineCost: 3, privateKey: "SECRET" }] };
+test("public receipts expose frozen workspace branding but exclude internal finances and personal identifiers", () => {
+  const sale = { _id: new ObjectId(), receiptNo: "TEST", total: 12, totalCost: 3, memberName: "PRIVATE", memberId: new ObjectId(), cashierName: "PRIVATE", paymentReference: "SECRET", saleNote: "PRIVATE", passwordHash: "SECRET", businessSnapshot: { businessName: "Store", currency: "MYR", workspaceLogoDataUrl: "data:image/png;base64,QUJDRA==", privateKey: "SECRET" }, items: [{ name: "Tea", price: 12, cost: 3, quantity: 1, lineTotal: 12, lineCost: 3, privateKey: "SECRET" }] };
   const result = publicReceipt(sale);
   assert.equal(result.total, 12);
+  assert.equal(result.businessSnapshot.businessName, "Store");
+  assert.equal(result.businessSnapshot.workspaceLogoDataUrl, "data:image/png;base64,QUJDRA==");
   assert.equal(result.eInvoice.status, "NOT_SUBMITTED");
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE|SECRET|totalCost|lineCost|memberId|cashierName/);
 });

@@ -6,6 +6,7 @@ import type { IScannerControls } from "@zxing/browser";
 import { apiRequest } from "@/components/ui";
 import { NfcControl } from "./nfc-control";
 import type { ScannerPurpose } from "@/lib/scanner-routing";
+import type { PublicBranding } from "@/lib/business-settings";
 
 type Detector = { detect(source: CanvasImageSource): Promise<Array<{ rawValue: string }>> };
 type DetectorConstructor = {
@@ -15,7 +16,7 @@ type DetectorConstructor = {
 
 const REQUESTED_FORMATS = ["code_128", "code_39", "codabar", "data_matrix", "ean_13", "ean_8", "itf", "pdf417", "qr_code", "upc_a", "upc_e"];
 
-export function MobileScanner({ token }: { token: string }) {
+export function MobileScanner({ token, branding }: { token: string; branding: PublicBranding }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -180,7 +181,7 @@ export function MobileScanner({ token }: { token: string }) {
   }
 
   return <main className="mobile-scan-page">
-    <header className="mobile-scan-brand"><span><Sprout />KŌN-KŌN</span><small>24-HOUR SCANNER PASS</small></header>
+    <header className="mobile-scan-brand"><span>{branding.workspaceLogoDataUrl ? <img src={branding.workspaceLogoDataUrl} alt={`${branding.businessName} logo`} /> : <Sprout />}<b>{branding.businessName}</b></span><small>24-HOUR SCANNER PASS</small></header>
     <section className={`scanner-pass scanner-${tone}`}>
       <div className="scanner-pass-edge" aria-hidden="true" />
       <div className="scanner-pass-title"><span>REMOTE COUNTER · {paired ? "AUTO-CONNECTED" : "PAIRING"}</span><h1>Turn this phone<br />into a scanner.</h1><p>No account data is exposed. The pass sends barcode values and protected NFC fingerprints only; it expires or closes immediately when revoked.</p></div>

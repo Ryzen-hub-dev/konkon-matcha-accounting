@@ -501,7 +501,7 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
       </div>
 
       <div className={styles.heroContent} id="hero-content">
-        <p className={styles.introLabel}>Hey there, meet KONA,<br />Kōn-Kōn’s calm operations guide.</p>
+        <p className={styles.introLabel}>Hey there, meet KONA,<br />{businessName}&apos;s calm operations guide.</p>
         <p className={styles.eyebrow}><Sparkles /> MOVE LEFT OR RIGHT — KONA RESPONDS</p>
         <h1>A calmer way to<br />run the whole day.</h1>
         <p className={styles.typewriter}>

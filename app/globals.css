@@ -1060,8 +1060,12 @@ a {
   height: 39px;
 }
 .auth-brand strong {
+  max-width: min(42vw, 340px);
+  overflow: hidden;
   font-size: 13px;
   letter-spacing: 0.15em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .auth-brand small {
   color: var(--usucha);
@@ -2459,8 +2463,24 @@ a {
 }
 .pos-page-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
+.pos-workspace-brand {
+  min-height: 38px;
+  padding: 5px 11px 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--koicha);
+  background: var(--paper);
+}
+.pos-workspace-brand img,
+.pos-workspace-brand > svg { width: 27px; height: 27px; border-radius: 50%; object-fit: contain; }
+.pos-workspace-brand b { max-width: 150px; overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .cash-tender,
 .register-paper {
   margin: 0 17px 13px;
@@ -6381,12 +6401,15 @@ a {
   color: #fff;
 }
 .mobile-scan-brand > span {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 7px;
   font-family: var(--display);
   font-size: 17px;
 }
+.mobile-scan-brand > span img { width: 30px; height: 30px; border-radius: 50%; object-fit: contain; }
+.mobile-scan-brand > span b { max-width: min(56vw, 280px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-scan-brand small {
   color: var(--usucha);
   font-family: var(--utility);
@@ -6639,6 +6662,9 @@ a {
   font-family: var(--display);
   font-size: 25px;
 }
+.member-card-logo img { width: 42px; height: 42px; border-radius: 50%; object-fit: contain; }
+.member-exclusive-card header { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.member-exclusive-card header img { width: 31px; height: 31px; border-radius: 50%; object-fit: contain; }
 .printable-member-card header small {
   color: var(--usucha);
   font-family: var(--utility);
@@ -11724,6 +11750,7 @@ textarea:focus-visible {
   gap: 16px;
 }
 .payment-display-header > div {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -11731,13 +11758,22 @@ textarea:focus-visible {
 .payment-display-header > div > svg {
   width: 27px;
 }
+.payment-display-header > div > img { width: 36px; height: 36px; border-radius: 50%; object-fit: contain; }
+.public-brand-line { margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
+.public-brand-line img { width: 42px; height: 42px; border-radius: 50%; object-fit: contain; }
+.public-brand-line b { font-size: 13px; letter-spacing: .03em; }
 .payment-display-header > div span {
+  min-width: 0;
   display: grid;
 }
 .payment-display-header strong {
+  max-width: min(50vw, 420px);
+  overflow: hidden;
   font-family: var(--display);
   font-size: 16px;
   letter-spacing: 0.12em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .payment-display-header small {
   color: var(--midori);

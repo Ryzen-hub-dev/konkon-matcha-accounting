@@ -42,7 +42,7 @@ export function DashboardView() {
   if (error) return <div className="page"><EmptyState title="The ledger could not be reached" detail={error} /></div>;
   const value = data!;
   return <div className="page page-enter">
-    <PageHeader eyebrow="TODAY AT KŌN-KŌN" title={`${greeting}. Here’s the pour.`} description={`Sales, stock and member activity · ${profile.timeZone}.`} action={<Link href="/pos" className="button button-primary"><ShoppingBag size={17} />New sale<ArrowUpRight size={16} /></Link>} />
+    <PageHeader eyebrow={`TODAY AT ${profile.businessName.toUpperCase()}`} title={`${greeting}. Here’s the pour.`} description={`Sales, stock and member activity · ${profile.timeZone}.`} action={<Link href="/pos" className="button button-primary"><ShoppingBag size={17} />New sale<ArrowUpRight size={16} /></Link>} />
     <section className="ledger-hero">
       <div className="hero-copy"><span className="eyebrow light">TODAY&apos;S TEA ROOM</span><strong>{money.format(value.today.revenue)}</strong><p>from {value.today.transactions} posted {value.today.transactions === 1 ? "order" : "orders"}, net of refunds</p><div className="hero-rule"><span>Average cup</span><b>{money.format(value.today.averageSale)}</b></div></div>
       <div className="whisk-orbit" aria-hidden="true"><div className="orbit-ring ring-one" /><div className="orbit-ring ring-two" /><div className="orbit-core">抹<span>MATCHĀ</span></div></div>

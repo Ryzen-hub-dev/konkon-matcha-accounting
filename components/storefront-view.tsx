@@ -41,6 +41,7 @@ type StoreData = {
     phone: string;
     currency: string;
     locale: string;
+    logoDataUrl: string;
   };
   store: {
     enabled: boolean;
@@ -250,7 +251,7 @@ export function StorefrontView({ productId = "" }: { productId?: string }) {
     <main className={styles.storePage}>
       <header className={styles.storeHeader}>
         <Link href="/" className={styles.wordmark}>
-          <span>KK</span>
+          <span>{data?.business.logoDataUrl ? <img src={data.business.logoDataUrl} alt={`${data.business.name} logo`} /> : "KK"}</span>
           <strong>{data?.business.name || "Order desk"}</strong>
         </Link>
         <nav>

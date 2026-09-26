@@ -131,7 +131,7 @@ export function NfcControl({ onRead, onGenericRead, stopAfterGeneric = false, wr
             } catch { if (!abort.signal.aborted) setMessage("The card could not be sent. Tap it again to retry."); } finally { processing = false; }
             return;
           }
-          setMessage(`No Kōn-Kōn ${credentialKind === "STAFF" ? "staff lookup" : "member"} credential found.`);
+          setMessage(`No issued ${credentialKind === "STAFF" ? "staff lookup" : "member"} credential found.`);
         };
         reader.onreadingerror = () => { if (!abort.signal.aborted) setMessage("Card could not be read. Hold it steady and try again."); };
         await reader.scan({ signal: abort.signal });

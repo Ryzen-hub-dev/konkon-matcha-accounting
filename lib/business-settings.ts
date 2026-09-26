@@ -27,6 +27,8 @@ export type BusinessSettings = {
   updatedAt?: string | Date;
 };
 
+export type PublicBranding = Pick<BusinessSettings, "businessName" | "workspaceLogoDataUrl">;
+
 export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   key: "business",
   businessName: "Kōn-Kōn Matchā",

@@ -77,6 +77,7 @@ export async function GET(request: Request) {
         phone: business.phone,
         currency: business.currency,
         locale: business.locale,
+        logoDataUrl: business.workspaceLogoDataUrl,
       },
       store,
       products: products.map((product) => ({

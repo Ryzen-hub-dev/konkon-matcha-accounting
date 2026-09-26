@@ -295,6 +295,7 @@ export async function POST(request: Request) {
         organizationType: business.organizationType,
         franchiseBrand: business.franchiseBrand,
         franchiseCode: business.franchiseCode,
+        workspaceLogoDataUrl: business.workspaceLogoDataUrl,
       },
       status: "COMPLETED",
       createdBy: new ObjectId(auth.session.id),

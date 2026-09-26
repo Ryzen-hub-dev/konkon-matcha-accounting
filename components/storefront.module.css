@@ -48,8 +48,9 @@
   font-weight: 900;
   letter-spacing: -0.04em;
 }
+.wordmark span img { width: 100%; height: 100%; border-radius: inherit; object-fit: contain; }
 
-.wordmark strong { font-size: 13px; }
+.wordmark strong { max-width: min(28vw, 260px); overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .storeHeader nav { display: flex; align-items: center; gap: 28px; }
 .storeHeader nav a { color: var(--navy); font-size: 12px; font-weight: 700; text-decoration: none; }
 .storeHeader nav span { color: var(--muted); font-size: 10px; }

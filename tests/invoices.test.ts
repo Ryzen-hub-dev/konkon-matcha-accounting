@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertInvoiceDraftEditable, assertInvoiceStatusTransition, assertInvoiceVersion,
-  calculateInvoiceAmounts, invoiceDueDateSchema, invoiceEditSchema, invoiceInputSchema,
+  calculateInvoiceAmounts, invoiceBusinessSnapshot, invoiceDueDateSchema, invoiceEditSchema, invoiceInputSchema,
   invoiceStatusSchema, nextInvoiceUpdatedAt,
 } from "../lib/invoices";
+import { DEFAULT_BUSINESS_SETTINGS } from "../lib/business-settings";
 
 const id = "1234567890abcdef12345678";
 const version = "2026-09-12T10:15:30.123Z";
@@ -13,6 +14,16 @@ const fields = {
   customerReference: "", dueDate: "2026-10-01", notes: "", templateId: "",
   items: [{ description: "Matcha catering", quantity: 3, unitPrice: 1.234 }],
 };
+
+test("new invoices freeze the current workspace name and logo into their business snapshot", () => {
+  const snapshot = invoiceBusinessSnapshot({
+    ...DEFAULT_BUSINESS_SETTINGS,
+    businessName: "North Star Trading",
+    workspaceLogoDataUrl: "data:image/png;base64,QUJDRA==",
+  });
+  assert.equal(snapshot.businessName, "North Star Trading");
+  assert.equal(snapshot.workspaceLogoDataUrl, "data:image/png;base64,QUJDRA==");
+});
 
 test("invoice due dates reject impossible calendars instead of silently moving them", () => {
   for (const value of ["2026-02-30", "2026-02-29", "2026-04-31", "2026-13-01", "2026-00-12", "2026-02-30T00:00:00.000Z", "not a date", ""]) {
