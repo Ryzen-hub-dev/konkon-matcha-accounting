@@ -1,10 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  calculateMediaCalibration,
   frameDamping,
   incrementalScrubTarget,
   normalizePointer,
 } from "../lib/interactive-video";
+
+test("media calibration keeps modest overscan and corrects portrait focus", () => {
+  const desktop = calculateMediaCalibration(1920, 1080, 1440, 900, 1);
+  const portrait = calculateMediaCalibration(1920, 1080, 390, 844, 3);
+  assert.ok(desktop.scale > 1 && desktop.scale <= 1.022);
+  assert.ok(desktop.focusY >= 49.5 && desktop.focusY <= 50);
+  assert.ok(portrait.focusY < 50);
+  assert.equal(portrait.seekIntervalMs, 1000 / 24);
+});
 
 test("pointer normalization stays inside the video control range", () => {
   assert.deepEqual(normalizePointer(-20, 1200, 1000, 800), { x: 0, y: 1 });

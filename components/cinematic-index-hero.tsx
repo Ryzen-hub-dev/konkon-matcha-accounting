@@ -15,21 +15,31 @@ import { useEffect, useRef, useState } from "react";
 import styles from "@/app/index.module.css";
 import { KonaRadio } from "@/components/kona-radio";
 import {
+  calculateMediaCalibration,
   frameDamping,
   incrementalScrubTarget,
   normalizePointer,
 } from "@/lib/interactive-video";
 
-const KONA_VIDEO = "/media/mascot/kona-mainframe-scrub-v5.mp4";
-const KONA_POSTER = "/media/mascot/kona-mainframe-poster.jpg";
+const PRELOADER_VIDEO = "/media/intro/optical-preloader-h264.mp4";
+const KONA_VIDEO = "/media/mascot/kona-mainframe-master-v6.mp4";
+const KONA_POSTER = "/media/mascot/kona-mainframe-poster-v6.jpg";
 const INTRO_COPY =
   "KONA keeps every hand-off connected — from the first order and stock movement to the final receipt and close.";
 
 type IntroStage = "loading" | "docking" | "ready";
 
-function BrandMark() {
+type CinematicIndexHeroProps = {
+  businessName: string;
+  workspaceLogoDataUrl?: string;
+};
+
+function BrandMark({ businessName, logoSrc }: { businessName: string; logoSrc?: string }) {
+  if (logoSrc) {
+    return <img src={logoSrc} alt={`${businessName} logo`} />;
+  }
   return (
-    <svg viewBox="0 0 56 56" role="img" aria-label="Kōn-Kōn">
+    <svg viewBox="0 0 56 56" role="img" aria-label={businessName}>
       <path d="M28 2 50 15v26L28 54 6 41V15Z" fill="currentColor" />
       <path d="M18 16v24m0-11 19-13M18 29l19 11" fill="none" stroke="#f8f3e8" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
       <circle cx="39" cy="16" r="2.7" fill="#ef6b3f" />
@@ -41,8 +51,9 @@ function isInteractiveTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest("a, button, input, label"));
 }
 
-export function CinematicIndexHero() {
+export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: CinematicIndexHeroProps) {
   const rootRef = useRef<HTMLElement>(null);
+  const preloaderRef = useRef<HTMLVideoElement>(null);
   const poseRef = useRef<HTMLVideoElement>(null);
   const pointerRef = useRef({ x: 0.5, y: 0.5, clientX: 0, clientY: 0 });
   const previewingRef = useRef(false);
@@ -71,31 +82,50 @@ export function CinematicIndexHero() {
     let fallbackTimer = 0;
     let finished = false;
     const startedAt = performance.now();
+    const intro = preloaderRef.current;
     const finish = () => {
       if (finished) return;
       finished = true;
       cancelAnimationFrame(frame);
+      intro?.pause();
       setProgress(100);
       setStage("docking");
       dockingTimer = window.setTimeout(() => setStage("ready"), 1100);
     };
     const tick = (now: number) => {
-      const ratio = Math.min(1, (now - startedAt) / 2600);
+      const mediaRatio = intro && Number.isFinite(intro.duration) && intro.duration > 0
+        ? intro.currentTime / intro.duration
+        : 0;
+      const elapsedRatio = (now - startedAt) / 3000;
+      const ratio = Math.min(1, Math.max(mediaRatio, Math.min(elapsedRatio, 0.97)));
       setProgress(Math.round(ratio * 100));
       if (ratio < 1) frame = requestAnimationFrame(tick);
       else finish();
     };
+    const configurePlayback = () => {
+      if (!intro || !Number.isFinite(intro.duration) || intro.duration <= 0) return;
+      intro.currentTime = 0;
+      intro.playbackRate = Math.max(0.25, intro.duration / 3);
+      void intro.play().catch(() => undefined);
+    };
     const finishWhenHidden = () => {
       if (document.visibilityState !== "visible") finish();
     };
+    if (intro) {
+      if (intro.readyState >= HTMLMediaElement.HAVE_METADATA) configurePlayback();
+      else intro.addEventListener("loadedmetadata", configurePlayback, { once: true });
+      intro.addEventListener("ended", finish, { once: true });
+    }
     document.addEventListener("visibilitychange", finishWhenHidden);
     frame = requestAnimationFrame(tick);
-    fallbackTimer = window.setTimeout(finish, 2850);
+    fallbackTimer = window.setTimeout(finish, 3400);
     return () => {
       finished = true;
       cancelAnimationFrame(frame);
       clearTimeout(dockingTimer);
       clearTimeout(fallbackTimer);
+      intro?.removeEventListener("loadedmetadata", configurePlayback);
+      intro?.removeEventListener("ended", finish);
       document.removeEventListener("visibilitychange", finishWhenHidden);
     };
   }, []);
@@ -128,6 +158,8 @@ export function CinematicIndexHero() {
     let animationFrame = 0;
     let lastFrameAt = performance.now();
     let lastSeekAt = 0;
+    let seekStartedAt = 0;
+    let seekIntervalMs = 1000 / 30;
     let seekBusy = false;
     let pendingSeek: number | null = null;
     let activeTouchPointer: number | null = null;
@@ -136,12 +168,27 @@ export function CinematicIndexHero() {
     let parallaxX = 0;
     let parallaxY = 0;
 
+    const calibrateMedia = () => {
+      const calibration = calculateMediaCalibration(
+        video.videoWidth || 1920,
+        video.videoHeight || 1080,
+        window.innerWidth,
+        window.innerHeight,
+        window.devicePixelRatio || 1,
+      );
+      seekIntervalMs = calibration.seekIntervalMs;
+      root.style.setProperty("--media-scale", String(calibration.scale));
+      root.style.setProperty("--media-focus-x", `${calibration.focusX}%`);
+      root.style.setProperty("--media-focus-y", `${calibration.focusY}%`);
+    };
+
     const flushSeek = () => {
       if (seekBusy || pendingSeek === null || previewingRef.current) return;
       const next = pendingSeek;
       pendingSeek = null;
-      if (Math.abs(video.currentTime - next) < 1 / 120) return;
+      if (Math.abs(video.currentTime - next) < 1 / 48) return;
       seekBusy = true;
+      seekStartedAt = performance.now();
       try {
         video.currentTime = next;
       } catch {
@@ -159,6 +206,7 @@ export function CinematicIndexHero() {
       smoothTimeRef.current = middle;
       video.currentTime = middle;
       video.pause();
+      calibrateMedia();
     };
     const move = (event: PointerEvent) => {
       const isTouchScrub = activeTouchPointer === event.pointerId;
@@ -166,7 +214,10 @@ export function CinematicIndexHero() {
 
       const normalized = normalizePointer(event.clientX, event.clientY, innerWidth, innerHeight);
       pointerRef.current = { ...normalized, clientX: event.clientX, clientY: event.clientY };
-      if (finePointer.matches) root.dataset.cursor = "visible";
+      if (finePointer.matches) {
+        root.dataset.cursor = "visible";
+        root.dataset.cursorMode = isInteractiveTarget(event.target) ? "action" : "idle";
+      }
 
       const previousX = lastPointerXRef.current;
       lastPointerXRef.current = event.clientX;
@@ -196,6 +247,7 @@ export function CinematicIndexHero() {
       if (!finePointer.matches) return;
       lastPointerXRef.current = null;
       root.dataset.cursor = "hidden";
+      root.dataset.cursorMode = "idle";
     };
     const render = (now: number) => {
       const deltaMs = Math.min(64, now - lastFrameAt);
@@ -207,6 +259,11 @@ export function CinematicIndexHero() {
       root.style.setProperty("--cursor-x", `${cursorX.toFixed(2)}px`);
       root.style.setProperty("--cursor-y", `${cursorY.toFixed(2)}px`);
 
+      if (seekBusy && now - seekStartedAt > 220) {
+        seekBusy = false;
+        pendingSeek = smoothTimeRef.current;
+      }
+
       if (!previewingRef.current && durationRef.current > 0) {
         smoothTimeRef.current = frameDamping(
           smoothTimeRef.current,
@@ -215,7 +272,7 @@ export function CinematicIndexHero() {
           reducedMotion ? 24 : 15,
         );
         pendingSeek = smoothTimeRef.current;
-        if (!seekBusy && now - lastSeekAt >= 16) {
+        if (!seekBusy && now - lastSeekAt >= seekIntervalMs) {
           lastSeekAt = now;
           flushSeek();
         }
@@ -238,6 +295,7 @@ export function CinematicIndexHero() {
     root.addEventListener("pointerdown", startTouchScrub);
     root.addEventListener("pointerup", endTouchScrub);
     root.addEventListener("pointercancel", endTouchScrub);
+    window.addEventListener("resize", calibrateMedia, { passive: true });
     window.addEventListener("blur", resetMouse);
     document.documentElement.addEventListener("mouseleave", resetMouse);
     animationFrame = requestAnimationFrame(render);
@@ -250,6 +308,7 @@ export function CinematicIndexHero() {
       root.removeEventListener("pointerdown", startTouchScrub);
       root.removeEventListener("pointerup", endTouchScrub);
       root.removeEventListener("pointercancel", endTouchScrub);
+      window.removeEventListener("resize", calibrateMedia);
       window.removeEventListener("blur", resetMouse);
       document.documentElement.removeEventListener("mouseleave", resetMouse);
     };
@@ -307,6 +366,10 @@ export function CinematicIndexHero() {
   return (
     <section ref={rootRef} className={styles.experience} data-stage={stage} id="content">
       <div className={styles.preloader} aria-hidden={stage === "ready"}>
+        <video ref={preloaderRef} muted playsInline preload="auto" disablePictureInPicture tabIndex={-1}>
+          <source src={PRELOADER_VIDEO} type="video/mp4" />
+        </video>
+        <div className={styles.preloaderGrey} />
         <div className={styles.preloaderAura} />
         <p>KONA IS GETTING THE DAY READY</p>
         <div className={styles.preloaderCounter} aria-live="polite">
@@ -314,13 +377,13 @@ export function CinematicIndexHero() {
         </div>
       </div>
 
-      <Link href="/" className={styles.dockingLogo} aria-label="Kōn-Kōn home" tabIndex={stage === "ready" ? 0 : -1}>
-        <BrandMark />
+      <Link href="/" className={styles.dockingLogo} aria-label={`${businessName} home`} tabIndex={stage === "ready" ? 0 : -1}>
+        <BrandMark businessName={businessName} logoSrc={workspaceLogoDataUrl} />
       </Link>
 
       <nav className={styles.navbar} aria-label="Main navigation">
         <div className={styles.brandCopy}>
-          <strong>KŌN-KŌN</strong>
+          <strong>{businessName}</strong>
           <small>KONA HOUSE SYSTEM</small>
         </div>
         <div className={styles.desktopNav}>
@@ -411,7 +474,28 @@ export function CinematicIndexHero() {
 
       <div className={styles.motionNote}>MOVE LEFT · MOVE RIGHT <span>DRAG ON TOUCHSCREENS</span></div>
       <div className={styles.creatorMark}>CREATED BY <strong>RYZEN HUB DEV</strong></div>
-      <div className={styles.doritoCursor} aria-hidden="true"><span /><i /><b /></div>
+      <div className={styles.doritoCursor} aria-hidden="true">
+        <svg viewBox="0 0 46 43">
+          <defs>
+            <linearGradient id="kona-chip" x1="9" y1="4" x2="39" y2="39" gradientUnits="userSpaceOnUse">
+              <stop stopColor="#ffd17a" />
+              <stop offset=".42" stopColor="#f28b36" />
+              <stop offset="1" stopColor="#bb3c20" />
+            </linearGradient>
+            <filter id="kona-chip-shadow" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="0" dy="4" stdDeviation="3" floodColor="#5b2817" floodOpacity=".34" />
+            </filter>
+          </defs>
+          <path d="M22.7 2.8c1.5-.4 2.9.5 3.7 1.8l16.4 30.8c1.3 2.4-.9 5.2-3.5 4.5L4.9 31.2c-2.7-.7-3-4.4-.4-5.5L22.7 2.8Z" fill="url(#kona-chip)" filter="url(#kona-chip-shadow)" />
+          <path d="M7.8 27.4c8.2-1.1 13.6-8.9 16-19.4" fill="none" stroke="#ffe4a5" strokeOpacity=".74" strokeWidth="1.35" strokeLinecap="round" />
+          <path d="M10.5 29.2c10.1 1.5 19 4.1 27 7.1" fill="none" stroke="#9f3820" strokeOpacity=".72" strokeWidth="1.1" strokeLinecap="round" />
+          <path d="m14.5 24.6 4-2.2m8.5 7.1 3.5-2m-6.9-9.5 3-1.7" stroke="#7d281b" strokeWidth="1.45" strokeLinecap="round" />
+          <circle cx="19" cy="28.5" r="1.15" fill="#ffd96d" />
+          <circle cx="31.2" cy="33.2" r=".82" fill="#7d281b" />
+          <circle cx="22.7" cy="12.7" r=".75" fill="#fff0ad" />
+          <circle cx="25.1" cy="24.2" r=".62" fill="#6f281a" />
+        </svg>
+      </div>
     </section>
   );
 }
