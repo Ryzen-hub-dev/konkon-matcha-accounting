@@ -2,39 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   calculateMediaCalibration,
-  correctedPoseFrame,
-  coverDrawRect,
+  correctedPoseTime,
   frameDamping,
   incrementalScrubTarget,
-  nativeCanvasPixelRatio,
   normalizePointer,
 } from "../lib/interactive-video";
 
-test("absolute pointer poses always auto-correct back to the neutral frame", () => {
-  assert.equal(correctedPoseFrame(0, 240), 0);
-  assert.equal(correctedPoseFrame(0.5, 240), 119.5);
-  assert.equal(correctedPoseFrame(1, 240), 239);
-  assert.equal(correctedPoseFrame(3, 240), 239);
-});
-
-test("canvas cover geometry preserves the source aspect ratio and focal point", () => {
-  assert.deepEqual(coverDrawRect(1280, 720, 1280, 720), {
-    x: 0,
-    y: 0,
-    width: 1280,
-    height: 720,
-  });
-  const portrait = coverDrawRect(1280, 720, 390, 844);
-  assert.equal(portrait.height, 844);
-  assert.ok(portrait.x < 0);
-  assert.equal(portrait.y, 0);
-});
-
-test("canvas resolution never exceeds the detail available in the source frames", () => {
-  assert.equal(nativeCanvasPixelRatio(1280, 720, 1280, 720, 2), 1);
-  assert.equal(nativeCanvasPixelRatio(1280, 720, 640, 360, 3), 2);
-  assert.equal(nativeCanvasPixelRatio(1280, 720, 1920, 1080, 2), 2 / 3);
-  assert.ok(Math.abs(nativeCanvasPixelRatio(1280, 720, 390, 844, 3) - 720 / 844) < 1e-12);
+test("KONA pose timing follows the pointer in the source video's corrected direction", () => {
+  const left = correctedPoseTime(0, 10);
+  const middle = correctedPoseTime(0.5, 10);
+  const right = correctedPoseTime(1, 10);
+  assert.equal(left, 9.9);
+  assert.equal(middle, 5);
+  assert.equal(right, 0.1);
+  assert.ok(left > middle && middle > right);
+  assert.equal(correctedPoseTime(0.5, Number.NaN), 0);
 });
 
 test("media calibration keeps modest overscan and corrects portrait focus", () => {

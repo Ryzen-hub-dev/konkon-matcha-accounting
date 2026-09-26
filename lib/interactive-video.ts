@@ -5,8 +5,6 @@ export type MediaCalibration = {
   focusY: number;
   seekIntervalMs: number;
 };
-export type DrawRect = { x: number; y: number; width: number; height: number };
-
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
 export function normalizePointer(
@@ -71,49 +69,10 @@ export function calculateMediaCalibration(
   };
 }
 
-export function correctedPoseFrame(pointerX: number, frameCount: number) {
-  const lastFrame = Math.max(0, Math.floor(frameCount) - 1);
+export function correctedPoseTime(pointerX: number, duration: number) {
+  if (!Number.isFinite(duration) || duration <= 0) return 0;
   const x = clamp01(pointerX);
   const smooth = x * x * (3 - 2 * x);
-  return smooth * lastFrame;
-}
-
-export function coverDrawRect(
-  sourceWidth: number,
-  sourceHeight: number,
-  targetWidth: number,
-  targetHeight: number,
-  focusX = 50,
-  focusY = 50,
-): DrawRect {
-  const safeSourceWidth = Math.max(1, sourceWidth);
-  const safeSourceHeight = Math.max(1, sourceHeight);
-  const safeTargetWidth = Math.max(1, targetWidth);
-  const safeTargetHeight = Math.max(1, targetHeight);
-  const scale = Math.max(
-    safeTargetWidth / safeSourceWidth,
-    safeTargetHeight / safeSourceHeight,
-  );
-  const width = safeSourceWidth * scale;
-  const height = safeSourceHeight * scale;
-  return {
-    x: (safeTargetWidth - width) * clamp01(focusX / 100),
-    y: (safeTargetHeight - height) * clamp01(focusY / 100),
-    width,
-    height,
-  };
-}
-
-export function nativeCanvasPixelRatio(
-  sourceWidth: number,
-  sourceHeight: number,
-  targetWidth: number,
-  targetHeight: number,
-  devicePixelRatio: number,
-) {
-  const coverScale = Math.max(
-    Math.max(1, targetWidth) / Math.max(1, sourceWidth),
-    Math.max(1, targetHeight) / Math.max(1, sourceHeight),
-  );
-  return Math.max(0.01, Math.min(2, Math.max(1, devicePixelRatio), 1 / coverScale));
+  const inset = Math.min(duration * 0.012, 0.1);
+  return inset + (1 - smooth) * (duration - inset * 2);
 }
