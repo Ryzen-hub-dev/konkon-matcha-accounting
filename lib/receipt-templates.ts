@@ -1,8 +1,10 @@
 import type { ClientSession, Db } from "mongodb";
 import { z } from "zod";
+import { templateCustomBlockSchema, validateTemplateBlocks } from "@/lib/document-template-blocks";
 
 export const RECEIPT_PAPER_WIDTHS = ["58MM", "80MM"] as const;
 export const RECEIPT_DENSITIES = ["COMPACT", "COMFORTABLE"] as const;
+export const RECEIPT_TEMPLATE_BLOCKS = ["HEADER", "DOCUMENT", "SERVICE", "ITEMS", "TOTALS", "PAYMENT", "LOYALTY", "FOOTER"] as const;
 
 const logoDataUrlSchema = z.string().max(350_000).refine(
   (value) => value === "" || /^data:image\/(png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(value),
@@ -29,7 +31,12 @@ export const receiptTemplateInputSchema = z.object({
   showMember: z.boolean().default(true),
   showPaymentDetails: z.boolean().default(true),
   showPoints: z.boolean().default(true),
+  blockOrder: z.array(z.string().max(80)).max(20).default([...RECEIPT_TEMPLATE_BLOCKS]),
+  customBlocks: z.array(templateCustomBlockSchema).max(6).default([]),
   isDefault: z.boolean().default(false),
+}).superRefine((value, context) => {
+  const issue = validateTemplateBlocks(value.blockOrder, value.customBlocks, RECEIPT_TEMPLATE_BLOCKS);
+  if (issue) context.addIssue({ code: "custom", path: ["blockOrder"], message: issue });
 });
 
 export type ReceiptTemplateInput = z.infer<typeof receiptTemplateInputSchema>;
@@ -59,6 +66,8 @@ export const DEFAULT_RECEIPT_TEMPLATE: ReceiptTemplateInput = {
   showMember: true,
   showPaymentDetails: true,
   showPoints: true,
+  blockOrder: [...RECEIPT_TEMPLATE_BLOCKS],
+  customBlocks: [],
   isDefault: true,
 };
 

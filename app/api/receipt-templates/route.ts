@@ -9,7 +9,7 @@ import { normaliseBusinessSettings } from "@/lib/business-settings";
 
 export const runtime = "nodejs";
 
-const updateSchema = receiptTemplateInputSchema.extend({ id: z.string().length(24) });
+const updateSchema = receiptTemplateInputSchema.safeExtend({ id: z.string().length(24) });
 
 async function readBody(request: Request) {
   try {

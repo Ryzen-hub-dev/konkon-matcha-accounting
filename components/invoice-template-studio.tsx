@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { Download, FileJson, ImagePlus, Palette, Plus, Save, Upload, X } from "lucide-react";
 import { InvoicePaper } from "@/components/invoice-paper";
+import { DocumentLayoutEditor } from "@/components/document-layout-editor";
 import { useBusiness } from "@/components/business-context";
 import { invoicePreview } from "@/lib/document-preview";
 import { apiRequest, Modal, Notice, useNotice } from "@/components/ui";
@@ -35,6 +36,8 @@ function draftFrom(template?: InvoiceTemplateRecord): TemplateDraft {
     showRegistrationNo: template.showRegistrationNo,
     showTaxBreakdown: template.showTaxBreakdown,
     showNotes: template.showNotes,
+    blockOrder: template.blockOrder?.length ? template.blockOrder : [...DEFAULT_INVOICE_TEMPLATE.blockOrder],
+    customBlocks: template.customBlocks || [],
     isDefault: template.isDefault,
   } : { ...DEFAULT_INVOICE_TEMPLATE, name: "New invoice template", isDefault: false };
 }
@@ -92,7 +95,7 @@ export function InvoiceTemplateStudio({ open, templates, initialTemplateId, onCl
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    if (file.size > 100_000) return show("Template JSON must be under 100 KB.", "error");
+    if (file.size > 750_000) return show("Template JSON must be under 750 KB.", "error");
     try {
       const raw = JSON.parse(await file.text()) as Partial<InvoiceTemplateInput>;
       setDraft({ ...DEFAULT_INVOICE_TEMPLATE, ...raw, _id: undefined, name: typeof raw.name === "string" ? raw.name : "Imported invoice template", isDefault: false });
@@ -143,6 +146,19 @@ export function InvoiceTemplateStudio({ open, templates, initialTemplateId, onCl
           <section><span className="eyebrow">IDENTITY</span><div className="form-grid two"><label className="field"><span>Template name</span><input value={draft.name} onChange={(event) => update("name", event.target.value)} required /></label><label className="field"><span>Document title</span><input value={draft.documentTitle} onChange={(event) => update("documentTitle", event.target.value)} required /></label></div><label className="field"><span>Header line</span><input value={draft.headerText} onChange={(event) => update("headerText", event.target.value)} placeholder="Business name or collection" /></label></section>
           <section><span className="eyebrow">PAPER</span><div className="form-grid two"><label className="field"><span>Layout</span><select value={draft.layout} onChange={(event) => update("layout", event.target.value as InvoiceTemplateInput["layout"])}>{INVOICE_LAYOUTS.map((layout) => <option key={layout}>{layout}</option>)}</select></label><label className="field"><span>Paper tone</span><select value={draft.paperTone} onChange={(event) => update("paperTone", event.target.value as InvoiceTemplateInput["paperTone"])}>{INVOICE_PAPER_TONES.map((tone) => <option key={tone}>{tone}</option>)}</select></label></div><label className="field colour-field"><span>Accent colour</span><div><input type="color" value={draft.accentColor} onChange={(event) => update("accentColor", event.target.value)} /><input value={draft.accentColor} pattern="#[0-9A-Fa-f]{6}" onChange={(event) => update("accentColor", event.target.value)} /></div></label><input ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={uploadLogo} /><div className="logo-upload"><button type="button" onClick={() => logoRef.current?.click()}><ImagePlus size={17} />{draft.logoDataUrl ? "Replace logo" : "Upload logo"}</button>{draft.logoDataUrl ? <button type="button" className="remove-logo" onClick={() => update("logoDataUrl", "")}><X size={14} />Remove</button> : <span>PNG, JPEG or WebP · 250 KB max</span>}</div></section>
           <section><span className="eyebrow">TERMS</span><label className="field"><span>Payment instructions</span><textarea rows={3} value={draft.paymentInstructions} onChange={(event) => update("paymentInstructions", event.target.value)} /></label><div className="form-grid two"><label className="field"><span>Default due days</span><input type="number" min="0" max="365" value={draft.termsDays} onChange={(event) => update("termsDays", Number(event.target.value))} /></label><label className="field"><span>Footer message</span><input value={draft.footerText} onChange={(event) => update("footerText", event.target.value)} /></label></div></section>
+          <DocumentLayoutEditor
+            builtIns={[
+              { key: "HEADER", label: "Brand & invoice identity", detail: "Logo, document title and invoice number" },
+              { key: "CUSTOMER", label: "Customer & dates", detail: "Billing party, issue date and due date" },
+              { key: "ITEMS", label: "Invoice lines", detail: "Descriptions, quantities, rates and amounts" },
+              { key: "TOTALS", label: "Notes & totals", detail: "Payment wording, tax and grand total" },
+              { key: "FOOTER", label: "Business footer", detail: "Contact, registration and closing line" },
+            ]}
+            order={draft.blockOrder}
+            customBlocks={draft.customBlocks}
+            onChange={(blockOrder, customBlocks) => setDraft(current => ({ ...current, blockOrder, customBlocks }))}
+            onError={message => show(message, "error")}
+          />
           <section className="template-toggles"><label className="check-row"><input type="checkbox" checked={draft.showTaxBreakdown} onChange={(event) => update("showTaxBreakdown", event.target.checked)} /><span><strong>Show tax breakdown</strong><small>Display tax as a separate total.</small></span></label><label className="check-row"><input type="checkbox" checked={draft.showNotes} onChange={(event) => update("showNotes", event.target.checked)} /><span><strong>Show invoice notes</strong><small>Include customer-facing notes.</small></span></label><label className="check-row"><input type="checkbox" checked={draft.showBusinessAddress} onChange={(event) => update("showBusinessAddress", event.target.checked)} /><span><strong>Show business address</strong><small>Off by default. Enable only when a statutory country pack requires it.</small></span></label><label className="check-row"><input type="checkbox" checked={draft.showCustomerAddress} onChange={(event) => update("showCustomerAddress", event.target.checked)} /><span><strong>Show customer address</strong><small>Off by default to protect customer privacy.</small></span></label><label className="check-row"><input type="checkbox" checked={draft.showRegistrationNo} onChange={(event) => update("showRegistrationNo", event.target.checked)} /><span><strong>Show registration number</strong><small>Use the workspace business profile.</small></span></label><label className="check-row"><input type="checkbox" checked={draft.isDefault} onChange={(event) => update("isDefault", event.target.checked)} /><span><strong>Default template</strong><small>Preselect this for new invoices.</small></span></label></section>
         </div>
         <footer><button type="button" className="button button-secondary" onClick={onClose}>Close</button><button className="button button-primary" disabled={busy}><Save size={16} />{busy ? "Saving…" : draft._id ? "Save changes" : "Add template"}</button></footer>

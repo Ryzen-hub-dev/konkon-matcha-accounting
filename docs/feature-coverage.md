@@ -16,7 +16,8 @@ This document prevents planned AutoCount-style modules from being confused with 
 - Thirty-day location demand forecasting for FEFO lots, at-risk freshness queues, advisory transfer suggestions, and controlled expiry/damage/recall disposal with inventory write-off journals
 - POS, tenders, trusted coupons/manual discounts, tax calculation and transactional posting
 - Public online catalogue and order-request intake with address/contact validation, rate limiting, controlled-goods questions, review/accept/reject, counter-style quantity and discount offers, purpose-hashed private customer links, bounded two-way chat, Google SMTP notifications, encrypted private-GitHub image/PDF sharing, invoice/verified-receipt linking, custom fulfilment steps and manual/API-reference shipment tracking
-- Owner-selectable Matcha, Professional and Focus workspace themes, plus a neutral professional public index independent of the matcha workspace theme
+- Owner-selectable workspace logo plus Matcha, Professional and Focus workspace themes, and a KONA-led cinematic parallax public index
+- Live invoice and receipt component editor with drag/reorder controls, built-in financial blocks, safe uploaded image/text components and portable JSON component import; arbitrary HTML and JavaScript are not accepted
 - Custom invoice and receipt templates, print/reprint, refund and historical snapshots
 - Invoice register search/status filters, copy-as-new-draft, idempotent draft creation, unpaid-draft editing with optimistic version checks, explicit payment/void confirmation and immutable issued/paid documents
 - Controlled recurring invoices with active-customer linkage, weekly/monthly/quarterly/yearly cadence, month-end-safe dates, optional end dates, templates and dimensions, idempotent occurrence generation, visible failure state, pause/resume/end controls and daily Vercel-compatible draft runs

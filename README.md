@@ -1,6 +1,6 @@
 # Kōn-Kōn Matchā Ledger
 
-A connected commerce, accounting, inventory, membership and point-of-sale workspace built for Kōn-Kōn Matchā. The public index uses a neutral professional product identity; signed-in Owners can choose Matcha, Professional or Focus workspace themes. The production application is a Next.js App Router project backed by MongoDB Atlas and designed for Vercel serverless deployment.
+A connected commerce, accounting, inventory, membership and point-of-sale workspace built for Kōn-Kōn Matchā. The public index uses a KONA-led cinematic parallax journey; signed-in Owners can upload a workspace logo and choose Matcha, Professional or Focus workspace themes. The production application is a Next.js App Router project backed by MongoDB Atlas and designed for Vercel serverless deployment.
 
 **Author:** [Ryzen Hub Dev](https://github.com/Ryzen-hub-dev) · **Built for:** Kōn-Kōn Matchā · **Version:** 1.0.0
 
@@ -50,7 +50,7 @@ User training: [完整中文使用手册](docs/user-manual-zh.md) · [Complete E
 - Manager-only manual discounts; Cashiers cannot submit arbitrary discount values.
 - Percentage and fixed coupons with start/end time, minimum spend, total-use limit and per-member limit.
 - Transactional stock deductions, member points, coupon redemption and double-entry posting.
-- Custom 58mm/80mm receipt templates, safe raster logos, privacy-first address-hidden defaults, print/reprint and refund workflow.
+- Custom 58mm/80mm receipt and invoice templates with a live drag-to-reorder component canvas, safe text/image component imports, safe raster logos, privacy-first address-hidden defaults, print/reprint and refund workflow. Required financial blocks cannot be removed and external JavaScript is never executed.
 - Historical receipt/template/business snapshots so reprints do not change later.
 - Receipt-number/QR lookup, signed customer receipt links, PDF printing, CSV and accounting JSON export; customer views show current refund totals without exposing member identity, staff names, costs or private payment references.
 - Click a cart quantity to enter an integer directly; both cart and checkout enforce available stock and the 999-unit line limit.

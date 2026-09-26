@@ -27,16 +27,27 @@
 .headerActions { justify-self: end; display: flex; align-items: center; gap: 18px; }
 .headerActions .primaryLink { min-height: 42px; padding: 0 17px; border: 1px solid rgba(255,255,255,.35); border-radius: 999px; display: inline-flex; align-items: center; gap: 8px; color: var(--forest); background: var(--rice); }
 .header a:focus-visible, .heroActions a:focus-visible, .workflow a:focus-visible, .author > a:focus-visible { outline: 3px solid var(--matcha-bright); outline-offset: 4px; }
-.cinema { --cinema-progress: 0; --cinema-x: 0deg; --cinema-y: 0deg; --kona-gaze-x: 0px; --kona-gaze-y: 0px; position: relative; height: 280svh; color: #fff; background: var(--forest); }
+.cinema { --cinema-progress: 0; --cinema-percent: 0%; --cinema-x: 0deg; --cinema-y: 0deg; --portal-top: 82px; --portal-right: 2vw; --portal-bottom: 28px; --portal-left: 37vw; --portal-radius: 92px; --portal-scale: .985; --kona-gaze-opacity: 1; --kona-gaze-x: 0px; --kona-gaze-y: 0px; position: relative; height: 280svh; color: #fff; background: var(--forest); }
+.cinemaPreloader { position: fixed; inset: 0; z-index: 90; overflow: hidden; color: #fff; background: #04100a; opacity: 1; visibility: visible; transition: opacity .8s cubic-bezier(.22,1,.36,1), visibility 0s linear .8s; }
+.cinema[data-intro-complete="true"] .cinemaPreloader { opacity: 0; visibility: hidden; pointer-events: none; }
+.cinemaPreloader video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center; filter: brightness(.72) saturate(.72) sepia(.12) contrast(1.08); transform: scale(1.025); }
+.preloaderShade { position: absolute; inset: 0; background: radial-gradient(circle at 54% 37%, transparent 0 17%, rgba(2,12,7,.18) 45%, rgba(1,8,5,.78) 100%), linear-gradient(180deg, rgba(1,10,6,.14), rgba(1,10,6,.72)); }
+.preloaderMark { position: absolute; top: 50%; left: 50%; width: 90px; aspect-ratio: 1; border: 1px solid rgba(218,246,159,.65); border-radius: 50%; display: grid; grid-template-columns: auto auto; place-content: center; align-items: center; gap: 7px; color: #d6f38f; background: rgba(3,17,10,.58); backdrop-filter: blur(15px); transform: translate(-50%,-50%); box-shadow: 0 0 70px rgba(182,226,98,.13); }
+.preloaderMark b { font: 500 34px/1 "Bodoni 72", Didot, serif; }
+.preloaderMark span { font-size: 6px; font-weight: 900; line-height: 1.4; letter-spacing: .14em; }
+.preloaderCount { position: absolute; right: clamp(20px,5vw,78px); bottom: clamp(23px,5vh,54px); display: flex; align-items: flex-end; gap: 4px; font-variant-numeric: tabular-nums; }
+.preloaderCount strong { min-width: 2.5ch; font-size: clamp(50px,7vw,96px); font-weight: 250; line-height: .8; letter-spacing: -.07em; text-align: right; }
+.preloaderCount span { padding-bottom: 2px; color: var(--matcha-bright); font-size: 17px; }
 .cinemaSticky { position: sticky; top: 0; height: 100svh; min-height: 640px; overflow: hidden; isolation: isolate; }
 .cinemaVisual { position: absolute; inset: 0; z-index: -3; overflow: hidden; background: #06150e; perspective: 1200px; }
 .cinemaVisual::before { content: ""; position: absolute; inset: -7%; z-index: 0; opacity: .32; background: url("/media/mascot/kona-base-v1.png") 72% 42% / cover no-repeat; filter: blur(34px) saturate(.85); transform: scale(1.08); }
 .cinemaVisual::after { content: ""; position: absolute; inset: 0; z-index: 3; pointer-events: none; opacity: .3; background-image: linear-gradient(rgba(204,241,139,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(204,241,139,.07) 1px, transparent 1px); background-size: 64px 64px; mask-image: linear-gradient(90deg, transparent 38%, #000 72%, transparent); }
-.cinemaStage { position: absolute; inset: 82px 2vw 28px 37vw; z-index: 2; display: grid; place-items: center; transform: perspective(1200px) rotateX(var(--cinema-y)) rotateY(var(--cinema-x)); transform-style: preserve-3d; will-change: transform; }
-.cinemaStage video { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; object-position: right center; pointer-events: none; filter: saturate(.96) contrast(1.025); transform: translateZ(22px); -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.72) 12%, #000 31% 100%); mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.72) 12%, #000 31% 100%); }
-.konaGaze { position: absolute; z-index: 5; left: 69.1%; top: 14.4%; width: clamp(20px,1.85vw,34px); height: clamp(7px,.72vw,13px); display: flex; justify-content: space-between; pointer-events: none; transform: translate(-50%,-50%) translateZ(48px); }
+.cinemaStage { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; overflow: hidden; clip-path: inset(var(--portal-top) var(--portal-right) var(--portal-bottom) var(--portal-left) round var(--portal-radius)); transform: perspective(1200px) rotateX(var(--cinema-y)) rotateY(var(--cinema-x)) scale(var(--portal-scale)); transform-style: preserve-3d; will-change: transform,clip-path; }
+.cinemaStage::after { content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none; background: linear-gradient(90deg, rgba(2,18,10,.3), transparent 46%, rgba(5,24,14,.08)), linear-gradient(180deg, rgba(10,36,22,.03), rgba(2,17,10,.34)); mix-blend-mode: multiply; }
+.cinemaStage video { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; object-position: center; pointer-events: none; filter: brightness(.66) saturate(.76) sepia(.12) contrast(1.09); transform: translateZ(22px) scale(1.015); }
+.konaGaze { position: absolute; z-index: 5; left: 53.4%; top: 11.4%; width: clamp(20px,1.58vw,30px); height: clamp(7px,.64vw,12px); display: flex; justify-content: space-between; pointer-events: none; transform: translate(-50%,-50%) translateZ(48px); opacity: var(--kona-gaze-opacity); }
 .konaGaze i { width: clamp(3px,.29vw,5px); aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 66% 33%, #fff 0 18%, #d6a742 22% 48%, #36230e 54% 100%); box-shadow: 0 0 5px rgba(225,186,88,.5); transform: translate3d(var(--kona-gaze-x),var(--kona-gaze-y),0); will-change: transform; }
-.konaHotspot { position: absolute; z-index: 4; top: 2%; right: 0; width: 48%; height: 96%; padding: 0; border: 0; border-radius: 44% 42% 30% 34%; color: inherit; background: transparent; cursor: pointer; }
+.konaHotspot { position: absolute; z-index: 4; top: 1%; left: 39%; width: 29%; height: 96%; padding: 0; border: 0; border-radius: 44% 42% 30% 34%; color: inherit; background: transparent; cursor: pointer; }
 .konaHotspot::after { content: ""; position: absolute; inset: 5% 11% 4% 7%; border: 1px solid rgba(210,241,142,0); border-radius: inherit; opacity: 0; transform: scale(.97); transition: opacity .35s ease, border-color .35s ease, transform .5s cubic-bezier(.16,1,.3,1), box-shadow .35s ease; }
 .cinema[data-kona-hover="true"] .konaHotspot::after, .cinema[data-kona-engaged="true"] .konaHotspot::after, .konaHotspot:focus-visible::after { border-color: rgba(210,241,142,.42); opacity: 1; transform: scale(1); box-shadow: inset 0 0 60px rgba(210,241,142,.04), 0 0 50px rgba(174,225,98,.08); }
 .konaHotspot:focus-visible { outline: 0; }
@@ -58,7 +69,7 @@
 .konaSticker strong, .konaSticker span { position: relative; z-index: 1; }
 .konaSticker strong { font-size: 24px; line-height: 1; letter-spacing: -.055em; }
 .konaSticker span { margin-top: 7px; font-size: 7px; font-weight: 900; line-height: 1.25; letter-spacing: .13em; text-align: center; }
-.cinemaShade { position: absolute; inset: 0; z-index: -2; pointer-events: none; background: linear-gradient(90deg, rgba(2,17,10,.96) 0%, rgba(4,20,13,.8) 34%, rgba(3,18,11,.17) 62%, rgba(3,18,11,.05) 100%), linear-gradient(180deg, rgba(0,0,0,.18), transparent 38%, rgba(0,0,0,.58)); }
+.cinemaShade { position: absolute; inset: 0; z-index: -2; pointer-events: none; background: linear-gradient(90deg, rgba(2,17,10,.97) 0%, rgba(4,20,13,.86) 34%, rgba(3,18,11,.26) 62%, rgba(3,18,11,.09) 100%), linear-gradient(180deg, rgba(0,0,0,.21), transparent 38%, rgba(0,0,0,.62)); }
 .cinemaShade::after { content: ""; position: absolute; inset: 0; opacity: .11; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.45'/%3E%3C/svg%3E"); mix-blend-mode: soft-light; }
 .cinemaCopy { position: absolute; z-index: 2; left: clamp(22px, 7vw, 112px); top: 50%; width: min(670px, 48vw); transform: translateY(-44%); }
 .eyebrow { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--matcha-bright); font-size: 9px; font-weight: 900; letter-spacing: .2em; text-transform: uppercase; }
@@ -77,7 +88,7 @@
 .scrollCue { position: absolute; right: clamp(22px, 5vw, 76px); bottom: 36px; display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,.62); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
 .scrollCue svg { width: 15px; animation: floatDown 1.7s ease-in-out infinite; }
 .cinemaProgress { position: absolute; left: clamp(22px, 7vw, 112px); bottom: 35px; width: min(260px, 34vw); height: 1px; background: rgba(255,255,255,.25); }
-.cinemaProgress i { display: block; width: calc(var(--cinema-progress) * 100%); height: 100%; background: var(--matcha-bright); }
+.cinemaProgress i { display: block; width: var(--cinema-percent); height: 100%; background: var(--matcha-bright); }
 @keyframes floatDown { 50% { transform: translateY(6px); } }
 @keyframes konaOrbit { to { transform: rotate(360deg); } }
 @keyframes konaSatellite { to { transform: translate3d(16px,-13px,34px) scale(1.35); opacity: .55; } }
@@ -171,11 +182,11 @@
   .cinemaSticky { min-height: 580px; }
   .cinemaVisual::before { inset: -4%; background-position: center top; filter: blur(26px) saturate(.8); }
   .cinemaVisual::after { background-size: 38px 38px; mask-image: linear-gradient(180deg,#000,transparent 52%); }
-  .cinemaStage { top: 68px; right: 0; bottom: auto; left: 0; height: clamp(220px,38svh,330px); transform: none; }
-  .cinemaStage video { object-fit: contain; object-position: center top; transform: none; -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%); mask-image: linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%); }
+  .cinemaStage { inset: 0; height: auto; transform: scale(var(--portal-scale)); }
+  .cinemaStage video { object-fit: cover; object-position: center; transform: scale(1.015); }
   .konaGaze { left: 76.6%; top: 11.1%; width: 15px; height: 6px; }
   .konaGaze i { width: 2.5px; }
-  .konaHotspot { top: 0; right: 4%; width: 40%; height: 100%; }
+  .konaHotspot { top: 0; right: 4%; left: auto; width: 40%; height: 100%; }
   .konaResponse { right: 14px; bottom: 14px; max-width: min(230px,62vw); padding: 10px 12px; font-size: 9px; }
   .cinemaDepth { top: 4%; right: -20%; width: 135vw; opacity: .46; }
   .konaSticker { right: 16px; bottom: 4px; width: 86px; }
@@ -218,6 +229,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .cinema { height: 100svh; }
+  .cinemaStage { clip-path: none !important; }
   .cinemaStage, .cinemaStage video { transform: none !important; }
   .konaGaze i { transform: none !important; }
   .konaHotspot::after, .konaResponse { transition: none; }

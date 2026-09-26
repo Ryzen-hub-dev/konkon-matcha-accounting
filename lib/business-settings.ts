@@ -23,6 +23,7 @@ export type BusinessSettings = {
   franchiseCode: string;
   parentOrganizationCode: string;
   workspaceTheme: "MATCHA" | "PROFESSIONAL" | "FOCUS";
+  workspaceLogoDataUrl: string;
   updatedAt?: string | Date;
 };
 
@@ -49,6 +50,7 @@ export const DEFAULT_BUSINESS_SETTINGS: BusinessSettings = {
   franchiseCode: "",
   parentOrganizationCode: "",
   workspaceTheme: "MATCHA",
+  workspaceLogoDataUrl: "",
 };
 
 export function normaliseBusinessSettings(value?: Record<string, unknown> | null): BusinessSettings {
@@ -88,5 +90,8 @@ export function normaliseBusinessSettings(value?: Record<string, unknown> | null
     )
       ? (String(value?.workspaceTheme) as BusinessSettings["workspaceTheme"])
       : "MATCHA",
+    workspaceLogoDataUrl: /^data:image\/(png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(
+      String(value?.workspaceLogoDataUrl || ""),
+    ) ? String(value?.workspaceLogoDataUrl) : "",
   };
 }

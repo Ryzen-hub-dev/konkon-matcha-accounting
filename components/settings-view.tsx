@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle, BellRing, Building2, Clock3, Globe2, History, KeyRound,
-  DatabaseZap, ExternalLink, FileCheck2, Network, Palette, Power, Save, ShieldCheck, Truck, UserRoundCog,
+  DatabaseZap, ExternalLink, FileCheck2, ImagePlus, Network, Palette, Power, Save, ShieldCheck, Truck, UserRoundCog, X,
 } from "lucide-react";
 import { apiRequest, LoadingPanel, Notice, PageHeader, useNotice } from "@/components/ui";
 import type { BusinessSettings } from "@/lib/business-settings";
@@ -48,6 +48,8 @@ export function SettingsView({ isOwner = false }: { isOwner?: boolean }) {
   const [attachmentStorage, setAttachmentStorage] = useState<AttachmentStorage | null>(null);
   const [shippingConnection, setShippingConnection] = useState<ShippingConnection | null>(null);
   const [taxConnection, setTaxConnection] = useState<TaxConnection | null>(null);
+  const [workspaceLogoDataUrl, setWorkspaceLogoDataUrl] = useState("");
+  const logoRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const { notice, show } = useNotice();
 
@@ -80,6 +82,7 @@ export function SettingsView({ isOwner = false }: { isOwner?: boolean }) {
       setSettings(profile);
       setRegional(profile);
       setSavedCountry(profile.countryCode);
+      setWorkspaceLogoDataUrl(profile.workspaceLogoDataUrl);
       setHistory(entries);
     } catch (reason) {
       show(reason instanceof Error ? reason.message : "Could not load workspace settings.", "error");
@@ -118,6 +121,7 @@ export function SettingsView({ isOwner = false }: { isOwner?: boolean }) {
           franchiseCode: form.get("franchiseCode"),
           parentOrganizationCode: form.get("parentOrganizationCode"),
           workspaceTheme: isOwner ? form.get("workspaceTheme") : settings?.workspaceTheme || "MATCHA",
+          workspaceLogoDataUrl: isOwner ? workspaceLogoDataUrl : settings?.workspaceLogoDataUrl || "",
         }),
       });
       setSettings(updated);
@@ -175,6 +179,20 @@ export function SettingsView({ isOwner = false }: { isOwner?: boolean }) {
       show("Private evidence repository verified and saved. The token is encrypted and never returned to the browser.");
     } catch (reason) { show(reason instanceof Error ? reason.message : "Could not verify private evidence storage.", "error"); }
     finally { setBusy(false); }
+  }
+
+  function uploadWorkspaceLogo(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size > 250_000) {
+      show("Use a PNG, JPEG or WebP logo under 250 KB.", "error");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setWorkspaceLogoDataUrl(String(reader.result || ""));
+    reader.onerror = () => show("The workspace logo could not be read.", "error");
+    reader.readAsDataURL(file);
   }
 
   async function saveShippingConnection(event: FormEvent<HTMLFormElement>) {
@@ -270,7 +288,7 @@ export function SettingsView({ isOwner = false }: { isOwner?: boolean }) {
         <div className="form-grid two"><label className="field"><span>Organization type</span><select name="organizationType" defaultValue={settings.organizationType}>{ORGANIZATION_TYPES.map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}</select></label><label className="field"><span>Franchise brand</span><input name="franchiseBrand" defaultValue={settings.franchiseBrand} placeholder="Required for franchisees" /></label></div>
         <div className="form-grid two"><label className="field"><span>Location / franchise code</span><input name="franchiseCode" defaultValue={settings.franchiseCode} placeholder="MY-KUL-001" pattern="[A-Za-z0-9_-]*" /></label><label className="field"><span>Parent organization code</span><input name="parentOrganizationCode" defaultValue={settings.parentOrganizationCode} placeholder="BRAND-HQ" pattern="[A-Za-z0-9_-]*" /></label></div>
 
-        {isOwner ? <><div className="settings-divider" /><header className="settings-section-title"><Palette /><div><h2>Workspace interface</h2><p>Owner-controlled visual mode for the signed-in workspace. Documents keep their own saved templates.</p></div></header><label className="field"><span>Interface theme</span><select name="workspaceTheme" defaultValue={settings.workspaceTheme}><option value="MATCHA">Matcha · warm operational identity</option><option value="PROFESSIONAL">Professional · blue enterprise workspace</option><option value="FOCUS">Focus · quiet monochrome workspace</option></select></label></> : null}
+        {isOwner ? <><div className="settings-divider" /><header className="settings-section-title"><Palette /><div><h2>Workspace interface</h2><p>Owner-controlled logo and visual mode for the signed-in workspace. Documents keep their own saved templates.</p></div></header><input ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={uploadWorkspaceLogo} /><div className="workspace-logo-control">{workspaceLogoDataUrl ? <img src={workspaceLogoDataUrl} alt="Current workspace logo" /> : <span><Building2 size={24} /></span>}<div><strong>Workspace logo</strong><small>Shown in the navigation. PNG, JPEG or WebP · 250 KB max.</small><div><button type="button" className="button button-secondary" onClick={() => logoRef.current?.click()}><ImagePlus size={15} />{workspaceLogoDataUrl ? "Replace logo" : "Upload logo"}</button>{workspaceLogoDataUrl ? <button type="button" className="button button-quiet" onClick={() => setWorkspaceLogoDataUrl("")}><X size={14} />Remove</button> : null}</div></div></div><label className="field"><span>Interface theme</span><select name="workspaceTheme" defaultValue={settings.workspaceTheme}><option value="MATCHA">Matcha · warm operational identity</option><option value="PROFESSIONAL">Professional · blue enterprise workspace</option><option value="FOCUS">Focus · quiet monochrome workspace</option></select></label></> : null}
 
         <div className="settings-divider" />
         <header className="settings-section-title"><BellRing /><div><h2>Ledger rules</h2><p>Applied to new transactions.</p></div></header>

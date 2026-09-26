@@ -296,7 +296,9 @@ export function AppShell({
         <aside className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
           <div className="brand-lockup">
             <div className="brand-mark">
-              <Sprout size={21} />
+              {business.workspaceLogoDataUrl
+                ? <img src={business.workspaceLogoDataUrl} alt={`${business.businessName} logo`} />
+                : <Sprout size={21} />}
             </div>
             <div className="brand-words">
               <strong>

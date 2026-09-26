@@ -1,9 +1,10 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { Fragment, type CSSProperties, type ReactNode } from "react";
 import { Leaf } from "lucide-react";
 import { DEFAULT_INVOICE_TEMPLATE, type InvoiceTemplateInput } from "@/lib/invoice-templates";
 import { formatCalendarDate } from "@/lib/dates";
+import { customBlockKey, normaliseTemplateBlockOrder } from "@/lib/document-template-blocks";
 
 export type InvoicePaperItem = {
   description: string;
@@ -56,38 +57,43 @@ export function InvoicePaper({ document, template = DEFAULT_INVOICE_TEMPLATE, co
   const timeZone = business.timeZone || "Asia/Singapore";
   const money = new Intl.NumberFormat(locale, { style: "currency", currency });
   const shortDate = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", timeZone });
+  const customBlocks = template.customBlocks || [];
+  const blockOrder = normaliseTemplateBlockOrder(template.blockOrder, DEFAULT_INVOICE_TEMPLATE.blockOrder, customBlocks);
+  const customByKey = new Map(customBlocks.map(block => [customBlockKey(block.id), block]));
+  const blocks: Record<string, ReactNode> = {
+    HEADER: <header className="invoice-paper-header">
+      <div className="invoice-paper-brand">
+        {template.logoDataUrl ? <img src={template.logoDataUrl} alt={`${business.businessName || "Business"} logo`} /> : <span className="invoice-paper-mark"><Leaf size={18} /></span>}
+        <div><small>{template.headerText}</small><strong>{business.businessName || "Kōn-Kōn Matchā"}</strong>{business.franchiseCode ? <span>{business.franchiseBrand || "Franchise"} · {business.franchiseCode}</span> : null}</div>
+      </div>
+      <div className="invoice-paper-title"><small>{document.status || "DRAFT"}</small><h2>{template.documentTitle}</h2><span>{document.invoiceNo}</span></div>
+    </header>,
+    CUSTOMER: <section className="invoice-paper-parties">
+      <div><small>BILLED TO</small><strong>{document.customerName}</strong>{template.showCustomerAddress && document.customerAddress ? <p>{document.customerAddress}</p> : null}<span>{[document.customerEmail, document.customerPhone].filter(Boolean).join(" · ")}</span></div>
+      <dl><div><dt>Issued</dt><dd>{shortDate.format(new Date(document.createdAt))}</dd></div><div><dt>Due</dt><dd>{formatCalendarDate(document.dueDate, locale)}</dd></div>{document.customerReference ? <div><dt>Reference</dt><dd>{document.customerReference}</dd></div> : null}</dl>
+    </section>,
+    ITEMS: <div className="invoice-paper-lines">
+      <div className="invoice-paper-line invoice-paper-line-head"><span>Description</span><span>Qty</span><span>Rate</span><span>Amount</span></div>
+      {document.items.map((item, index) => <div className="invoice-paper-line" key={`${item.description}-${index}`}><strong>{item.description}</strong><span>{item.quantity}</span><span>{money.format(item.unitPrice)}</span><b>{money.format(item.lineTotal)}</b></div>)}
+    </div>,
+    TOTALS: <section className="invoice-paper-summary">
+      <div className="invoice-paper-message">
+        {template.showNotes && document.notes ? <><small>NOTES</small><p>{document.notes}</p></> : null}
+        {template.paymentInstructions ? <><small>PAYMENT</small><p>{template.paymentInstructions}</p></> : null}
+      </div>
+      <dl><div><dt>Subtotal</dt><dd>{money.format(document.subtotal)}</dd></div>{template.showTaxBreakdown ? <div><dt>{business.taxName || "Tax"} · {document.taxRate}%{document.taxMode === "INCLUSIVE" ? " included" : ""}</dt><dd>{money.format(document.tax)}</dd></div> : null}<div className="invoice-paper-grand-total"><dt>Total</dt><dd>{money.format(document.total)}</dd></div></dl>
+    </section>,
+    FOOTER: <footer className="invoice-paper-footer">
+      <div><strong>{template.footerText}</strong><span>{[business.email, business.phone, template.showBusinessAddress ? business.address : ""].filter(Boolean).join(" · ")}</span>{template.showRegistrationNo && business.registrationNo ? <small>Registration {business.registrationNo}</small> : null}</div>
+      <div className="invoice-paper-seal"><Leaf size={13} /><span>KŌN<br />KŌN</span></div>
+    </footer>,
+  };
   return (
     <article className={`invoice-paper invoice-layout-${template.layout.toLowerCase()} invoice-tone-${template.paperTone.toLowerCase()} ${compact ? "invoice-paper-compact" : ""}`} style={paperStyle}>
-      <header className="invoice-paper-header">
-        <div className="invoice-paper-brand">
-          {template.logoDataUrl ? <img src={template.logoDataUrl} alt={`${business.businessName || "Business"} logo`} /> : <span className="invoice-paper-mark"><Leaf size={18} /></span>}
-          <div><small>{template.headerText}</small><strong>{business.businessName || "Kōn-Kōn Matchā"}</strong>{business.franchiseCode ? <span>{business.franchiseBrand || "Franchise"} · {business.franchiseCode}</span> : null}</div>
-        </div>
-        <div className="invoice-paper-title"><small>{document.status || "DRAFT"}</small><h2>{template.documentTitle}</h2><span>{document.invoiceNo}</span></div>
-      </header>
-
-      <section className="invoice-paper-parties">
-        <div><small>BILLED TO</small><strong>{document.customerName}</strong>{template.showCustomerAddress && document.customerAddress ? <p>{document.customerAddress}</p> : null}<span>{[document.customerEmail, document.customerPhone].filter(Boolean).join(" · ")}</span></div>
-        <dl><div><dt>Issued</dt><dd>{shortDate.format(new Date(document.createdAt))}</dd></div><div><dt>Due</dt><dd>{formatCalendarDate(document.dueDate, locale)}</dd></div>{document.customerReference ? <div><dt>Reference</dt><dd>{document.customerReference}</dd></div> : null}</dl>
-      </section>
-
-      <div className="invoice-paper-lines">
-        <div className="invoice-paper-line invoice-paper-line-head"><span>Description</span><span>Qty</span><span>Rate</span><span>Amount</span></div>
-        {document.items.map((item, index) => <div className="invoice-paper-line" key={`${item.description}-${index}`}><strong>{item.description}</strong><span>{item.quantity}</span><span>{money.format(item.unitPrice)}</span><b>{money.format(item.lineTotal)}</b></div>)}
-      </div>
-
-      <section className="invoice-paper-summary">
-        <div className="invoice-paper-message">
-          {template.showNotes && document.notes ? <><small>NOTES</small><p>{document.notes}</p></> : null}
-          {template.paymentInstructions ? <><small>PAYMENT</small><p>{template.paymentInstructions}</p></> : null}
-        </div>
-        <dl><div><dt>Subtotal</dt><dd>{money.format(document.subtotal)}</dd></div>{template.showTaxBreakdown ? <div><dt>{business.taxName || "Tax"} · {document.taxRate}%{document.taxMode === "INCLUSIVE" ? " included" : ""}</dt><dd>{money.format(document.tax)}</dd></div> : null}<div className="invoice-paper-grand-total"><dt>Total</dt><dd>{money.format(document.total)}</dd></div></dl>
-      </section>
-
-      <footer className="invoice-paper-footer">
-        <div><strong>{template.footerText}</strong><span>{[business.email, business.phone, template.showBusinessAddress ? business.address : ""].filter(Boolean).join(" · ")}</span>{template.showRegistrationNo && business.registrationNo ? <small>Registration {business.registrationNo}</small> : null}</div>
-        <div className="invoice-paper-seal"><Leaf size={13} /><span>KŌN<br />KŌN</span></div>
-      </footer>
+      {blockOrder.map(key => {
+        const custom = customByKey.get(key);
+        return <Fragment key={key}>{blocks[key] || (custom ? <section className={`document-custom-block align-${custom.alignment.toLowerCase()}`}>{custom.kind === "IMAGE" ? <img src={custom.content} alt={custom.label} /> : <p>{custom.content}</p>}</section> : null)}</Fragment>;
+      })}
     </article>
   );
 }

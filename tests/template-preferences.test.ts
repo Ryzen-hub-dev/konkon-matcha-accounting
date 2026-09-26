@@ -11,6 +11,7 @@ import {
   ensureDefaultReceiptTemplate,
   receiptTemplateInputSchema,
 } from "../lib/receipt-templates";
+import { customBlockKey, normaliseTemplateBlockOrder } from "../lib/document-template-blocks";
 
 type Document = Record<string, unknown>;
 type Filter = Document & { $or?: Filter[] };
@@ -149,4 +150,16 @@ test("template preference fixes do not relax logo upload validation", () => {
     assert.equal(schema.safeParse({ ...defaults, logoDataUrl: "https://example.com/logo.png" }).success, false);
     assert.equal(schema.safeParse({ ...defaults, logoDataUrl: `data:image/png;base64,${"A".repeat(350_000)}` }).success, false);
   }
+});
+
+test("document builders preserve every required financial block while allowing ordered safe components", () => {
+  const textBlock = { id: "delivery-note", kind: "TEXT" as const, label: "Delivery note", content: "Leave with the receiving team.", alignment: "LEFT" as const };
+  const order = ["HEADER", customBlockKey(textBlock.id), "CUSTOMER", "ITEMS", "TOTALS", "FOOTER"];
+  assert.equal(invoiceTemplateInputSchema.safeParse({ ...DEFAULT_INVOICE_TEMPLATE, blockOrder: order, customBlocks: [textBlock] }).success, true);
+  assert.equal(invoiceTemplateInputSchema.safeParse({ ...DEFAULT_INVOICE_TEMPLATE, blockOrder: order.filter(key => key !== "TOTALS"), customBlocks: [textBlock] }).success, false);
+  assert.equal(receiptTemplateInputSchema.safeParse({ ...DEFAULT_RECEIPT_TEMPLATE, customBlocks: [{ ...textBlock, kind: "IMAGE", content: "https://example.com/tracker.png" }] }).success, false);
+  assert.deepEqual(
+    normaliseTemplateBlockOrder(["FOOTER", "HEADER"], DEFAULT_INVOICE_TEMPLATE.blockOrder, []),
+    ["FOOTER", "HEADER", "CUSTOMER", "ITEMS", "TOTALS"],
+  );
 });

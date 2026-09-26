@@ -8,7 +8,7 @@ import { serialise } from "@/lib/format";
 
 export const runtime = "nodejs";
 
-const updateSchema = invoiceTemplateInputSchema.extend({ id: z.string().length(24) });
+const updateSchema = invoiceTemplateInputSchema.safeExtend({ id: z.string().length(24) });
 
 async function readBody(request: Request) {
   try {

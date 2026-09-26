@@ -37,6 +37,10 @@ const settingsSchema = z.object({
   franchiseCode: z.string().trim().toUpperCase().max(40).regex(/^$|^[A-Z0-9_-]+$/).default(""),
   parentOrganizationCode: z.string().trim().toUpperCase().max(40).regex(/^$|^[A-Z0-9_-]+$/).default(""),
   workspaceTheme: z.enum(["MATCHA", "PROFESSIONAL", "FOCUS"]).default("MATCHA"),
+  workspaceLogoDataUrl: z.string().max(350_000).refine(
+    (value) => value === "" || /^data:image\/(png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/.test(value),
+    "Upload a PNG, JPEG or WebP logo under 250 KB.",
+  ).optional(),
 }).superRefine((value, context) => {
   if (!value.acceptedCurrencies.includes(value.currency)) {
     context.addIssue({ code: "custom", path: ["acceptedCurrencies"], message: "Accepted currencies must include the workspace base currency." });
@@ -48,6 +52,12 @@ const settingsSchema = z.object({
 
 class CurrencyChangeConflict extends Error {}
 class ThemeChangeForbidden extends Error {}
+class LogoChangeForbidden extends Error {}
+
+function historySnapshot(settings: ReturnType<typeof normaliseBusinessSettings>) {
+  const { workspaceLogoDataUrl, ...rest } = settings;
+  return { ...rest, hasWorkspaceLogo: Boolean(workspaceLogoDataUrl) };
+}
 
 export async function GET() {
   const auth = await authorize("settings.read");
@@ -78,16 +88,23 @@ export async function PATCH(request: Request) {
     try {
       await mongoSession.withTransaction(async () => {
         const current = normaliseBusinessSettings(await db.collection("settings").findOne({ key: "business" }, { session: mongoSession }));
-        if (auth.session.role !== "OWNER" && input.data.workspaceTheme !== current.workspaceTheme) {
+        const nextInput = {
+          ...input.data,
+          workspaceLogoDataUrl: input.data.workspaceLogoDataUrl ?? current.workspaceLogoDataUrl,
+        };
+        if (auth.session.role !== "OWNER" && nextInput.workspaceTheme !== current.workspaceTheme) {
           throw new ThemeChangeForbidden("Only the Owner can change the workspace interface theme.");
         }
-        const currencyError = ledgerCurrencyChangeError(current.currency, input.data.currency);
+        if (auth.session.role !== "OWNER" && nextInput.workspaceLogoDataUrl !== current.workspaceLogoDataUrl) {
+          throw new LogoChangeForbidden("Only the Owner can change the workspace logo.");
+        }
+        const currencyError = ledgerCurrencyChangeError(current.currency, nextInput.currency);
         if (currencyError) throw new CurrencyChangeConflict(currencyError);
-        const changedFields = Object.keys(input.data).filter((field) => JSON.stringify(current[field as keyof typeof current]) !== JSON.stringify(input.data[field as keyof typeof input.data]));
+        const changedFields = Object.keys(nextInput).filter((field) => JSON.stringify(current[field as keyof typeof current]) !== JSON.stringify(nextInput[field as keyof typeof nextInput]));
         if (!changedFields.length) { settings = current; return; }
         const updated = await db.collection("settings").findOneAndUpdate(
           { key: "business" },
-          { $set: { ...input.data, acceptedCurrencies: [...new Set(input.data.acceptedCurrencies)], updatedAt: now, updatedBy: auth.session.id }, $setOnInsert: { key: "business", createdAt: now } },
+          { $set: { ...nextInput, acceptedCurrencies: [...new Set(nextInput.acceptedCurrencies)], updatedAt: now, updatedBy: auth.session.id }, $setOnInsert: { key: "business", createdAt: now } },
           { upsert: true, returnDocument: "after", session: mongoSession },
         );
         settings = normaliseBusinessSettings(updated);
@@ -113,8 +130,8 @@ export async function PATCH(request: Request) {
           await db.collection("settingsHistory").insertOne({
             key: "business",
             changedFields,
-            before: current,
-            after: settings,
+            before: historySnapshot(current),
+            after: historySnapshot(settings),
             changedBy: auth.session.id,
             changedByName: auth.session.fullName,
             createdAt: now,
@@ -129,6 +146,7 @@ export async function PATCH(request: Request) {
   } catch (error) {
     if (error instanceof CurrencyChangeConflict) return fail(error.message, 409, { currency: [error.message] });
     if (error instanceof ThemeChangeForbidden) return fail(error.message, 403);
+    if (error instanceof LogoChangeForbidden) return fail(error.message, 403);
     return publicError(error);
   }
 }

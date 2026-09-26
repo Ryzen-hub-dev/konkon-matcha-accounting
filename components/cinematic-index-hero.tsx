@@ -10,11 +10,14 @@ import { konaGazeOffset } from "@/lib/kona-gaze";
 export function CinematicIndexHero() {
   const section = useRef<HTMLElement>(null);
   const visual = useRef<HTMLVideoElement>(null);
+  const introVisual = useRef<HTMLVideoElement>(null);
   const gaze = useRef<HTMLDivElement>(null);
   const konaHovered = useRef(false);
   const konaEngaged = useRef(false);
   const konaReplyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [konaMessage, setKonaMessage] = useState("");
+  const [introProgress, setIntroProgress] = useState(0);
+  const [introComplete, setIntroComplete] = useState(false);
 
   const setKonaPresence = (active: boolean, message = "") => {
     konaHovered.current = active;
@@ -42,6 +45,53 @@ export function CinematicIndexHero() {
 
   useEffect(() => () => {
     if (konaReplyTimer.current) clearTimeout(konaReplyTimer.current);
+  }, []);
+
+  useEffect(() => {
+    const video = introVisual.current;
+    if (!video) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reducedMotion) {
+      setIntroProgress(100);
+      setIntroComplete(true);
+      return;
+    }
+
+    let finished = false;
+    let frame = 0;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      setIntroProgress(100);
+      window.setTimeout(() => setIntroComplete(true), 180);
+      const mainVideo = visual.current;
+      if (mainVideo) {
+        mainVideo.currentTime = 0;
+        void mainVideo.play().catch(() => undefined);
+      }
+    };
+    const update = () => {
+      if (video.duration > 0) setIntroProgress(Math.min(100, Math.round((video.currentTime / video.duration) * 100)));
+      if (!finished) frame = requestAnimationFrame(update);
+    };
+    const start = () => {
+      video.playbackRate = Math.min(4, Math.max(0.25, video.duration / 2.8));
+      frame = requestAnimationFrame(update);
+      void video.play().catch(finish);
+    };
+    const fallback = window.setTimeout(finish, 3800);
+    video.addEventListener("loadedmetadata", start, { once: true });
+    video.addEventListener("ended", finish, { once: true });
+    video.addEventListener("error", finish, { once: true });
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) start();
+    return () => {
+      finished = true;
+      cancelAnimationFrame(frame);
+      clearTimeout(fallback);
+      video.removeEventListener("loadedmetadata", start);
+      video.removeEventListener("ended", finish);
+      video.removeEventListener("error", finish);
+    };
   }, []);
 
   useEffect(() => {
@@ -89,8 +139,22 @@ export function CinematicIndexHero() {
 
       root.dataset.stage = state.stage;
       root.style.setProperty("--cinema-progress", String(state.progress));
-      root.style.setProperty("--cinema-x", `${currentX.toFixed(3)}deg`);
-      root.style.setProperty("--cinema-y", `${currentY.toFixed(3)}deg`);
+      root.style.setProperty("--cinema-percent", `${(state.progress * 100).toFixed(2)}%`);
+      root.style.setProperty("--cinema-x", `${(currentX * (1 - state.progress)).toFixed(3)}deg`);
+      root.style.setProperty("--cinema-y", `${(currentY * (1 - state.progress)).toFixed(3)}deg`);
+      const compact = window.innerWidth <= 700;
+      const remaining = 1 - state.progress;
+      const portalTop = (compact ? 68 : 82) * remaining;
+      const portalRight = (compact ? window.innerWidth * 0.05 : window.innerWidth * 0.02) * remaining;
+      const portalBottom = (compact ? Math.max(0, window.innerHeight * 0.58 - 68) : 28) * remaining;
+      const portalLeft = (compact ? window.innerWidth * 0.05 : window.innerWidth * 0.37) * remaining;
+      root.style.setProperty("--portal-top", `${portalTop.toFixed(2)}px`);
+      root.style.setProperty("--portal-right", `${portalRight.toFixed(2)}px`);
+      root.style.setProperty("--portal-bottom", `${portalBottom.toFixed(2)}px`);
+      root.style.setProperty("--portal-left", `${portalLeft.toFixed(2)}px`);
+      root.style.setProperty("--portal-radius", `${(92 * remaining).toFixed(2)}px`);
+      root.style.setProperty("--portal-scale", String(0.985 + state.progress * 0.015));
+      root.style.setProperty("--kona-gaze-opacity", String(remaining));
       root.style.setProperty("--kona-gaze-x", `${currentGazeX.toFixed(2)}px`);
       root.style.setProperty("--kona-gaze-y", `${currentGazeY.toFixed(2)}px`);
 
@@ -164,14 +228,21 @@ export function CinematicIndexHero() {
     };
   }, []);
 
-  return <section ref={section} className={styles.cinema} id="content" data-stage="0">
+  return <section ref={section} className={styles.cinema} id="content" data-stage="0" data-intro-complete={introComplete}>
+    <div className={styles.cinemaPreloader} aria-hidden={introComplete}>
+      <video ref={introVisual} muted playsInline preload="auto" tabIndex={-1}>
+        <source src="/media/mascot/kona-parallax-v3.mp4" type="video/mp4" />
+      </video>
+      <div className={styles.preloaderShade} />
+      <div className={styles.preloaderMark}><b>K</b><span>KONA<br />LEDGER</span></div>
+      <div className={styles.preloaderCount} aria-live="polite"><strong>{introProgress}</strong><span>%</span></div>
+    </div>
     <div className={styles.cinemaSticky}>
       <div className={styles.cinemaVisual}>
         <div className={styles.cinemaDepth} aria-hidden="true"><i /><i /><i /><span /><span /></div>
         <div className={styles.cinemaStage}>
           <video ref={visual} autoPlay muted loop playsInline preload="auto" poster="/media/mascot/kona-base-v1.png" disablePictureInPicture tabIndex={-1} aria-hidden="true">
-            <source src="/media/mascot/kona-hero-v2.webm" type="video/webm" />
-            <source src="/media/mascot/kona-hero-v2.mp4" type="video/mp4" />
+            <source src="/media/mascot/kona-parallax-v3.mp4" type="video/mp4" />
             Your browser does not support background video.
           </video>
           <div ref={gaze} className={styles.konaGaze} aria-hidden="true"><i /><i /></div>
