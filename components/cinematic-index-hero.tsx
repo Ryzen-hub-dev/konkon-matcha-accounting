@@ -19,11 +19,14 @@ import {
   correctedPoseTime,
   frameDamping,
   normalizePointer,
+  skipCounterTurnFrames,
 } from "@/lib/interactive-video";
 
 const PRELOADER_VIDEO = "/media/intro/optical-preloader-h264.mp4";
-const KONA_VIDEO = "/media/mascot/kona-mainframe-original-v8.mp4";
-const KONA_POSTER = "/media/mascot/kona-mainframe-poster-v6.jpg";
+const KONA_VIDEO = "/media/mascot/kona-mainframe-ai-2x-v9.mp4";
+const KONA_VIDEO_FALLBACK = "/media/mascot/kona-mainframe-original-v8.mp4";
+const KONA_POSTER = "/media/mascot/kona-mainframe-poster-v9.jpg";
+const KONA_MEDIA_CACHE = "kona-hd-media-v9";
 const INTRO_COPY =
   "KONA keeps every hand-off connected — from the first order and stock movement to the final receipt and close.";
 
@@ -60,6 +63,7 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
   const targetTimeRef = useRef(0);
   const smoothTimeRef = useRef(0);
   const durationRef = useRef(0);
+  const cachedVideoUrlRef = useRef<string | null>(null);
   const [stage, setStage] = useState<IntroStage>("loading");
   const [progress, setProgress] = useState(0);
   const [typedCopy, setTypedCopy] = useState("");
@@ -211,7 +215,7 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
       }
       video.pause();
       root.dataset.renderMode = "video";
-      root.dataset.poseDirection = "reversed";
+      root.dataset.poseDirection = "calibrated";
       root.dataset.poseTime = middle.toFixed(3);
       calibrateMedia();
     };
@@ -264,6 +268,11 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
       }
 
       if (!previewingRef.current && durationRef.current > 0) {
+        smoothTimeRef.current = skipCounterTurnFrames(
+          smoothTimeRef.current,
+          targetTimeRef.current,
+          durationRef.current,
+        );
         smoothTimeRef.current = frameDamping(
           smoothTimeRef.current,
           targetTimeRef.current,
@@ -312,6 +321,66 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
       window.removeEventListener("resize", calibrateMedia);
       window.removeEventListener("blur", resetMouse);
       document.documentElement.removeEventListener("mouseleave", resetMouse);
+    };
+  }, []);
+
+  useEffect(() => {
+    const video = poseRef.current;
+    const root = rootRef.current;
+    if (!video || !root) return;
+
+    let cancelled = false;
+    const installPersistentPlayback = async () => {
+      if (!("caches" in window)) {
+        root.dataset.mediaCache = "http-immutable";
+        return;
+      }
+
+      try {
+        const cacheNames = await window.caches.keys();
+        await Promise.all(
+          cacheNames
+            .filter((name) => name.startsWith("kona-hd-media-") && name !== KONA_MEDIA_CACHE)
+            .map((name) => window.caches.delete(name)),
+        );
+
+        const cache = await window.caches.open(KONA_MEDIA_CACHE);
+        let response = await cache.match(KONA_VIDEO);
+        if (!response) {
+          const fetched = await fetch(KONA_VIDEO, { cache: "force-cache", credentials: "same-origin" });
+          if (!fetched.ok) throw new Error(`Unable to cache KONA video (${fetched.status})`);
+          await cache.put(KONA_VIDEO, fetched.clone());
+          response = fetched;
+        }
+
+        const blob = await response.blob();
+        if (cancelled) return;
+
+        const resumeAt = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+        const shouldResume = previewingRef.current;
+        const objectUrl = URL.createObjectURL(blob);
+        cachedVideoUrlRef.current = objectUrl;
+        video.addEventListener("loadedmetadata", () => {
+          if (cancelled) return;
+          video.currentTime = Math.min(resumeAt, Math.max(0, video.duration - 0.05));
+          if (shouldResume) void video.play().catch(() => undefined);
+          root.dataset.mediaCache = "persistent-blob";
+        }, { once: true });
+        video.src = objectUrl;
+        video.load();
+        void navigator.storage?.persist?.();
+      } catch {
+        root.dataset.mediaCache = "http-immutable";
+      }
+    };
+
+    void installPersistentPlayback();
+    return () => {
+      cancelled = true;
+      if (cachedVideoUrlRef.current) {
+        URL.revokeObjectURL(cachedVideoUrlRef.current);
+        cachedVideoUrlRef.current = null;
+      }
     };
   }, []);
 
@@ -425,6 +494,7 @@ export function CinematicIndexHero({ businessName, workspaceLogoDataUrl }: Cinem
           aria-hidden="true"
         >
           <source src={KONA_VIDEO} type="video/mp4" />
+          <source src={KONA_VIDEO_FALLBACK} type="video/mp4" />
         </video>
         <div className={styles.colorAtmosphere} aria-hidden="true" />
         <div className={styles.filmGrain} aria-hidden="true" />

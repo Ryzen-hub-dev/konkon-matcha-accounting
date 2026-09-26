@@ -72,7 +72,38 @@ export function calculateMediaCalibration(
 export function correctedPoseTime(pointerX: number, duration: number) {
   if (!Number.isFinite(duration) || duration <= 0) return 0;
   const x = clamp01(pointerX);
-  const smooth = x * x * (3 - 2 * x);
-  const inset = Math.min(duration * 0.012, 0.1);
-  return inset + (1 - smooth) * (duration - inset * 2);
+  const center = duration * 0.5;
+  const centerDeadZone = 0.04;
+  const leftBoundary = 0.5 - centerDeadZone;
+  const rightBoundary = 0.5 + centerDeadZone;
+  const counterTurnGap = duration * 0.12;
+  const inset = Math.min(duration * 0.035, 0.35);
+
+  // The generated source briefly counter-rotates its eyes around the midpoint.
+  // Hold a clean front-facing pose over KONA's head, then map each side only
+  // into the monotonic portions of the clip.
+  if (x >= leftBoundary && x <= rightBoundary) return center;
+  if (x < leftBoundary) {
+    const progress = clamp01((leftBoundary - x) / leftBoundary);
+    const eased = progress * progress * (3 - 2 * progress);
+    return center + counterTurnGap + eased * (duration - inset - center - counterTurnGap);
+  }
+
+  const progress = clamp01((x - rightBoundary) / (1 - rightBoundary));
+  const eased = progress * progress * (3 - 2 * progress);
+  return center - counterTurnGap - eased * (center - counterTurnGap - inset);
+}
+
+export function skipCounterTurnFrames(current: number, target: number, duration: number) {
+  if (!Number.isFinite(duration) || duration <= 0) return 0;
+  const center = duration * 0.5;
+  const gap = duration * 0.12;
+  const lower = center - gap;
+  const upper = center + gap;
+  const centerTolerance = duration * 0.001;
+
+  if (Math.abs(target - center) <= centerTolerance) return center;
+  if (target <= lower && current > lower) return lower;
+  if (target >= upper && current < upper) return upper;
+  return current;
 }

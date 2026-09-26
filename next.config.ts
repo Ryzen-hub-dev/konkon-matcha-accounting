@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
   },
   headers: async () => [
     {
-      source: "/media/mascot/kona-mainframe-original-v8.mp4",
+      source: "/media/mascot/:asset(kona-mainframe-ai-2x-v9.mp4|kona-mainframe-original-v8.mp4|kona-mainframe-poster-v9.jpg)",
       headers: [
         { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
       ],

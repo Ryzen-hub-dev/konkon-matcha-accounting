@@ -6,17 +6,31 @@ import {
   frameDamping,
   incrementalScrubTarget,
   normalizePointer,
+  skipCounterTurnFrames,
 } from "../lib/interactive-video";
 
 test("KONA pose timing follows the pointer in the source video's corrected direction", () => {
   const left = correctedPoseTime(0, 10);
+  const besideLeft = correctedPoseTime(0.45, 10);
   const middle = correctedPoseTime(0.5, 10);
+  const besideRight = correctedPoseTime(0.55, 10);
   const right = correctedPoseTime(1, 10);
-  assert.equal(left, 9.9);
+  assert.equal(left, 9.65);
+  assert.ok(besideLeft >= 6.2);
   assert.equal(middle, 5);
-  assert.equal(right, 0.1);
+  assert.ok(besideRight <= 3.8);
+  assert.ok(Math.abs(right - 0.35) < 1e-9);
   assert.ok(left > middle && middle > right);
   assert.equal(correctedPoseTime(0.5, Number.NaN), 0);
+});
+
+test("KONA skips the source frames that counter-turn beside her face", () => {
+  assert.equal(skipCounterTurnFrames(5, 6.2, 10), 6.2);
+  assert.equal(skipCounterTurnFrames(5, 3.8, 10), 3.8);
+  assert.equal(skipCounterTurnFrames(8, 2, 10), 3.8);
+  assert.equal(skipCounterTurnFrames(2, 8, 10), 6.2);
+  assert.equal(skipCounterTurnFrames(7, 5, 10), 5);
+  assert.equal(skipCounterTurnFrames(8, 9, 10), 8);
 });
 
 test("media calibration keeps modest overscan and corrects portrait focus", () => {
